@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>ë©”ì´íˆ¬íˆ¬ ìŠ¤ë§ˆíŠ¸íŒ©í† ë¦¬</title>
+<title>메이투투 스마트팩토리</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -166,7 +166,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .photo-step-num{width:26px;height:26px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
 .photo-step-item.done .photo-step-num{background:var(--success);}
 .photo-step-title{font-size:12px;font-weight:700;flex:1;}
-.photo-step-btn{background:#fff;border:1.5px solid #94a3b8;border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text-sub);white-space:nowrap;}
+.photo-step-btn{background:#fff;border:1.5px solid #94a3b8;border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text-sub);white-space:nowraw;}
 .photo-step-btn.done{background:#dcfce7;border-color:var(--success);color:#166534;}
 /* FIFO batch */
 .fifo-batch{background:#fff;border-radius:var(--radius);padding:14px 16px;margin-bottom:8px;box-shadow:var(--shadow);border-left:4px solid var(--success);}
@@ -224,7 +224,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 #toast.show{opacity:1;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 
-/* â”€â”€â”€ Google Login Overlay â”€â”€â”€ */
+/* ─── Google Login Overlay ─── */
 #login-overlay{display:flex;position:fixed;inset:0;background:var(--primary);z-index:9999;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
 .login-card{background:#fff;border-radius:20px;padding:32px 24px;width:100%;max-width:360px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.3);}
 .login-logo{font-size:48px;margin-bottom:12px;}
@@ -234,7 +234,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .login-note{font-size:10px;color:var(--text-sub);margin-top:16px;line-height:1.6;}
 .login-user-info{background:#f0fdf4;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;display:flex;align-items:center;gap:10px;text-align:left;}
 .login-user-avatar{width:36px;height:36px;border-radius:50%;border:2px solid var(--success);}
-/* â”€â”€â”€ QR Camera Modal â”€â”€â”€ */
+/* ─── QR Camera Modal ─── */
 #qr-camera-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:700;flex-direction:column;align-items:center;justify-content:center;}
 #qr-camera-modal.open{display:flex;}
 #qr-video{width:100%;max-width:400px;border-radius:12px;border:3px solid var(--primary-light);}
@@ -242,7 +242,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .qr-scan-line{position:absolute;width:80%;max-width:300px;height:2px;background:var(--primary-light);animation:scanLine 2s linear infinite;}
 @keyframes scanLine{0%{top:15%;}50%{top:80%;}100%{top:15%;}}
 #qr-cam-result{font-size:12px;color:var(--text-sub);margin-top:6px;}
-/* â”€â”€â”€ LOT Inventory Cards â”€â”€â”€ */
+/* ─── LOT Inventory Cards ─── */
 .lot-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:8px;overflow:hidden;border-left:4px solid var(--success);cursor:pointer;}
 .lot-card-head{display:flex;align-items:center;gap:12px;padding:12px 14px;}
 .lot-card-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
@@ -266,507 +266,507 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 <body>
 <div id="toast"></div>
 
-<!-- â•â•â• GOOGLE LOGIN OVERLAY â•â•â• -->
+<!-- ═══ GOOGLE LOGIN OVERLAY ═══ -->
 <div id="login-overlay">
   <div class="login-card">
-    <div class="login-logo">ðŸ­</div>
-    <div class="login-title">ë©”ì´íˆ¬íˆ¬ ìŠ¤ë§ˆíŠ¸íŒ©í† ë¦¬</div>
-    <div class="login-sub">ì‚¬ë‚´ Google Workspace ê³„ì •ìœ¼ë¡œ ë¡œê·¸ì¸í•˜ì„¸ìš”</div>
+    <div class="login-logo">🏭</div>
+    <div class="login-title">메이투투 스마트팩토리</div>
+    <div class="login-sub">사내 Google Workspace 계정으로 로그인하세요</div>
     <div id="login-user-display" style="display:none" class="login-user-info">
       <img id="login-avatar" class="login-user-avatar" src="" alt="">
       <div>
-        <div style="font-weight:700" id="login-name">â€”</div>
-        <div style="color:var(--text-sub)" id="login-email">â€”</div>
-        <div id="login-role-badge" class="pill pill-blue" style="margin-top:3px;font-size:9px">ì—­í•  í™•ì¸ ì¤‘</div>
+        <div style="font-weight:700" id="login-name">—</div>
+        <div style="color:var(--text-sub)" id="login-email">—</div>
+        <div id="login-role-badge" class="pill pill-blue" style="margin-top:3px;font-size:9px">역할 확인 중</div>
       </div>
     </div>
     <div id="google-btn-wrapper"></div>
-    <div class="login-note">ë©”ì´íˆ¬íˆ¬ Google Workspace ê³„ì •(@anghodu.biz)ë§Œ<br>ë¡œê·¸ì¸ ê°€ëŠ¥í•©ë‹ˆë‹¤</div>
+    <div class="login-note">메이투투 Google Workspace 계정(@anghodu.biz)만<br>로그인 가능합니다</div>
   </div>
 </div>
 
-<!-- â•â•â• QR CAMERA MODAL â•â•â• -->
+<!-- ═══ QR CAMERA MODAL ═══ -->
 <div id="qr-camera-modal">
   <div style="position:relative;display:flex;align-items:center;justify-content:center;width:100%;max-width:400px;">
     <video id="qr-video" autoplay playsinline muted></video>
     <div class="qr-scan-line" style="position:absolute;left:10%;width:80%;"></div>
   </div>
   <div class="qr-cam-bar">
-    <div style="font-size:13px;font-weight:700;margin-bottom:4px">ðŸ“· QR ì½”ë“œì— ì¹´ë©”ë¼ë¥¼ ë¹„ì¶”ì„¸ìš”</div>
-    <div id="qr-cam-result">ìŠ¤ìº” ëŒ€ê¸° ì¤‘...</div>
-    <button onclick="closeQRCamera()" style="margin-top:10px;background:var(--danger);color:#fff;border:none;border-radius:8px;padding:10px 28px;font-size:13px;font-weight:700;cursor:pointer">âœ• ë‹«ê¸°</button>
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px">📷 QR 코드에 카메라를 비추세요</div>
+    <div id="qr-cam-result">스캔 대기 중...</div>
+    <button onclick="closeQRCamera()" style="margin-top:10px;background:var(--danger);color:#fff;border:none;border-radius:8px;padding:10px 28px;font-size:13px;font-weight:700;cursor:pointer">✕ 닫기</button>
   </div>
 </div>
 
 
 <!-- TOP BAR -->
 <div class="topbar">
-  <div class="topbar-logo">ë©”ì´íˆ¬íˆ¬ <span>ìŠ¤ë§ˆíŠ¸íŒ©í† ë¦¬</span></div>
-  <span class="topbar-badge" id="alert-badge">ì•Œë¦¼ 3</span>
+  <div class="topbar-logo">메이투투 <span>스마트팩토리</span></div>
+  <span class="topbar-badge" id="alert-badge">알림 3</span>
   <span id="topbar-user" style="font-size:11px;opacity:.9;display:flex;align-items:center;gap:5px">
     <img id="topbar-avatar" src="" style="width:24px;height:24px;border-radius:50%;display:none;border:1.5px solid rgba(255,255,255,.5)">
-    <span id="topbar-name">â€”</span>
-    <button onclick="logoutGoogle()" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;padding:2px 7px;font-size:10px;color:#fff;cursor:pointer;font-weight:600">ë¡œê·¸ì•„ì›ƒ</button>
+    <span id="topbar-name">—</span>
+    <button onclick="logoutGoogle()" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;padding:2px 7px;font-size:10px;color:#fff;cursor:pointer;font-weight:600">로그아웃</button>
   </span>
 </div>
 
-<!-- PAGE: ëŒ€ì‹œë³´ë“œ -->
+<!-- PAGE: 대시보드 -->
 <div id="page-dashboard" class="page active">
-  <div style="padding:4px 0 8px;font-size:12px;color:var(--text-sub)">2026-03-27 (ê¸ˆ) Â· í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ ìƒì‚°ì¼</div>
+  <div style="padding:4px 0 8px;font-size:12px;color:var(--text-sub)">2026-03-27 (금) · 호두과자 전용반죽 생산일</div>
   <div class="kpi-grid">
-    <div class="kpi-card blue"><div class="kpi-label">ì˜¤ëŠ˜ ìƒì‚°ëª©í‘œ</div><div class="kpi-value">45<span style="font-size:14px">kg</span></div><div class="kpi-sub">9ë°°ì¹˜ Ã— 5kg</div></div>
-    <div class="kpi-card green"><div class="kpi-label">ì™„ë£Œ ë°°ì¹˜</div><div class="kpi-value">3</div><div class="kpi-sub">15kg ì™„ë£Œ</div></div>
-    <div class="kpi-card orange"><div class="kpi-label">ìž¬ê³  ê²½ê³ </div><div class="kpi-value">2</div><div class="kpi-sub">í”„ë¦¬ë¯¹ìŠ¤1Â·ê³„ëž€ ë¶€ì¡±</div></div>
-    <div class="kpi-card red"><div class="kpi-label">ì¶œí•˜ëŒ€ê¸°</div><div class="kpi-value">12<span style="font-size:14px">ë´‰</span></div><div class="kpi-sub">3ë°•ìŠ¤ (ëƒ‰ë™ì™„ë£Œ)</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">오늘 생산목표</div><div class="kpi-value">45<span style="font-size:14px">kg</span></div><div class="kpi-sub">9배치 × 5kg</div></div>
+    <div class="kpi-card green"><div class="kpi-label">완료 배치</div><div class="kpi-value">3</div><div class="kpi-sub">15kg 완료</div></div>
+    <div class="kpi-card orange"><div class="kpi-label">재고 경고</div><div class="kpi-value">2</div><div class="kpi-sub">프리믹스1·계란 부족</div></div>
+    <div class="kpi-card red"><div class="kpi-label">출하대기</div><div class="kpi-value">12<span style="font-size:14px">봉</span></div><div class="kpi-sub">3박스 (냉동완료)</div></div>
   </div>
-  <div class="section-header"><span class="section-title">ðŸ­ ì§„í–‰ ì¤‘ ìž‘ì—…</span></div>
+  <div class="section-header"><span class="section-title">🏭 진행 중 작업</span></div>
   <div class="wo-card ongoing" onclick="showTab('production',document.querySelectorAll('.bnav-item')[2])">
-    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-004</div><span class="pill pill-blue">â–¶ ì§„í–‰ì¤‘</span></div>
-    <div class="wo-prod">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg Ã— 3ë°°ì¹˜</div>
-    <div class="wo-meta"><span>í˜¼í•©ê¸° A</span><span>15kg ëª©í‘œ</span><span>10:30 ì‹œìž‘</span></div>
+    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-004</div><span class="pill pill-blue">▶ 진행중</span></div>
+    <div class="wo-prod">호두과자 전용반죽 5kg × 3배치</div>
+    <div class="wo-meta"><span>혼합기 A</span><span>15kg 목표</span><span>10:30 시작</span></div>
     <div class="wo-progress">
       <div class="wo-steps">
         <div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div>
         <div class="wo-step done"></div><div class="wo-step active"></div><div class="wo-step"></div>
         <div class="wo-step"></div><div class="wo-step"></div>
       </div>
-      <span style="font-size:11px;color:var(--primary-light);font-weight:700">5/14 ê³µì •</span>
+      <span style="font-size:11px;color:var(--primary-light);font-weight:700">5/14 공정</span>
     </div>
   </div>
-  <div class="section-header"><span class="section-title">âš ï¸ ì•Œë¦¼</span></div>
+  <div class="section-header"><span class="section-title">⚠️ 알림</span></div>
   <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:8px">
-    <div style="background:#fef2f2;border-radius:8px;padding:10px 12px;font-size:12px;color:#991b1b"><b>ðŸ”´ CCP-1B ëƒ‰ë™ì˜¨ë„ í™•ì¸ í•„ìš”</b> Â· ëƒ‰ë™ì°½ê³  A-2 ì˜¨ë„ -15Â°C (ê¸°ì¤€ -16Â°C ì´í•˜)</div>
-    <div style="background:#fffbeb;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"><b>ðŸŸ  í”„ë¦¬ë¯¹ìŠ¤1 ìž¬ê³  ë¶€ì¡±</b> Â· ìž”ì—¬ 3.2kg, ì˜¤ëŠ˜ í•„ìš”ëŸ‰ 12kg (ë¶€ì¡± 8.8kg)</div>
-    <div style="background:#eff6ff;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e40af"><b>âœ… WL-20260327-HDR-001 ì¶œí•˜ê°€ëŠ¥</b> Â· ëƒ‰ë™ 12ì‹œê°„ ì™„ë£Œ Â· 3ë´‰ â†’ íƒë°° ë°°ì†¡ ëŒ€ê¸°</div>
+    <div style="background:#fef2f2;border-radius:8px;padding:10px 12px;font-size:12px;color:#991b1b"><b>🔴 CCP-1B 냉동온도 확인 필요</b> · 냉동창고 A-2 온도 -15°C (기준 -16°C 이하)</div>
+    <div style="background:#fffbeb;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"><b>🟠 프리믹스1 재고 부족</b> · 잔여 3.2kg, 오늘 필요량 12kg (부족 8.8kg)</div>
+    <div style="background:#eff6ff;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e40af"><b>✅ WL-20260327-HDR-001 출하가능</b> · 냉동 12시간 완료 · 3봉 → 택배 배송 대기</div>
   </div></div>
 </div>
 
-<!-- PAGE: ìž¬ê³ ê´€ë¦¬ -->
+<!-- PAGE: 재고관리 -->
 <div id="page-inventory" class="page">
   <div class="section-header">
-    <span class="section-title">ðŸ“¦ ìž¬ê³  í˜„í™©</span>
-    <button onclick="openReceivingModal()" style="background:var(--success);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(22,163,74,.4);display:flex;align-items:center;gap:6px">ðŸ“¥ + ìž…ê³  ë“±ë¡</button>
+    <span class="section-title">📦 재고 현황</span>
+    <button onclick="openReceivingModal()" style="background:var(--success);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(22,163,74,.4);display:flex;align-items:center;gap:6px">📥 + 입고 등록</button>
   </div>
 
-  <!-- QR ìŠ¤ìº” -->
+  <!-- QR 스캔 -->
   <div class="card">
-    <div class="card-head"><span class="card-title">ðŸ“· QR ìŠ¤ìº” ì²˜ë¦¬</span><span style="font-size:11px;color:var(--text-sub)">ìŠ¤ìº” â†’ ìžë™ ì¡°íšŒ</span></div>
+    <div class="card-head"><span class="card-title">📷 QR 스캔 처리</span><span style="font-size:11px;color:var(--text-sub)">스캔 → 자동 조회</span></div>
     <div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:10px">
-        <input id="inv-scan-input" class="form-input" placeholder="QR ìŠ¤ìº” ë˜ëŠ” ì½”ë“œ ìž…ë ¥..." style="flex:1;font-family:monospace;font-size:12px">
-        <button onclick="processInvScan()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">ðŸ“·</button>
+        <input id="inv-scan-input" class="form-input" placeholder="QR 스캔 또는 코드 입력..." style="flex:1;font-family:monospace;font-size:12px">
+        <button onclick="processInvScan()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">📷</button>
       </div>
       <div style="display:flex;gap:5px;flex-wrap:wrap">
-        <button onclick="invSample('MTT|RM|MAT-H03|L-H03-20260320-003|20270320')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">ìƒ˜í”Œ:í”„ë¦¬ë¯¹ìŠ¤1 #003</button>
-        <button onclick="invSample('MTT|RM|MAT-H02|L-H02-20260325-001|20260415')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">ìƒ˜í”Œ:ê³„ëž€ #001</button>
-        <button onclick="invSample('MTT|FG|FG-HDR|FP-20260327-HDR-001|20261227')" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#0369a1">ìƒ˜í”Œ:ì™„ì œí’ˆ #001</button>
+        <button onclick="invSample('MTT|RM|MAT-H03|L-H03-20260320-003|20270320')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">샘플:프리믹스1 #003</button>
+        <button onclick="invSample('MTT|RM|MAT-H02|L-H02-20260325-001|20260415')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">샘플:계란 #001</button>
+        <button onclick="invSample('MTT|FG|FG-HDR|FP-20260327-HDR-001|20261227')" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#0369a1">샘플:완제품 #001</button>
       </div>
       <div id="inv-scan-result" style="margin-top:10px;display:none"></div>
     </div>
   </div>
 
-  <!-- ì›ìž¬ë£Œ ìž¬ê³  (LOTë³„) -->
-  <div class="section-header"><span class="section-title">ðŸŒ¾ ì›ìž¬ë£Œ ìž¬ê³  (LOTë³„)</span><span class="pill pill-blue" id="raw-lot-count">4 LOTs</span></div>
+  <!-- 원재료 재고 (LOT별) -->
+  <div class="section-header"><span class="section-title">🌾 원재료 재고 (LOT별)</span><span class="pill pill-blue" id="raw-lot-count">4 LOTs</span></div>
   <div id="raw-lot-list">
     <!-- LOT cards rendered by JS -->
   </div>
 
-  <!-- ì™„ì œí’ˆ ìž¬ê³  (LOTë³„) -->
-  <div class="section-header"><span class="section-title">ðŸ“¦ ì™„ì œí’ˆ ìž¬ê³  (LOTë³„)</span><span class="pill pill-approve" id="fg-lot-count">2 LOTs</span></div>
+  <!-- 완제품 재고 (LOT별) -->
+  <div class="section-header"><span class="section-title">📦 완제품 재고 (LOT별)</span><span class="pill pill-approve" id="fg-lot-count">2 LOTs</span></div>
   <div id="fg-lot-list">
     <!-- LOT cards rendered by JS -->
   </div>
 
-  <!-- ì¶œí•˜ ê°€ëŠ¥ ìž¬ê³  (ì„ ìž…ì„ ì¶œ) -->
-  <div class="section-header"><span class="section-title">ðŸš› ì¶œí•˜ ê°€ëŠ¥ ìž¬ê³  (ì„ ìž…ì„ ì¶œ FIFO)</span><span class="pill pill-approve" id="fifo-total-badge">3ë´‰ ëŒ€ê¸°</span></div>
+  <!-- 출하 가능 재고 (선입선출) -->
+  <div class="section-header"><span class="section-title">🚛 출하 가능 재고 (선입선출 FIFO)</span><span class="pill pill-approve" id="fifo-total-badge">3봉 대기</span></div>
   <div id="fifo-section">
     <div class="fifo-batch">
       <div class="fifo-batch-top">
         <div>
-          <div style="font-size:11px;font-family:monospace;color:var(--text-sub)">â‘  WL-20260327-HDR-001 <span style="color:#16a34a;font-weight:700">â† ì„ ì¶œê³  ìš°ì„ </span></div>
-          <div style="font-size:14px;font-weight:800;margin-top:2px">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg</div>
-          <div style="font-size:11px;color:var(--text-sub);margin-top:1px">ìƒì‚°ì¼: 2026-03-27 Â· ëƒ‰ë™ì™„ë£Œ: 07:30 Â· ìœ í†µê¸°í•œ: 2026-12-27</div>
+          <div style="font-size:11px;font-family:monospace;color:var(--text-sub)">① WL-20260327-HDR-001 <span style="color:#16a34a;font-weight:700">← 선출고 우선</span></div>
+          <div style="font-size:14px;font-weight:800;margin-top:2px">호두과자 전용반죽 5kg</div>
+          <div style="font-size:11px;color:var(--text-sub);margin-top:1px">생산일: 2026-03-27 · 냉동완료: 07:30 · 유통기한: 2026-12-27</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:22px;font-weight:800;color:var(--success)">3</div>
-          <div style="font-size:10px;color:var(--text-sub)">ë´‰ ìž¬ê³ </div>
+          <div style="font-size:10px;color:var(--text-sub)">봉 재고</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
         <div style="flex:1">
-          <div style="font-size:10px;color:var(--text-sub);margin-bottom:3px">ì¶œí•˜ ìˆ˜ëŸ‰ (ë´‰)</div>
+          <div style="font-size:10px;color:var(--text-sub);margin-bottom:3px">출하 수량 (봉)</div>
           <input type="number" class="form-input" id="fifo-ship-qty-001" value="3" min="1" max="3" style="font-size:13px;padding:7px 10px">
         </div>
-        <button onclick="processShip('WL-20260327-HDR-001','fifo-ship-qty-001')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;margin-top:14px">ðŸš› ì¶œí•˜</button>
+        <button onclick="processShip('WL-20260327-HDR-001','fifo-ship-qty-001')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;margin-top:14px">🚛 출하</button>
       </div>
     </div>
     <div id="fifo-dynamic-lots"></div>
   </div>
 
-  <!-- ìˆ˜ë¶ˆì¶œì´ë ¥ -->
+  <!-- 수불출이력 -->
   <div class="card">
-    <div class="card-head"><span class="card-title">ðŸ“‹ ìµœê·¼ ìˆ˜ë¶ˆì¶œì´ë ¥</span></div>
+    <div class="card-head"><span class="card-title">📋 최근 수불출이력</span></div>
     <div id="inv-log-list" style="padding:8px 16px;display:flex;flex-direction:column;gap:6px">
       <div style="background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">
-        <span style="color:var(--success);font-weight:700">ðŸ“¥ ìž…ê³ </span><span style="color:#f8fafc">í”„ë¦¬ë¯¹ìŠ¤1 #003</span><span style="color:#475569;font-size:10px">09:15</span>
+        <span style="color:var(--success);font-weight:700">📥 입고</span><span style="color:#f8fafc">프리믹스1 #003</span><span style="color:#475569;font-size:10px">09:15</span>
       </div>
       <div style="background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">
-        <span style="color:#0ea5e9;font-weight:700">ðŸš› ì¶œí•˜</span><span style="color:#f8fafc">í˜¸ë‘ê³¼ìžë°˜ì£½ #001~003</span><span style="color:#475569;font-size:10px">08:30</span>
+        <span style="color:#0ea5e9;font-weight:700">🚛 출하</span><span style="color:#f8fafc">호두과자반죽 #001~003</span><span style="color:#475569;font-size:10px">08:30</span>
       </div>
       <div style="background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center">
-        <span style="color:var(--primary-light);font-weight:700">ðŸ“¤ ë¶ˆì¶œ</span><span style="color:#f8fafc">íƒ€í”¼ì˜¤ì¹´ì „ë¶„ #002</span><span style="color:#475569;font-size:10px">08:05</span>
+        <span style="color:var(--primary-light);font-weight:700">📤 불출</span><span style="color:#f8fafc">타피오카전분 #002</span><span style="color:#475569;font-size:10px">08:05</span>
       </div>
     </div>
   </div>
 </div>
 
-<!-- PAGE: ìƒì‚°ê´€ë¦¬ -->
+<!-- PAGE: 생산관리 -->
 <div id="page-production" class="page">
   <div class="section-header">
-    <span class="section-title">ðŸ“‹ SOP ê¸°ë°˜ ìž‘ì—…ì§€ì‹œì„œ ìƒì„±</span>
-    <button onclick="openSopManager()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">âš™ï¸ SOP ê´€ë¦¬</button>
+    <span class="section-title">📋 SOP 기반 작업지시서 생성</span>
+    <button onclick="openSopManager()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">⚙️ SOP 관리</button>
   </div>
   <div class="card">
-    <div class="card-head"><span class="card-title">ðŸ—‚ï¸ ì œí’ˆë³„ SOP ëª©ë¡</span><span class="pill pill-blue">1ì¢… (í™œì„±)</span></div>
+    <div class="card-head"><span class="card-title">🗂️ 제품별 SOP 목록</span><span class="pill pill-blue">1종 (활성)</span></div>
     <div class="card-body">
       <div class="sop-item" onclick="openWOPanel('HDR')">
-        <div class="sop-icon" style="background:#fff7ed">ðŸ¡</div>
+        <div class="sop-icon" style="background:#fff7ed">🍡</div>
         <div class="sop-info">
-          <div class="sop-name">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg</div>
-          <div class="sop-meta">SOP-HDR-v2.0 Â· 14ë‹¨ê³„ ìˆœì°¨ê³µì • Â· CCP 2ê°œ (ë™ê²°Â·ê¸ˆì†ê²€ì¶œ)</div>
+          <div class="sop-name">호두과자 전용반죽 5kg</div>
+          <div class="sop-meta">SOP-HDR-v2.0 · 14단계 순차공정 · CCP 2개 (동결·금속검출)</div>
         </div>
-        <div class="sop-arrow">â€º</div>
+        <div class="sop-arrow">›</div>
       </div>
     </div>
   </div>
 
-  <!-- ì˜¤ëŠ˜ ìž‘ì—…ì§€ì‹œì„œ -->
-  <div class="section-header"><span class="section-title">ðŸ“ ì˜¤ëŠ˜ ìž‘ì—…ì§€ì‹œì„œ (2026-03-27)</span><span class="pill pill-blue">4ê±´</span></div>
+  <!-- 오늘 작업지시서 -->
+  <div class="section-header"><span class="section-title">📝 오늘 작업지시서 (2026-03-27)</span><span class="pill pill-blue">4건</span></div>
   <div class="wo-card approved" onclick="openCompletedWOQR('WL-20260327-HDR-001',3)" style="cursor:pointer">
-    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-001</div><span class="pill pill-approve">â„ï¸ ì¶œí•˜ê°€ëŠ¥</span></div>
-    <div class="wo-prod">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg Ã— 3ë°°ì¹˜</div>
-    <div class="wo-meta"><span>í˜¼í•©ê¸° A</span><span>15kg</span><span>06:00~07:30</span></div>
+    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-001</div><span class="pill pill-approve">❄️ 출하가능</span></div>
+    <div class="wo-prod">호두과자 전용반죽 5kg × 3배치</div>
+    <div class="wo-meta"><span>혼합기 A</span><span>15kg</span><span>06:00~07:30</span></div>
     <div class="wo-progress">
       <div class="wo-steps"><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div></div>
-      <span style="font-size:11px;color:var(--success);font-weight:700">ì™„ë£Œ Â· ðŸ–¨ï¸ QR ìž¬ì¶œë ¥ ê°€ëŠ¥</span>
+      <span style="font-size:11px;color:var(--success);font-weight:700">완료 · 🖨️ QR 재출력 가능</span>
     </div>
   </div>
   <div class="wo-card waiting">
-    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-002</div><span class="pill" style="background:#ede9fe;color:#5b21b6">â„ï¸ ëƒ‰ë™ì¤‘</span></div>
-    <div class="wo-prod">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg Ã— 5ë°°ì¹˜</div>
-    <div class="wo-meta"><span>í˜¼í•©ê¸° A</span><span>25kg</span><span>08:00~10:00</span></div>
+    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-002</div><span class="pill" style="background:#ede9fe;color:#5b21b6">❄️ 냉동중</span></div>
+    <div class="wo-prod">호두과자 전용반죽 5kg × 5배치</div>
+    <div class="wo-meta"><span>혼합기 A</span><span>25kg</span><span>08:00~10:00</span></div>
     <div class="wo-progress">
       <div class="wo-steps"><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step active"></div></div>
-      <span style="font-size:11px;color:#7c3aed;font-weight:700">CCP-1B ë™ê²°ì¤‘ (-18Â°C)</span>
+      <span style="font-size:11px;color:#7c3aed;font-weight:700">CCP-1B 동결중 (-18°C)</span>
     </div>
   </div>
   <div class="wo-card ongoing" onclick="openWOPanel('HDR')">
-    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-004</div><span class="pill pill-blue">â–¶ ì§„í–‰ì¤‘</span></div>
-    <div class="wo-prod">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg Ã— 3ë°°ì¹˜</div>
-    <div class="wo-meta"><span>í˜¼í•©ê¸° A</span><span>15kg ëª©í‘œ</span><span>10:30 ì‹œìž‘</span></div>
+    <div class="wo-top"><div class="wo-lot">WL-20260327-HDR-004</div><span class="pill pill-blue">▶ 진행중</span></div>
+    <div class="wo-prod">호두과자 전용반죽 5kg × 3배치</div>
+    <div class="wo-meta"><span>혼합기 A</span><span>15kg 목표</span><span>10:30 시작</span></div>
     <div class="wo-progress">
       <div class="wo-steps"><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step active"></div><div class="wo-step"></div><div class="wo-step"></div><div class="wo-step"></div></div>
-      <span style="font-size:11px;color:var(--primary-light);font-weight:700">5/14 ê³µì •</span>
+      <span style="font-size:11px;color:var(--primary-light);font-weight:700">5/14 공정</span>
     </div>
   </div>
 
-  <!-- ì¶œí•˜ ê°€ëŠ¥ ì„¹ì…˜ -->
-  <div class="section-header"><span class="section-title">ðŸš› ì¶œí•˜ ì¤€ë¹„ í˜„í™©</span></div>
+  <!-- 출하 가능 섹션 -->
+  <div class="section-header"><span class="section-title">🚛 출하 준비 현황</span></div>
   <div class="card">
-    <div class="card-head"><span class="card-title">â„ï¸ ëƒ‰ë™ì™„ë£Œ Â· ì¶œí•˜ê°€ëŠ¥ ë°°ì¹˜</span><span class="pill pill-approve">3ë´‰ ëŒ€ê¸°ì¤‘</span></div>
+    <div class="card-head"><span class="card-title">❄️ 냉동완료 · 출하가능 배치</span><span class="pill pill-approve">3봉 대기중</span></div>
     <div class="card-body">
       <div style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:12px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:6px">WL-20260327-HDR-001 Â· í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 3ë´‰</div>
-        <div style="font-size:11px;color:var(--text-sub);margin-bottom:8px">5kg Ã— 3ë´‰ = 15kg Â· ëƒ‰ë™ì™„ë£Œ 07:30 â†’ ì¶œí•˜ê°€ëŠ¥ 19:30 âœ… (ì´ë¯¸ ê²½ê³¼)</div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">WL-20260327-HDR-001 · 호두과자 전용반죽 3봉</div>
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:8px">5kg × 3봉 = 15kg · 냉동완료 07:30 → 출하가능 19:30 ✅ (이미 경과)</div>
         <div style="background:#dcfce7;border-radius:6px;padding:8px 10px;font-size:11px;color:#166534;margin-bottom:10px">
-          ðŸ“¦ ë°•ìŠ¤ í¬ìž¥: 5kg Ã— 4ë´‰ = 1ë°•ìŠ¤ (20kg/ë°•ìŠ¤)<br>
-          í˜„ìž¬ 3ë´‰ â†’ <b>0ë°•ìŠ¤ ì™„ì„± Â· ë‚±ë´‰ 3ê°œ (1ë°•ìŠ¤ ì¶”ê°€ ì‹œ ì¶œí•˜ ê°€ëŠ¥)</b>
+          📦 박스 포장: 5kg × 4봉 = 1박스 (20kg/박스)<br>
+          현재 3봉 → <b>0박스 완성 · 낱봉 3개 (1박스 추가 시 출하 가능)</b>
         </div>
-        <button onclick="openShipPanel('WL-20260327-HDR-001')" style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">ðŸš› ì¶œí•˜ ì²˜ë¦¬ ì‹œìž‘</button>
+        <button onclick="openShipPanel('WL-20260327-HDR-001')" style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">🚛 출하 처리 시작</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- PAGE: ê¸°ê¸°ê´€ë¦¬ -->
+<!-- PAGE: 기기관리 -->
 <div id="page-equipment" class="page">
-  <div class="section-header"><span class="section-title">ðŸŒ¡ï¸ HACCP CCP ì‹¤ì‹œê°„ ëª¨ë‹ˆí„°ë§</span></div>
+  <div class="section-header"><span class="section-title">🌡️ HACCP CCP 실시간 모니터링</span></div>
   <div class="ccp-grid">
     <div class="ccp-tile fail" onclick="showCCPDetail('1B')">
-      <div class="ccp-tile-name">CCP-1B ë™ê²°ê³µì •</div>
-      <div class="ccp-tile-val" style="color:var(--danger)">-15Â°C</div>
-      <div class="ccp-tile-range">ê¸°ì¤€ -16Â°C ì´í•˜</div>
-      <div class="ccp-tile-time">ëƒ‰ë™ì°½ê³  A-2 Â· ì´ìƒ</div>
-      <span class="pill pill-danger" style="margin-top:6px;font-size:10px">âš ï¸ í•œê³„ê¸°ì¤€ ì´íƒˆ</span>
+      <div class="ccp-tile-name">CCP-1B 동결공정</div>
+      <div class="ccp-tile-val" style="color:var(--danger)">-15°C</div>
+      <div class="ccp-tile-range">기준 -16°C 이하</div>
+      <div class="ccp-tile-time">냉동창고 A-2 · 이상</div>
+      <span class="pill pill-danger" style="margin-top:6px;font-size:10px">⚠️ 한계기준 이탈</span>
     </div>
     <div class="ccp-tile ok" onclick="showCCPDetail('2P')">
-      <div class="ccp-tile-name">CCP-2P ê¸ˆì†ê²€ì¶œ</div>
-      <div class="ccp-tile-val" style="color:var(--success);font-size:16px">ë¯¸ê²€ì¶œ</div>
-      <div class="ccp-tile-range">Feâ‰¥2.5mm Â· SUSâ‰¥4.0mm</div>
-      <div class="ccp-tile-time">09:10 ìž‘ì—…ì „ í™•ì¸ Â· ì í•©</div>
-      <span class="pill pill-ok" style="margin-top:6px;font-size:10px">âœ… ì •ìƒ</span>
+      <div class="ccp-tile-name">CCP-2P 금속검출</div>
+      <div class="ccp-tile-val" style="color:var(--success);font-size:16px">미검출</div>
+      <div class="ccp-tile-range">Fe≥2.5mm · SUS≥4.0mm</div>
+      <div class="ccp-tile-time">09:10 작업전 확인 · 적합</div>
+      <span class="pill pill-ok" style="margin-top:6px;font-size:10px">✅ 정상</span>
     </div>
     <div class="ccp-tile ok">
-      <div class="ccp-tile-name">ëƒ‰ë™ì°½ê³  A-1 ì˜¨ë„</div>
-      <div class="ccp-tile-val" style="color:var(--success)">-18Â°C</div>
-      <div class="ccp-tile-range">ê¸°ì¤€ -18Â°C ì´í•˜</div>
-      <div class="ccp-tile-time">ë°ì´í„°ë¡œê±° ìžë™ê¸°ë¡</div>
-      <span class="pill pill-ok" style="margin-top:6px;font-size:10px">âœ… ì •ìƒ</span>
+      <div class="ccp-tile-name">냉동창고 A-1 온도</div>
+      <div class="ccp-tile-val" style="color:var(--success)">-18°C</div>
+      <div class="ccp-tile-range">기준 -18°C 이하</div>
+      <div class="ccp-tile-time">데이터로거 자동기록</div>
+      <span class="pill pill-ok" style="margin-top:6px;font-size:10px">✅ 정상</span>
     </div>
     <div class="ccp-tile warn">
-      <div class="ccp-tile-name">í˜¼í•©ê¸° A ë°°í•©ì˜¨ë„</div>
-      <div class="ccp-tile-val" style="color:var(--warning)">28Â°C</div>
-      <div class="ccp-tile-range">ê¸°ì¤€ 25Â°C ì´í•˜</div>
-      <div class="ccp-tile-time">10:45 ì¸¡ì • Â· ì£¼ì˜</div>
-      <span class="pill pill-warn" style="margin-top:6px;font-size:10px">ðŸŸ  ì£¼ì˜</span>
+      <div class="ccp-tile-name">혼합기 A 배합온도</div>
+      <div class="ccp-tile-val" style="color:var(--warning)">28°C</div>
+      <div class="ccp-tile-range">기준 25°C 이하</div>
+      <div class="ccp-tile-time">10:45 측정 · 주의</div>
+      <span class="pill pill-warn" style="margin-top:6px;font-size:10px">🟠 주의</span>
     </div>
   </div>
 
-  <!-- CCP-1B ëª¨ë‹ˆí„°ë§ ì¼ì§€ -->
+  <!-- CCP-1B 모니터링 일지 -->
   <div class="card">
-    <div class="card-head"><span class="card-title">â„ï¸ CCP-1B ë™ê²°ê³µì • ëª¨ë‹ˆí„°ë§</span><span class="pill pill-blue">ì˜¤ëŠ˜</span></div>
+    <div class="card-head"><span class="card-title">❄️ CCP-1B 동결공정 모니터링</span><span class="pill pill-blue">오늘</span></div>
     <div class="card-body" style="padding:0">
       <table class="tbl">
-        <thead><tr><th>ë°°ì¹˜LOT</th><th>ì‹œìž‘ì‹œê°</th><th>ì˜¨ë„</th><th>ê²½ê³¼</th><th>ìƒíƒœ</th></tr></thead>
+        <thead><tr><th>배치LOT</th><th>시작시각</th><th>온도</th><th>경과</th><th>상태</th></tr></thead>
         <tbody>
-          <tr><td style="font-size:10px;font-family:monospace">HDR-001</td><td>07:30</td><td style="color:var(--success)">-18Â°C</td><td>ì™„ë£Œ(12h+)</td><td><span class="pill pill-approve" style="font-size:10px">ì¶œí•˜ê°€ëŠ¥</span></td></tr>
-          <tr><td style="font-size:10px;font-family:monospace">HDR-002</td><td>10:10</td><td style="color:var(--success)">-18Â°C</td><td>1h 20m</td><td><span class="pill pill-waiting" style="font-size:10px">ëƒ‰ë™ì¤‘</span></td></tr>
-          <tr><td style="font-size:10px;font-family:monospace">HDR-003</td><td>â€”</td><td>â€”</td><td>â€”</td><td><span class="pill pill-gray" style="font-size:10px">ì§„í–‰ì „</span></td></tr>
+          <tr><td style="font-size:10px;font-family:monospace">HDR-001</td><td>07:30</td><td style="color:var(--success)">-18°C</td><td>완료(12h+)</td><td><span class="pill pill-approve" style="font-size:10px">출하가능</span></td></tr>
+          <tr><td style="font-size:10px;font-family:monospace">HDR-002</td><td>10:10</td><td style="color:var(--success)">-18°C</td><td>1h 20m</td><td><span class="pill pill-waiting" style="font-size:10px">냉동중</span></td></tr>
+          <tr><td style="font-size:10px;font-family:monospace">HDR-003</td><td>—</td><td>—</td><td>—</td><td><span class="pill pill-gray" style="font-size:10px">진행전</span></td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- CCP-2P ê¸ˆì†ê²€ì¶œ ì¼ì§€ -->
+  <!-- CCP-2P 금속검출 일지 -->
   <div class="card">
-    <div class="card-head"><span class="card-title">ðŸ” CCP-2P ê¸ˆì†ê²€ì¶œ ëª¨ë‹ˆí„°ë§</span><span class="pill pill-blue">ì˜¤ëŠ˜</span></div>
+    <div class="card-head"><span class="card-title">🔍 CCP-2P 금속검출 모니터링</span><span class="pill pill-blue">오늘</span></div>
     <div class="card-body" style="padding:0">
       <table class="tbl">
-        <thead><tr><th>ì‹œê°</th><th>êµ¬ë¶„</th><th>ì‹œíŽ¸Fe</th><th>ì‹œíŽ¸STS</th><th>ê²€ì¶œ</th></tr></thead>
+        <thead><tr><th>시각</th><th>구분</th><th>시편Fe</th><th>시편STS</th><th>검출</th></tr></thead>
         <tbody>
-          <tr><td>06:00</td><td style="font-size:10px">ìž‘ì—…ì „</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5âœ“</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0âœ“</span></td><td style="color:var(--success)">ë¯¸ê²€ì¶œ</td></tr>
-          <tr><td>08:00</td><td style="font-size:10px">2ì‹œê°„</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5âœ“</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0âœ“</span></td><td style="color:var(--success)">ë¯¸ê²€ì¶œ</td></tr>
-          <tr><td>10:00</td><td style="font-size:10px">2ì‹œê°„</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5âœ“</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0âœ“</span></td><td style="color:var(--success)">ë¯¸ê²€ì¶œ</td></tr>
+          <tr><td>06:00</td><td style="font-size:10px">작업전</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5✓</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0✓</span></td><td style="color:var(--success)">미검출</td></tr>
+          <tr><td>08:00</td><td style="font-size:10px">2시간</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5✓</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0✓</span></td><td style="color:var(--success)">미검출</td></tr>
+          <tr><td>10:00</td><td style="font-size:10px">2시간</td><td><span class="pill pill-ok" style="font-size:10px">Fe2.5✓</span></td><td><span class="pill pill-ok" style="font-size:10px">SUS4.0✓</span></td><td style="color:var(--success)">미검출</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- ì„¤ë¹„ í˜„í™© -->
+  <!-- 설비 현황 -->
   <div class="card">
-    <div class="card-head"><span class="card-title">âš™ï¸ ì„¤ë¹„ í˜„í™©</span><span class="pill pill-warn">ì ê²€ 1ê±´</span></div>
+    <div class="card-head"><span class="card-title">⚙️ 설비 현황</span><span class="pill pill-warn">점검 1건</span></div>
     <div class="card-body">
-      <div class="equip-item"><div class="equip-icon" style="background:#f0fdf4">ðŸ¥£</div><div class="equip-info"><div class="equip-name">í˜¼í•©ê¸° A-01 (ë°°í•©ê¸°)</div><div class="equip-meta">ë§ˆì§€ë§‰ ì ê²€ 2026-03-20 Â· ë‹¤ìŒ ì ê²€ 2026-04-20</div></div><div><span class="pill pill-ok">âœ… ì •ìƒ</span></div></div>
-      <div class="equip-item"><div class="equip-icon" style="background:#eff6ff">ðŸ”</div><div class="equip-info"><div class="equip-name">ê¸ˆì†ê²€ì¶œê¸° C-01</div><div class="equip-meta">ë§ˆì§€ë§‰ ì ê²€ 2026-03-25 Â· Fe 2.5mm / SUS 4.0mm ê²€êµì • ì™„ë£Œ</div></div><div><span class="pill pill-ok">âœ… ì •ìƒ</span></div></div>
-      <div class="equip-item"><div class="equip-icon" style="background:#f5f3ff">â„ï¸</div><div class="equip-info"><div class="equip-name">ëƒ‰ë™ì°½ê³  A-2</div><div class="equip-meta">âš ï¸ ì˜¨ë„ ì´íƒˆ ê°ì§€ (-15Â°C) Â· ì ê²€ ìš”ì²­ë¨</div></div><div><span class="pill pill-danger">âš ï¸ ì´ìƒ</span></div></div>
-      <div class="equip-item"><div class="equip-icon" style="background:#fef3c7">âš–ï¸</div><div class="equip-info"><div class="equip-name">ì „ìžì €ìš¸ E-01 (30kg)</div><div class="equip-meta">ë§ˆì§€ë§‰ ê²€êµì • 2026-01-15 Â· ë‹¤ìŒ ê²€êµì • 2027-01-15</div></div><div><span class="pill pill-ok">âœ… ì •ìƒ</span></div></div>
+      <div class="equip-item"><div class="equip-icon" style="background:#f0fdf4">🥣</div><div class="equip-info"><div class="equip-name">혼합기 A-01 (배합기)</div><div class="equip-meta">마지막 점검 2026-03-20 · 다음 점검 2026-04-20</div></div><div><span class="pill pill-ok">✅ 정상</span></div></div>
+      <div class="equip-item"><div class="equip-icon" style="background:#eff6ff">🔍</div><div class="equip-info"><div class="equip-name">금속검출기 C-01</div><div class="equip-meta">마지막 점검 2026-03-25 · Fe 2.5mm / SUS 4.0mm 검교정 완료</div></div><div><span class="pill pill-ok">✅ 정상</span></div></div>
+      <div class="equip-item"><div class="equip-icon" style="background:#f5f3ff">❄️</div><div class="equip-info"><div class="equip-name">냉동창고 A-2</div><div class="equip-meta">⚠️ 온도 이탈 감지 (-15°C) · 점검 요청됨</div></div><div><span class="pill pill-danger">⚠️ 이상</span></div></div>
+      <div class="equip-item"><div class="equip-icon" style="background:#fef3c7">⚖️</div><div class="equip-info"><div class="equip-name">전자저울 E-01 (30kg)</div><div class="equip-meta">마지막 검교정 2026-01-15 · 다음 검교정 2027-01-15</div></div><div><span class="pill pill-ok">✅ 정상</span></div></div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-head"><span class="card-title">ðŸ§¹ ì˜¤ëŠ˜ ìœ„ìƒì ê²€</span><span class="pill pill-warn">1ê±´ ë¯¸ì™„ë£Œ</span></div>
+    <div class="card-head"><span class="card-title">🧹 오늘 위생점검</span><span class="pill pill-warn">1건 미완료</span></div>
     <div class="card-body">
-      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">âœ“</div><div class="check-text">ìž‘ì—… ì „ ì†ì„¸ì • ë° ì†Œë… ì™„ë£Œ</div></div>
-      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">âœ“</div><div class="check-text">í˜¼í•©ê¸°Â·ê³„ëŸ‰ê¸° ì„¸ì²™ ë° ì†Œë…</div></div>
-      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">âœ“</div><div class="check-text">ì´ë¬¼ì§ˆ í˜¼ìž… ë°©ì§€ ì ê²€</div></div>
-      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">âœ“</div><div class="check-text">ìž‘ì—…ë³µÂ·ëª¨ìžÂ·ìž¥ê°‘ ì°©ìš© í™•ì¸</div></div>
-      <div class="checklist-item"><div class="check-box" onclick="toggleCheck(this)"></div><div class="check-text">í‡´ê·¼ ì „ êµ¬ì—­ ìµœì¢… ì •ë¦¬</div></div>
+      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">✓</div><div class="check-text">작업 전 손세정 및 소독 완료</div></div>
+      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">✓</div><div class="check-text">혼합기·계량기 세척 및 소독</div></div>
+      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">✓</div><div class="check-text">이물질 혼입 방지 점검</div></div>
+      <div class="checklist-item"><div class="check-box checked" onclick="toggleCheck(this)">✓</div><div class="check-text">작업복·모자·장갑 착용 확인</div></div>
+      <div class="checklist-item"><div class="check-box" onclick="toggleCheck(this)"></div><div class="check-text">퇴근 전 구역 최종 정리</div></div>
     </div>
   </div>
 </div>
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav">
-  <button class="bnav-item active" onclick="showTab('dashboard',this)"><span class="bnav-icon">ðŸ“Š</span><span class="bnav-label">ëŒ€ì‹œë³´ë“œ</span></button>
-  <button class="bnav-item" onclick="showTab('inventory',this)"><span class="bnav-icon">ðŸ“¦</span><span class="bnav-label">ìž¬ê³ ê´€ë¦¬</span></button>
-  <button class="bnav-item" onclick="showTab('production',this)"><span class="bnav-icon">ðŸ­</span><span class="bnav-label">ìƒì‚°ê´€ë¦¬</span></button>
-  <button class="bnav-item" onclick="showTab('equipment',this)"><span class="bnav-icon">âš™ï¸</span><span class="bnav-label">ê¸°ê¸°ê´€ë¦¬</span></button>
+  <button class="bnav-item active" onclick="showTab('dashboard',this)"><span class="bnav-icon">📊</span><span class="bnav-label">대시보드</span></button>
+  <button class="bnav-item" onclick="showTab('inventory',this)"><span class="bnav-icon">📦</span><span class="bnav-label">재고관리</span></button>
+  <button class="bnav-item" onclick="showTab('production',this)"><span class="bnav-icon">🏭</span><span class="bnav-label">생산관리</span></button>
+  <button class="bnav-item" onclick="showTab('equipment',this)"><span class="bnav-icon">⚙️</span><span class="bnav-label">기기관리</span></button>
 </div>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     ìž…ê³  ë“±ë¡ MODAL (3-step)
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════
+     입고 등록 MODAL (3-step)
+════════════════════════════════════ -->
 <div id="recv-modal" class="modal-overlay">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <div class="modal-title">ðŸ“¥ ì›ìž¬ë£Œ ìž…ê³  ë“±ë¡</div>
+    <div class="modal-title">📥 원재료 입고 등록</div>
     <div class="recv-step-indicator">
       <div class="recv-dot active" id="rdot-1"></div>
       <div class="recv-dot" id="rdot-2"></div>
       <div class="recv-dot" id="rdot-3"></div>
     </div>
 
-    <!-- Step 1: ì›ìž¬ë£Œ ì„ íƒ -->
+    <!-- Step 1: 원재료 선택 -->
     <div class="recv-step active" id="recv-s1">
-      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 1 â€” DBì—ì„œ ì›ìž¬ë£Œ ì„ íƒ</div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 1 — DB에서 원재료 선택</div>
       <div class="form-row">
-        <div class="form-label">ì›ìž¬ë£Œ ì„ íƒ</div>
+        <div class="form-label">원재료 선택</div>
         <select class="form-select" id="recv-item-select" onchange="onRecvItemSelect(this.value)">
-          <option value="">â€” ì›ìž¬ë£Œ ì„ íƒ â€”</option>
-          <option value="MAT-H02">ðŸ¥š ê³„ëž€ ì „ëž€ (1kg/íŒ)</option>
-          <option value="MAT-H03">ðŸŒ¾ í˜¸ë‘ê³¼ìž í”„ë¦¬ë¯¹ìŠ¤1 (20kg/í¬ëŒ€)</option>
-          <option value="MAT-H04">ðŸ§ª í˜¸ë‘ê³¼ìž í”„ë¦¬ë¯¹ìŠ¤2 (5kg/ë´‰)</option>
-          <option value="MAT-H05">ðŸ¥„ íƒ€í”¼ì˜¤ì¹´ì „ë¶„ (20kg/í¬ëŒ€)</option>
+          <option value="">— 원재료 선택 —</option>
+          <option value="MAT-H02">🥚 계란 전란 (1kg/판)</option>
+          <option value="MAT-H03">🌾 호두과자 프리믹스1 (20kg/포대)</option>
+          <option value="MAT-H04">🧪 호두과자 프리믹스2 (5kg/봉)</option>
+          <option value="MAT-H05">🥄 타피오카전분 (20kg/포대)</option>
         </select>
       </div>
       <div id="recv-item-info" style="display:none;background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px">
-        <div style="font-weight:700;margin-bottom:8px" id="recv-item-name">â€”</div>
+        <div style="font-weight:700;margin-bottom:8px" id="recv-item-name">—</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <div><span style="color:var(--text-sub)">ê³µê¸‰ì—…ì²´</span><br><b id="recv-supplier">â€”</b></div>
-          <div><span style="color:var(--text-sub)">í¬ìž¥ë‹¨ìœ„</span><br><b id="recv-unit">â€”</b></div>
-          <div><span style="color:var(--text-sub)">ë³´ê´€ì¡°ê±´</span><br><b id="recv-storage">â€”</b></div>
-          <div><span style="color:var(--text-sub)">í‘œì¤€ìœ í†µê¸°í•œ</span><br><b id="recv-shelf">â€”</b></div>
+          <div><span style="color:var(--text-sub)">공급업체</span><br><b id="recv-supplier">—</b></div>
+          <div><span style="color:var(--text-sub)">포장단위</span><br><b id="recv-unit">—</b></div>
+          <div><span style="color:var(--text-sub)">보관조건</span><br><b id="recv-storage">—</b></div>
+          <div><span style="color:var(--text-sub)">표준유통기한</span><br><b id="recv-shelf">—</b></div>
         </div>
       </div>
-      <button class="btn-primary" id="recv-s1-next" disabled onclick="recvGoStep(2)">ë‹¤ìŒ ë‹¨ê³„ â†’</button>
+      <button class="btn-primary" id="recv-s1-next" disabled onclick="recvGoStep(2)">다음 단계 →</button>
     </div>
 
-    <!-- Step 2: ìž…ê³  ì •ë³´ ìž…ë ¥ -->
+    <!-- Step 2: 입고 정보 입력 -->
     <div class="recv-step" id="recv-s2">
-      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 2 â€” ìž…ê³  ì •ë³´ í™•ì¸ ë° ìž…ë ¥</div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 2 — 입고 정보 확인 및 입력</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div class="form-row"><div class="form-label">ìž…ê³  ë‚ ì§œ</div><input type="date" class="form-input" id="recv-date" value="2026-03-27"></div>
-        <div class="form-row"><div class="form-label">ìœ í†µê¸°í•œ</div><input type="date" class="form-input" id="recv-expiry"></div>
+        <div class="form-row"><div class="form-label">입고 날짜</div><input type="date" class="form-input" id="recv-date" value="2026-03-27"></div>
+        <div class="form-row"><div class="form-label">유통기한</div><input type="date" class="form-input" id="recv-expiry"></div>
       </div>
-      <div class="form-row"><div class="form-label">ê³µê¸‰ì—…ì²´ / ê±°ëž˜ì²˜</div><input class="form-input" id="recv-supplier-input" placeholder="ê³µê¸‰ì—…ì²´ëª…"></div>
-      <div class="form-row"><div class="form-label">ìž…ê³  ìˆ˜ëŸ‰ (í¬ìž¥ë‹¨ìœ„ ê°œìˆ˜)</div>
+      <div class="form-row"><div class="form-label">공급업체 / 거래처</div><input class="form-input" id="recv-supplier-input" placeholder="공급업체명"></div>
+      <div class="form-row"><div class="form-label">입고 수량 (포장단위 개수)</div>
         <div style="display:flex;align-items:center;gap:8px">
           <input type="number" class="form-input" id="recv-qty" value="1" min="1" style="width:80px" oninput="updateRecvQtyDisplay()">
-          <span id="recv-unit-label" style="font-size:12px;color:var(--text-sub)">í¬ëŒ€</span>
-          <span style="font-size:11px;color:var(--primary)">â†’ QRë¼ë²¨ <b id="recv-label-count">1</b>ìž¥ ìƒì„±</span>
+          <span id="recv-unit-label" style="font-size:12px;color:var(--text-sub)">포대</span>
+          <span style="font-size:11px;color:var(--primary)">→ QR라벨 <b id="recv-label-count">1</b>장 생성</span>
         </div>
       </div>
-      <div class="form-row"><div class="form-label">ìž…ê³  ìƒíƒœ í™•ì¸</div>
+      <div class="form-row"><div class="form-label">입고 상태 확인</div>
         <div style="display:flex;gap:8px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;background:#f9fafb;border-radius:8px;padding:10px;cursor:pointer"><input type="checkbox" id="recv-chk-visual" onchange="checkRecvReady()"> ì™¸ê´€Â·í¬ìž¥ ì–‘í˜¸</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;background:#f9fafb;border-radius:8px;padding:10px;cursor:pointer"><input type="checkbox" id="recv-chk-temp" onchange="checkRecvReady()"> ë³´ê´€ì˜¨ë„ ì í•©</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;background:#f9fafb;border-radius:8px;padding:10px;cursor:pointer"><input type="checkbox" id="recv-chk-visual" onchange="checkRecvReady()"> 외관·포장 양호</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;background:#f9fafb;border-radius:8px;padding:10px;cursor:pointer"><input type="checkbox" id="recv-chk-temp" onchange="checkRecvReady()"> 보관온도 적합</label>
         </div>
       </div>
-      <div class="form-row"><div class="form-label">íŠ¹ì´ì‚¬í•­ (ì„ íƒ)</div><textarea class="form-input" id="recv-note" rows="2" placeholder="ì´ìƒ ì—†ì„ ì‹œ ìƒëžµ ê°€ëŠ¥"></textarea></div>
+      <div class="form-row"><div class="form-label">특이사항 (선택)</div><textarea class="form-input" id="recv-note" rows="2" placeholder="이상 없을 시 생략 가능"></textarea></div>
       <div style="display:flex;gap:8px">
-        <button class="btn-secondary" style="flex:1" onclick="recvGoStep(1)">â† ì´ì „</button>
-        <button class="btn-primary" id="recv-s2-next" style="flex:2" disabled onclick="confirmReceiving()">âœ… ìž…ê³  í™•ì • â†’ QR ë¼ë²¨ ìƒì„±</button>
+        <button class="btn-secondary" style="flex:1" onclick="recvGoStep(1)">← 이전</button>
+        <button class="btn-primary" id="recv-s2-next" style="flex:2" disabled onclick="confirmReceiving()">✅ 입고 확정 → QR 라벨 생성</button>
       </div>
     </div>
 
-    <!-- Step 3: QR ë¼ë²¨ ìƒì„± -->
+    <!-- Step 3: QR 라벨 생성 -->
     <div class="recv-step" id="recv-s3">
-      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 3 â€” QR ë¼ë²¨ ìƒì„± ë° ì¶œë ¥</div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:10px">STEP 3 — QR 라벨 생성 및 출력</div>
       <div style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:14px">
-        <div style="font-size:13px;font-weight:700;color:var(--success);margin-bottom:4px">âœ… ìž…ê³  ì™„ë£Œ Â· QR ë¼ë²¨ ìƒì„±ë¨</div>
-        <div style="font-size:11px;color:var(--text-sub)" id="recv-confirm-summary">â€”</div>
+        <div style="font-size:13px;font-weight:700;color:var(--success);margin-bottom:4px">✅ 입고 완료 · QR 라벨 생성됨</div>
+        <div style="font-size:11px;color:var(--text-sub)" id="recv-confirm-summary">—</div>
       </div>
       <div id="recv-label-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px"></div>
       <div style="background:#eff6ff;border-radius:8px;padding:10px 12px;font-size:11px;color:#1e40af;margin-bottom:12px">
-        ðŸ“± ê° í¬ìž¥ë‹¨ìœ„ì— QR ë¼ë²¨ì„ ë¶€ì°©í•˜ì„¸ìš”.<br>QR ìŠ¤ìº”ìœ¼ë¡œ ìž…ê³ Â·ë¶ˆì¶œÂ·íê¸° ì¶”ì ì´ ê°€ëŠ¥í•©ë‹ˆë‹¤.
+        📱 각 포장단위에 QR 라벨을 부착하세요.<br>QR 스캔으로 입고·불출·폐기 추적이 가능합니다.
       </div>
-      <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">ðŸ–¨ï¸ ë¼ë²¨ í”„ë¦°í„° ì¶œë ¥</button>
-      <button onclick="closeRecvModal()" class="btn-secondary" style="width:100%">ì™„ë£Œ Â· ë‹«ê¸°</button>
+      <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">🖨️ 라벨 프린터 출력</button>
+      <button onclick="closeRecvModal()" class="btn-secondary" style="width:100%">완료 · 닫기</button>
     </div>
   </div>
 </div>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     ìž‘ì—…ì§€ì‹œì„œ ì „ì²´í™”ë©´ íŒ¨ë„
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════
+     작업지시서 전체화면 패널
+════════════════════════════════════ -->
 <div id="wo-panel" class="wo-panel">
-  <!-- ìƒë‹¨ë°” -->
+  <!-- 상단바 -->
   <div class="wo-panel-topbar">
-    <span class="wo-panel-back" onclick="closeWOPanel()">â€¹</span>
-    <span class="wo-panel-title" id="wo-panel-title">ìž‘ì—…ì§€ì‹œì„œ</span>
-    <button class="wo-panel-save" onclick="showToast('ìž„ì‹œì €ìž¥ ì™„ë£Œ')">ìž„ì‹œì €ìž¥</button>
+    <span class="wo-panel-back" onclick="closeWOPanel()">‹</span>
+    <span class="wo-panel-title" id="wo-panel-title">작업지시서</span>
+    <button class="wo-panel-save" onclick="showToast('임시저장 완료')">임시저장</button>
   </div>
-  <!-- ì§„í–‰ìƒíƒœ dots -->
+  <!-- 진행상태 dots -->
   <div class="wo-progress-bar">
-    <div style="font-size:10px;color:var(--text-sub);margin-bottom:6px" id="wo-step-label">ë‹¨ê³„ 1 / 14</div>
+    <div style="font-size:10px;color:var(--text-sub);margin-bottom:6px" id="wo-step-label">단계 1 / 14</div>
     <div class="wo-prog-dots" id="wo-prog-dots"></div>
   </div>
-  <!-- ë‹¨ê³„ ë³¸ë¬¸ -->
+  <!-- 단계 본문 -->
   <div class="wo-step-body" id="wo-step-body"></div>
 </div>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     ì¶œí•˜ ì²˜ë¦¬ íŒ¨ë„
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════
+     출하 처리 패널
+════════════════════════════════════ -->
 <div id="ship-panel" class="modal-overlay">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <div class="modal-title">ðŸš› ì¶œí•˜ ì²˜ë¦¬</div>
+    <div class="modal-title">🚛 출하 처리</div>
     <div id="ship-content">
       <div style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;color:var(--success)">â„ï¸ ëƒ‰ë™ì™„ë£Œ ì¶œí•˜ê°€ëŠ¥ ë°°ì¹˜</div>
-        <div style="font-size:11px;color:var(--text-sub);margin-top:4px" id="ship-lot-info">â€”</div>
+        <div style="font-size:12px;font-weight:700;color:var(--success)">❄️ 냉동완료 출하가능 배치</div>
+        <div style="font-size:11px;color:var(--text-sub);margin-top:4px" id="ship-lot-info">—</div>
       </div>
       <div style="background:#eff6ff;border-radius:8px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:6px">ðŸ“¦ ë°•ìŠ¤ í¬ìž¥ (5kg Ã— 4ë´‰ = 1ë°•ìŠ¤)</div>
-        <div id="ship-box-calc" style="font-size:12px;color:var(--text-sub)">â€”</div>
+        <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:6px">📦 박스 포장 (5kg × 4봉 = 1박스)</div>
+        <div id="ship-box-calc" style="font-size:12px;color:var(--text-sub)">—</div>
       </div>
-      <div class="form-row"><div class="form-label">ë‚©í’ˆ ê±°ëž˜ì²˜ <span style="color:var(--danger)">*</span></div>
+      <div class="form-row"><div class="form-label">납품 거래처 <span style="color:var(--danger)">*</span></div>
         <select class="form-select" id="ship-customer">
-          <option value="">â€” ê±°ëž˜ì²˜ ì„ íƒ â€”</option>
-          <option>ãˆœí•œêµ­ìœ í†µ Â· ì„œìš¸ ê°•ë‚¨êµ¬</option>
-          <option>ãˆœì‹ ì„ ë§ˆíŠ¸ Â· ê²½ê¸° ì„±ë‚¨ì‹œ</option>
-          <option>ãˆœí˜¸ë‘ê³¼ìžì²´ì¸ Â· ì „êµ­</option>
-          <option>ãˆœì˜¨ë¼ì¸ëª°ì§ë°°ì†¡ Â· ì „êµ­</option>
+          <option value="">— 거래처 선택 —</option>
+          <option>㈜한국유통 · 서울 강남구</option>
+          <option>㈜신선마트 · 경기 성남시</option>
+          <option>㈜호두과자체인 · 전국</option>
+          <option>㈜온라인몰직배송 · 전국</option>
         </select>
       </div>
-      <div class="form-row"><div class="form-label">ëƒ‰ë™ íƒë°°ì‚¬</div>
+      <div class="form-row"><div class="form-label">냉동 택배사</div>
         <select class="form-select">
-          <option>CJëŒ€í•œí†µìš´ ëƒ‰ë™íƒë°°</option>
-          <option>ë¡¯ë°íƒë°° ëƒ‰ë™</option>
-          <option>í•œì§„íƒë°° ëƒ‰ë™</option>
+          <option>CJ대한통운 냉동택배</option>
+          <option>롯데택배 냉동</option>
+          <option>한진택배 냉동</option>
         </select>
       </div>
-      <div class="form-row"><div class="form-label">ì¶œí•˜ ë©”ëª¨</div><textarea class="form-input" rows="2" placeholder="íŠ¹ì´ì‚¬í•­ ì—†ìœ¼ë©´ ìƒëžµ"></textarea></div>
-      <button onclick="confirmShipment()" class="btn-primary">ðŸš› ì¶œí•˜ í™•ì • Â· ìž¬ê³  ë°˜ì˜</button>
-      <button onclick="closeShipPanel()" class="btn-secondary" style="width:100%;margin-top:8px">ì·¨ì†Œ</button>
+      <div class="form-row"><div class="form-label">출하 메모</div><textarea class="form-input" rows="2" placeholder="특이사항 없으면 생략"></textarea></div>
+      <button onclick="confirmShipment()" class="btn-primary">🚛 출하 확정 · 재고 반영</button>
+      <button onclick="closeShipPanel()" class="btn-secondary" style="width:100%;margin-top:8px">취소</button>
     </div>
   </div>
 </div>
 
-<!-- íê¸° í™•ì¸ ë‹¤ì´ì–¼ë¡œê·¸ -->
+<!-- 폐기 확인 다이얼로그 -->
 <div id="dlg-dispose" class="dlg-overlay">
   <div class="dlg-box">
-    <div class="dlg-icon">ðŸ—‘ï¸</div>
-    <div class="dlg-title">íê¸° ì²˜ë¦¬ í™•ì¸</div>
-    <div class="dlg-sub" id="dlg-dispose-msg">ì´ í’ˆëª©ì„ íê¸° ì²˜ë¦¬í•˜ì‹œê² ìŠµë‹ˆê¹Œ?<br>ì²˜ë¦¬ í›„ ìˆ˜ë¶ˆì¶œì´ë ¥ì— ê¸°ë¡ë©ë‹ˆë‹¤.</div>
+    <div class="dlg-icon">🗑️</div>
+    <div class="dlg-title">폐기 처리 확인</div>
+    <div class="dlg-sub" id="dlg-dispose-msg">이 품목을 폐기 처리하시겠습니까?<br>처리 후 수불출이력에 기록됩니다.</div>
     <div class="dlg-btns">
-      <button class="dlg-btn-cancel" onclick="closeDlg('dlg-dispose')">ì·¨ì†Œ</button>
-      <button class="dlg-btn-confirm" id="dlg-dispose-confirm">íê¸° í™•ì •</button>
+      <button class="dlg-btn-cancel" onclick="closeDlg('dlg-dispose')">취소</button>
+      <button class="dlg-btn-confirm" id="dlg-dispose-confirm">폐기 확정</button>
     </div>
   </div>
 </div>
 
-<!-- ì™„ë£Œ WO QR ë¼ë²¨ ì‹œíŠ¸ -->
+<!-- 완료 WO QR 라벨 시트 -->
 <div id="qr-sheet-overlay" class="qr-sheet-overlay">
   <div class="qr-sheet-panel">
     <div class="modal-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="modal-title" style="margin-bottom:0" id="qr-sheet-title">QR ë¼ë²¨ ì¶œë ¥</div>
-      <button onclick="document.getElementById('qr-sheet-overlay').classList.remove('open')" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-sub)">âœ•</button>
+      <div class="modal-title" style="margin-bottom:0" id="qr-sheet-title">QR 라벨 출력</div>
+      <button onclick="document.getElementById('qr-sheet-overlay').classList.remove('open')" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-sub)">✕</button>
     </div>
-    <div style="background:#f0fdf4;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#166534" id="qr-sheet-info">â€”</div>
+    <div style="background:#f0fdf4;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#166534" id="qr-sheet-info">—</div>
     <div id="qr-sheet-labels" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px"></div>
-    <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">ðŸ–¨ï¸ ë¼ë²¨ í”„ë¦°í„° ì¶œë ¥</button>
-    <button onclick="document.getElementById('qr-sheet-overlay').classList.remove('open')" class="btn-secondary" style="width:100%">ë‹«ê¸°</button>
+    <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">🖨️ 라벨 프린터 출력</button>
+    <button onclick="document.getElementById('qr-sheet-overlay').classList.remove('open')" class="btn-secondary" style="width:100%">닫기</button>
   </div>
 </div>
 
 <script>
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// CONFIG â€” Google Workspace
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
+// CONFIG — Google Workspace
+// ═══════════════════════════════════
 const GWS_CONFIG = {
-  clientId: '905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com', // Google Cloud Consoleì—ì„œ ë°œê¸‰
-  allowedDomain: 'anghodu.biz',  // ì‚¬ë‚´ Workspace ë„ë©”ì¸
-  adminEmails: [], // ê´€ë¦¬ìž ì´ë©”ì¼ ëª©ë¡ (ë¹„ì–´ìžˆìœ¼ë©´ ë„ë©”ì¸ ì „ì²´ ìž‘ì—…ìžë¡œ ì²˜ë¦¬)
+  clientId: '905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com',
+  allowedDomain: 'anghodu.biz',  // 사내 Workspace 도메인
+  adminEmails: [], // 관리자 이메일 목록 (비어있으면 도메인 전체 작업자로 처리)
 };
 
-// â”€â”€â”€ ë¡œê·¸ì¸ ìƒíƒœ â”€â”€â”€
+// ─── 로그인 상태 ───
 let currentUser = null;
 let currentRole = 'worker'; // 'admin' | 'worker'
 
-// â”€â”€â”€ Google Identity Services ì´ˆê¸°í™” â”€â”€â”€
+// ─── Google Identity Services 초기화 ───
 function initGoogleSignIn() {
   if (typeof google === 'undefined') {
     setTimeout(initGoogleSignIn, 300);
@@ -777,7 +777,7 @@ function initGoogleSignIn() {
     callback: handleGoogleLogin,
     auto_select: false,
     cancel_on_tap_outside: false,
-    hd: GWS_CONFIG.allowedDomain,  // Google Workspace ë„ë©”ì¸ ì œí•œ
+    hd: GWS_CONFIG.allowedDomain,  // Google Workspace 도메인 제한
   });
   google.accounts.id.renderButton(
     document.getElementById('google-btn-wrapper'),
@@ -792,7 +792,7 @@ function handleGoogleLogin(response) {
     const email = payload.email || '';
     const domain = email.split('@')[1] || '';
     if (GWS_CONFIG.allowedDomain && domain !== GWS_CONFIG.allowedDomain) {
-      alert('âš ï¸ ì‚¬ë‚´(' + GWS_CONFIG.allowedDomain + ') Google Workspace ê³„ì •ë§Œ ë¡œê·¸ì¸ ê°€ëŠ¥í•©ë‹ˆë‹¤.');
+      alert('⚠️ 사내(' + GWS_CONFIG.allowedDomain + ') Google Workspace 계정만 로그인 가능합니다.');
       return;
     }
     currentUser = {
@@ -811,14 +811,14 @@ function handleGoogleLogin(response) {
     finishLogin();
   } catch(e) {
     console.error('Login parse error:', e);
-    alert('ë¡œê·¸ì¸ ì²˜ë¦¬ ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤. ë‹¤ì‹œ ì‹œë„í•´ ì£¼ì„¸ìš”.');
+    alert('로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
   }
 }
 
 function finishLogin() {
   if (!currentUser) return;
   // Update topbar
-  document.getElementById('topbar-name').textContent = currentUser.name + ' (' + (currentRole === 'admin' ? 'ê´€ë¦¬ìž' : 'ìž‘ì—…ìž') + ')';
+  document.getElementById('topbar-name').textContent = currentUser.name + ' (' + (currentRole === 'admin' ? '관리자' : '작업자') + ')';
   const avatar = document.getElementById('topbar-avatar');
   if (currentUser.picture) { avatar.src = currentUser.picture; avatar.style.display = 'block'; }
   // Update login overlay display
@@ -826,7 +826,7 @@ function finishLogin() {
   document.getElementById('login-name').textContent = currentUser.name;
   document.getElementById('login-email').textContent = currentUser.email;
   const roleBadge = document.getElementById('login-role-badge');
-  roleBadge.textContent = currentRole === 'admin' ? 'ðŸ‘‘ ê´€ë¦¬ìž' : 'ðŸ”§ ìž‘ì—…ìž';
+  roleBadge.textContent = currentRole === 'admin' ? '👑 관리자' : '🔧 작업자';
   roleBadge.className = 'pill ' + (currentRole === 'admin' ? 'pill-blue' : 'pill-ok');
   // Hide login overlay
   document.getElementById('login-overlay').style.display = 'none';
@@ -836,16 +836,16 @@ function finishLogin() {
 }
 
 function logoutGoogle() {
-  if (!confirm('ë¡œê·¸ì•„ì›ƒ í•˜ì‹œê² ìŠµë‹ˆê¹Œ?')) return;
+  if (!confirm('로그아웃 하시겠습니까?')) return;
   currentUser = null; currentRole = 'worker';
   if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
   location.reload();
 }
 
-// â”€â”€â”€ DEV MODE: auto-login for demo â”€â”€â”€
-// (Comment out in production â€” requires real Google Client ID)
+// ─── DEV MODE: auto-login for demo ───
+// (Comment out in production — requires real Google Client ID)
 function devAutoLogin() {
-  currentUser = { name: 'ì´ìƒì—°', email: 'sangyeon@anghodu.biz', picture: '' };
+  currentUser = { name: '이상연', email: 'sangyeon@anghodu.biz', picture: '' };
   currentRole = 'worker';
   finishLogin();
 }
@@ -860,15 +860,15 @@ window.addEventListener('load', () => {
       // Show fallback login button
       const wrapper = document.getElementById('google-btn-wrapper');
       if (!wrapper.querySelector('iframe') && !wrapper.querySelector('button')) {
-        wrapper.innerHTML = '<button onclick="devAutoLogin()" style="background:#1e40af;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer;width:100%">ðŸ” í…ŒìŠ¤íŠ¸ ë¡œê·¸ì¸ (ê°œë°œìš©)</button>';
+        wrapper.innerHTML = '<button onclick="devAutoLogin()" style="background:#1e40af;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer;width:100%">🔐 테스트 로그인 (개발용)</button>';
       }
     }
   }, 3000);
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // QR CAMERA SCANNER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 let qrStream = null;
 let qrScanTarget = 'inv'; // 'inv' | 'wo'
 let qrAnimFrame = null;
@@ -877,7 +877,7 @@ function openQRCamera(target) {
   qrScanTarget = target || 'inv';
   const modal = document.getElementById('qr-camera-modal');
   modal.classList.add('open');
-  document.getElementById('qr-cam-result').textContent = 'ìŠ¤ìº” ëŒ€ê¸° ì¤‘...';
+  document.getElementById('qr-cam-result').textContent = '스캔 대기 중...';
   const video = document.getElementById('qr-video');
   navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
     .then(stream => {
@@ -887,7 +887,7 @@ function openQRCamera(target) {
       video.addEventListener('loadedmetadata', startQRScan, { once: true });
     })
     .catch(err => {
-      document.getElementById('qr-cam-result').textContent = 'ì¹´ë©”ë¼ ê¶Œí•œì´ í•„ìš”í•©ë‹ˆë‹¤: ' + err.message;
+      document.getElementById('qr-cam-result').textContent = '카메라 권한이 필요합니다: ' + err.message;
     });
 }
 
@@ -917,7 +917,7 @@ function handleQRResult(data) {
   if (qrScanTarget === 'inv') {
     document.getElementById('inv-scan-input').value = data;
     processInvScan();
-    showToast('ðŸ“· QR ìŠ¤ìº” ì™„ë£Œ: ' + data.substring(0, 30) + '...');
+    showToast('📷 QR 스캔 완료: ' + data.substring(0, 30) + '...');
   } else if (qrScanTarget === 'wo') {
     // For work order ingredient scan
     const idx = parseInt(document.getElementById('qr-camera-modal').dataset.woIdx || '0');
@@ -932,16 +932,16 @@ function closeQRCamera() {
   if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// LOT INVENTORY DATA (ì›ìž¬ë£Œ LOT)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
+// LOT INVENTORY DATA (원재료 LOT)
+// ═══════════════════════════════════
 let RAW_LOTS = [
   {
     lotId: 'L-H02-20260325',
     matId: 'MAT-H02',
     rcvDate: '2026-03-25',
     expiry: '2026-04-15',
-    supplier: '(ì£¼)ìžì—°ë†ì›',
+    supplier: '(주)자연농원',
     units: [
       { seq: '001', status: 'available' },
       { seq: '002', status: 'used' },
@@ -953,7 +953,7 @@ let RAW_LOTS = [
     matId: 'MAT-H03',
     rcvDate: '2026-03-20',
     expiry: '2027-03-20',
-    supplier: '(ì£¼)ì‹í’ˆì›ë£Œ',
+    supplier: '(주)식품원료',
     units: [
       { seq: '001', status: 'used' },
       { seq: '002', status: 'used' },
@@ -966,7 +966,7 @@ let RAW_LOTS = [
     matId: 'MAT-H04',
     rcvDate: '2026-03-01',
     expiry: '2028-03-01',
-    supplier: '(ì£¼)ì‹í’ˆì›ë£Œ',
+    supplier: '(주)식품원료',
     units: [
       { seq: '001', status: 'available' },
       { seq: '002', status: 'available' },
@@ -979,7 +979,7 @@ let RAW_LOTS = [
     matId: 'MAT-H05',
     rcvDate: '2026-03-10',
     expiry: '2028-03-10',
-    supplier: '(ì£¼)ë™ì•„ì „ë¶„',
+    supplier: '(주)동아전분',
     units: [
       { seq: '001', status: 'used' },
       { seq: '002', status: 'available' },
@@ -998,7 +998,7 @@ let FG_LOTS = [
     batches: 3,
     status: 'shippable',
     frozenAt: '07:30',
-    approvedBy: 'ë°•ê´€ë¦¬ìž',
+    approvedBy: '박관리자',
     units: [
       { seq: '001', status: 'available' },
       { seq: '002', status: 'available' },
@@ -1013,7 +1013,7 @@ let FG_LOTS = [
     batches: 5,
     status: 'freezing',
     frozenAt: '10:10',
-    approvedBy: 'ë°•ê´€ë¦¬ìž',
+    approvedBy: '박관리자',
     units: [
       { seq: '001', status: 'freezing' },
       { seq: '002', status: 'freezing' },
@@ -1035,40 +1035,40 @@ function renderRawLotInventory() {
     const exp = new Date(lot.expiry);
     const dLeft = Math.ceil((exp - today) / 864e5);
     const expColor = dLeft <= 7 ? 'var(--danger)' : dLeft <= 30 ? 'var(--warning)' : 'var(--success)';
-    const expLabel = dLeft <= 0 ? 'âŒ ë§Œë£Œ' : dLeft <= 7 ? `ðŸ”´ D-${dLeft}` : dLeft <= 30 ? `ðŸŸ  D-${dLeft}` : `âœ… D-${dLeft}`;
+    const expLabel = dLeft <= 0 ? '❌ 만료' : dLeft <= 7 ? `🔴 D-${dLeft}` : dLeft <= 30 ? `🟠 D-${dLeft}` : `✅ D-${dLeft}`;
     const statusPill = available === 0
-      ? '<span class="pill pill-gray">ì†Œì§„</span>'
-      : `<span class="pill pill-ok">${available}/${lot.units.length} ìž¬ê³ </span>`;
+      ? '<span class="pill pill-gray">소진</span>'
+      : `<span class="pill pill-ok">${available}/${lot.units.length} 재고</span>`;
     html += `<div class="lot-card" id="raw-lot-${i}" style="border-left-color:${expColor}">
       <div class="lot-card-head" onclick="toggleLotCard('raw-lot-${i}')">
-        <div class="lot-card-icon" style="background:#f9fafb">${master.icon||'ðŸ“¦'}</div>
+        <div class="lot-card-icon" style="background:#f9fafb">${master.icon||'📦'}</div>
         <div class="lot-card-info">
           <div class="lot-card-name">${master.name || lot.matId}</div>
-          <div class="lot-card-meta">${lot.lotId} Â· ìœ í†µê¸°í•œ ${lot.expiry} <span style="color:${expColor};font-weight:700">${expLabel}</span></div>
+          <div class="lot-card-meta">${lot.lotId} · 유통기한 ${lot.expiry} <span style="color:${expColor};font-weight:700">${expLabel}</span></div>
         </div>
         ${statusPill}
-        <div class="lot-card-arrow">â€º</div>
+        <div class="lot-card-arrow">›</div>
       </div>
       <div class="lot-card-body">
         <div class="lot-detail-grid">
-          <div class="lot-detail-item"><span class="lot-detail-key">ìž…ê³ ì¼</span><span class="lot-detail-val">${lot.rcvDate}</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ê³µê¸‰ì—…ì²´</span><span class="lot-detail-val">${lot.supplier}</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìœ í†µê¸°í•œ</span><span class="lot-detail-val" style="color:${expColor}">${lot.expiry}</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìž¬ê³  í˜„í™©</span><span class="lot-detail-val">${available}/${lot.units.length} ${master.unitLabel||'ê°œ'}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">입고일</span><span class="lot-detail-val">${lot.rcvDate}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">공급업체</span><span class="lot-detail-val">${lot.supplier}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">유통기한</span><span class="lot-detail-val" style="color:${expColor}">${lot.expiry}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">재고 현황</span><span class="lot-detail-val">${available}/${lot.units.length} ${master.unitLabel||'개'}</span></div>
         </div>
-        <div style="font-size:11px;font-weight:700;margin-bottom:6px">ë‹¨ìœ„ ë¼ë²¨ ìž¬í”„ë¦°íŠ¸</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:6px">단위 라벨 재프린트</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
           ${lot.units.map(u => {
             const qrStr = 'MTT|RM|' + lot.matId + '|' + lot.lotId + '-' + u.seq + '|' + lot.expiry.replace(/-/g,'');
             const statusCls = u.status === 'available' ? 'pill-ok' : 'pill-gray';
-            const statusTxt = u.status === 'available' ? 'ìž¬ê³ ' : 'ì‚¬ìš©ë¨';
+            const statusTxt = u.status === 'available' ? '재고' : '사용됨';
             return `<div style="background:#f9fafb;border-radius:8px;padding:8px;text-align:center;border:1px solid #e5e7eb">
               <div style="font-size:9px;font-family:monospace;color:var(--text-sub);margin-bottom:4px">#${u.seq}</div>
               <span class="pill ${statusCls}" style="font-size:9px">${statusTxt}</span>
             </div>`;
           }).join('')}
         </div>
-        <button class="btn-reprint" onclick="reprintRawLotLabels(${i})">ðŸ–¨ï¸ LOT ë¼ë²¨ ì „ì²´ ìž¬í”„ë¦°íŠ¸ (${lot.units.length}ìž¥)</button>
+        <button class="btn-reprint" onclick="reprintRawLotLabels(${i})">🖨️ LOT 라벨 전체 재프린트 (${lot.units.length}장)</button>
       </div>
     </div>`;
   });
@@ -1088,40 +1088,40 @@ function renderFGLotInventory() {
     const dLeft = Math.ceil((exp - today) / 864e5);
     const expColor = dLeft <= 30 ? 'var(--warning)' : 'var(--success)';
     const statusInfo = lot.status === 'shippable'
-      ? { color: 'var(--success)', label: 'â„ï¸ ì¶œí•˜ê°€ëŠ¥', pill: '<span class="pill pill-approve">ì¶œí•˜ê°€ëŠ¥</span>' }
-      : { color: '#7c3aed', label: 'â„ï¸ ëƒ‰ë™ì¤‘', pill: '<span class="pill" style="background:#ede9fe;color:#5b21b6">ëƒ‰ë™ì¤‘</span>' };
+      ? { color: 'var(--success)', label: '❄️ 출하가능', pill: '<span class="pill pill-approve">출하가능</span>' }
+      : { color: '#7c3aed', label: '❄️ 냉동중', pill: '<span class="pill" style="background:#ede9fe;color:#5b21b6">냉동중</span>' };
     html += `<div class="lot-card" id="fg-lot-${i}" style="border-left-color:${statusInfo.color}">
       <div class="lot-card-head" onclick="toggleLotCard('fg-lot-${i}')">
-        <div class="lot-card-icon" style="background:#f0fdf4">${master.icon||'ðŸ¡'}</div>
+        <div class="lot-card-icon" style="background:#f0fdf4">${master.icon||'🍡'}</div>
         <div class="lot-card-info">
           <div class="lot-card-name">${master.name || lot.matId}</div>
-          <div class="lot-card-meta">${lot.lotId} Â· ìƒì‚° ${lot.prodDate}</div>
+          <div class="lot-card-meta">${lot.lotId} · 생산 ${lot.prodDate}</div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${statusInfo.pill}<span style="font-size:10px;color:var(--text-sub)">${available}ë´‰</span></div>
-        <div class="lot-card-arrow">â€º</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${statusInfo.pill}<span style="font-size:10px;color:var(--text-sub)">${available}봉</span></div>
+        <div class="lot-card-arrow">›</div>
       </div>
       <div class="lot-card-body">
         <div class="lot-detail-grid">
-          <div class="lot-detail-item"><span class="lot-detail-key">ìƒì‚°ì¼</span><span class="lot-detail-val">${lot.prodDate}</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ëƒ‰ë™ ì‹œìž‘</span><span class="lot-detail-val">${lot.frozenAt}</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìœ í†µê¸°í•œ</span><span class="lot-detail-val">${lot.expiry} (D-${dLeft})</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìŠ¹ì¸ìž</span><span class="lot-detail-val" style="color:var(--success)">${lot.approvedBy} âœ…</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìž¬ê³  í˜„í™©</span><span class="lot-detail-val">${available}/${lot.units.length}ë´‰</span></div>
-          <div class="lot-detail-item"><span class="lot-detail-key">ìƒíƒœ</span><span class="lot-detail-val">${statusInfo.label}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">생산일</span><span class="lot-detail-val">${lot.prodDate}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">냉동 시작</span><span class="lot-detail-val">${lot.frozenAt}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">유통기한</span><span class="lot-detail-val">${lot.expiry} (D-${dLeft})</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">승인자</span><span class="lot-detail-val" style="color:var(--success)">${lot.approvedBy} ✅</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">재고 현황</span><span class="lot-detail-val">${available}/${lot.units.length}봉</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">상태</span><span class="lot-detail-val">${statusInfo.label}</span></div>
         </div>
-        <div style="font-size:11px;font-weight:700;margin-bottom:6px">ë´‰ë³„ ë¼ë²¨ ìž¬í”„ë¦°íŠ¸</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:6px">봉별 라벨 재프린트</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
           ${lot.units.map(u => {
             const qrStr = 'MTT|FG|' + lot.matId + '|FP-' + lot.lotId + '-' + u.seq + '|' + lot.expiry.replace(/-/g,'');
             const statusCls = u.status === 'available' ? 'pill-approve' : u.status === 'freezing' ? '' : 'pill-gray';
-            const statusTxt = u.status === 'available' ? 'ì¶œí•˜ê°€ëŠ¥' : u.status === 'freezing' ? 'ëƒ‰ë™ì¤‘' : 'ì¶œí•˜ë¨';
+            const statusTxt = u.status === 'available' ? '출하가능' : u.status === 'freezing' ? '냉동중' : '출하됨';
             return `<div style="background:#f9fafb;border-radius:8px;padding:8px;text-align:center;border:1px solid #e5e7eb">
               <div style="font-size:9px;font-family:monospace;color:var(--text-sub);margin-bottom:4px">#${u.seq}</div>
               <span class="pill ${statusCls}" style="font-size:9px;background:${u.status==='freezing'?'#ede9fe':'undefined'};color:${u.status==='freezing'?'#5b21b6':'undefined'}">${statusTxt}</span>
             </div>`;
           }).join('')}
         </div>
-        <button class="btn-reprint" onclick="reprintFGLotLabels(${i})">ðŸ–¨ï¸ LOT ë¼ë²¨ ì „ì²´ ìž¬í”„ë¦°íŠ¸ (${lot.units.length}ìž¥)</button>
+        <button class="btn-reprint" onclick="reprintFGLotLabels(${i})">🖨️ LOT 라벨 전체 재프린트 (${lot.units.length}장)</button>
       </div>
     </div>`;
   });
@@ -1137,57 +1137,57 @@ function toggleLotCard(id) {
 function reprintRawLotLabels(idx) {
   const lot = RAW_LOTS[idx];
   if (!lot) return;
-  showToast('ðŸ–¨ï¸ ' + lot.lotId + ' ë¼ë²¨ ' + lot.units.length + 'ìž¥ í”„ë¦°í„° ì „ì†¡ ì™„ë£Œ');
+  showToast('🖨️ ' + lot.lotId + ' 라벨 ' + lot.units.length + '장 프린터 전송 완료');
 }
 
 function reprintFGLotLabels(idx) {
   const lot = FG_LOTS[idx];
   if (!lot) return;
-  showToast('ðŸ–¨ï¸ ' + lot.lotId + ' ë¼ë²¨ ' + lot.units.length + 'ìž¥ í”„ë¦°í„° ì „ì†¡ ì™„ë£Œ');
+  showToast('🖨️ ' + lot.lotId + ' 라벨 ' + lot.units.length + '장 프린터 전송 완료');
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // MASTER DATA
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 const ITEM_DB = {
-  'MAT-H01':{name:'ì •ì œìˆ˜',icon:'ðŸ’§',supplier:'ìžì²´(ì •ì œìˆ˜ì‹œìŠ¤í…œ)',pkg:'20L/í†µ',storage:'ìƒì˜¨',shelfDays:0,unitLabel:'í†µ'},
-  'MAT-H02':{name:'ê³„ëž€ ì „ëž€',icon:'ðŸ¥š',supplier:'(ì£¼)ìžì—°ë†ì›',pkg:'1kg/íŒ',storage:'5Â°C ì´í•˜ ëƒ‰ìž¥',shelfDays:21,unitLabel:'íŒ'},
-  'MAT-H03':{name:'í˜¸ë‘ê³¼ìž í”„ë¦¬ë¯¹ìŠ¤1',icon:'ðŸŒ¾',supplier:'(ì£¼)ì‹í’ˆì›ë£Œ',pkg:'20kg/í¬ëŒ€',storage:'ìƒì˜¨Â·ê±´ì¡°',shelfDays:365,unitLabel:'í¬ëŒ€'},
-  'MAT-H04':{name:'í˜¸ë‘ê³¼ìž í”„ë¦¬ë¯¹ìŠ¤2',icon:'ðŸ§ª',supplier:'(ì£¼)ì‹í’ˆì›ë£Œ',pkg:'5kg/ë´‰',storage:'ìƒì˜¨Â·ê±´ì¡°',shelfDays:730,unitLabel:'ë´‰'},
-  'MAT-H05':{name:'íƒ€í”¼ì˜¤ì¹´ì „ë¶„',icon:'ðŸ¥„',supplier:'(ì£¼)ë™ì•„ì „ë¶„',pkg:'20kg/í¬ëŒ€',storage:'ìƒì˜¨Â·ê±´ì¡°',shelfDays:730,unitLabel:'í¬ëŒ€'},
-  'FG-HDR':{name:'í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg',icon:'ðŸ¡',supplier:'ìžì²´ìƒì‚°',pkg:'5kg/ë´‰',storage:'ëƒ‰ë™(-18Â°C)',shelfDays:270,unitLabel:'ë´‰'}
+  'MAT-H01':{name:'정제수',icon:'💧',supplier:'자체(정제수시스템)',pkg:'20L/통',storage:'상온',shelfDays:0,unitLabel:'통'},
+  'MAT-H02':{name:'계란 전란',icon:'🥚',supplier:'(주)자연농원',pkg:'1kg/판',storage:'5°C 이하 냉장',shelfDays:21,unitLabel:'판'},
+  'MAT-H03':{name:'호두과자 프리믹스1',icon:'🌾',supplier:'(주)식품원료',pkg:'20kg/포대',storage:'상온·건조',shelfDays:365,unitLabel:'포대'},
+  'MAT-H04':{name:'호두과자 프리믹스2',icon:'🧪',supplier:'(주)식품원료',pkg:'5kg/봉',storage:'상온·건조',shelfDays:730,unitLabel:'봉'},
+  'MAT-H05':{name:'타피오카전분',icon:'🥄',supplier:'(주)동아전분',pkg:'20kg/포대',storage:'상온·건조',shelfDays:730,unitLabel:'포대'},
+  'FG-HDR':{name:'호두과자 전용반죽 5kg',icon:'🍡',supplier:'자체생산',pkg:'5kg/봉',storage:'냉동(-18°C)',shelfDays:270,unitLabel:'봉'}
 };
-// ë ˆì‹œí”¼: 5kg ë°°ì¹˜ 1ê°œ ê¸°ì¤€
+// 레시피: 5kg 배치 1개 기준
 const RECIPE_HDR = {
   batches_per_lot: 1,
   perBatch5kg: [
-    {itemId:'MAT-H01',name:'ì •ì œìˆ˜',icon:'ðŸ’§',amount:1250,unit:'mL',unitsNeeded:1,note:'ê³„ëŸ‰ í›„ ë°°í•©ê¸° íˆ¬ìž…'},
-    {itemId:'MAT-H02',name:'ê³„ëž€ ì „ëž€',icon:'ðŸ¥š',amount:600,unit:'g',unitsNeeded:1,note:'ì‹¤ì˜¨ 30ë¶„ ì „ì²˜ë¦¬ í›„ ì‚¬ìš©'},
-    {itemId:'MAT-H03',name:'í”„ë¦¬ë¯¹ìŠ¤1',icon:'ðŸŒ¾',amount:2400,unit:'g',unitsNeeded:1,note:'í¬ëŒ€ ì¼ë¶€ ì‚¬ìš© ê°€ëŠ¥'},
-    {itemId:'MAT-H04',name:'í”„ë¦¬ë¯¹ìŠ¤2',icon:'ðŸ§ª',amount:500,unit:'g',unitsNeeded:1,note:'ì†Œë¶„ ë´‰ ì¼ë¶€ ì‚¬ìš© ê°€ëŠ¥'},
-    {itemId:'MAT-H05',name:'íƒ€í”¼ì˜¤ì¹´ì „ë¶„',icon:'ðŸ¥„',amount:250,unit:'g',unitsNeeded:1,note:'í¬ëŒ€ ì¼ë¶€ ì‚¬ìš© ê°€ëŠ¥'}
+    {itemId:'MAT-H01',name:'정제수',icon:'💧',amount:1250,unit:'mL',unitsNeeded:1,note:'계량 후 배합기 투입'},
+    {itemId:'MAT-H02',name:'계란 전란',icon:'🥚',amount:600,unit:'g',unitsNeeded:1,note:'실온 30분 전처리 후 사용'},
+    {itemId:'MAT-H03',name:'프리믹스1',icon:'🌾',amount:2400,unit:'g',unitsNeeded:1,note:'포대 일부 사용 가능'},
+    {itemId:'MAT-H04',name:'프리믹스2',icon:'🧪',amount:500,unit:'g',unitsNeeded:1,note:'소분 봉 일부 사용 가능'},
+    {itemId:'MAT-H05',name:'타피오카전분',icon:'🥄',amount:250,unit:'g',unitsNeeded:1,note:'포대 일부 사용 가능'}
   ]
 };
-// ìž„ì‹œ LOT ìž¬ê³  (scan demo)
+// 임시 LOT 재고 (scan demo)
 const LOT_INVENTORY = {
   'MTT|RM|MAT-H03|L-H03-20260320-003|20270320':
     {matId:'MAT-H03',batchLot:'L-H03-20260320',unitSeq:'003',rcvDate:'2026-03-20',expiry:'2027-03-20',status:'normal'},
   'MTT|RM|MAT-H02|L-H02-20260325-001|20260415':
     {matId:'MAT-H02',batchLot:'L-H02-20260325',unitSeq:'001',rcvDate:'2026-03-25',expiry:'2026-04-15',status:'normal'},
   'MTT|FG|FG-HDR|FP-20260327-HDR-001|20261227':
-    {matId:'FG-HDR',batchLot:'FP-20260327-HDR',unitSeq:'001',rcvDate:'2026-03-27',expiry:'2026-12-27',status:'normal',prodLot:'WL-20260327-HDR-001',approvedBy:'ë°•ê´€ë¦¬ìž',approvedAt:'2026-03-27 07:25'}
+    {matId:'FG-HDR',batchLot:'FP-20260327-HDR',unitSeq:'001',rcvDate:'2026-03-27',expiry:'2026-12-27',status:'normal',prodLot:'WL-20260327-HDR-001',approvedBy:'박관리자',approvedAt:'2026-03-27 07:25'}
 };
 
-// ì¶œí•˜ ê°€ëŠ¥ LOT (ëƒ‰ë™ ì™„ë£Œëœ ê²ƒ)
+// 출하 가능 LOT (냉동 완료된 것)
 let SHIP_READY_LOTS = [
   {lot:'WL-20260327-HDR-001',qty:3,totalKg:15,prodDate:'2026-03-27',frozenAt:'07:30',readyAt:'2026-03-27 19:30',expiry:'2026-12-27'}
 ];
-// ì™„ë£Œëœ ìž‘ì—…ì§€ì‹œì„œ (ê´€ë¦¬ìž ìŠ¹ì¸ ì™„ë£Œ)
+// 완료된 작업지시서 (관리자 승인 완료)
 let COMPLETED_LOTS = [];
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // CONFIRM DIALOG UTIL
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 function closeDlg(id){ document.getElementById(id).classList.remove('open'); }
 function confirmDispose(msg, onConfirm){
   document.getElementById('dlg-dispose-msg').innerHTML = msg;
@@ -1196,9 +1196,9 @@ function confirmDispose(msg, onConfirm){
   btn.onclick = ()=>{ closeDlg('dlg-dispose'); onConfirm(); };
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // NAV & UTIL
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 function showTab(tab, el) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+tab).classList.add('active');
@@ -1207,7 +1207,7 @@ function showTab(tab, el) {
 }
 function toggleCheck(el) {
   el.classList.toggle('checked');
-  if(el.classList.contains('checked')) el.textContent='âœ“'; else el.textContent='';
+  if(el.classList.contains('checked')) el.textContent='✓'; else el.textContent='';
 }
 let _toastTimer;
 function showToast(msg) {
@@ -1215,16 +1215,16 @@ function showToast(msg) {
   clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>t.classList.remove('show'),2800);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// ìž¬ê³  QR ìŠ¤ìº” ì²˜ë¦¬
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
+// 재고 QR 스캔 처리
+// ═══════════════════════════════════
 let currentScanData = null;
 function invSample(code) { document.getElementById('inv-scan-input').value=code; processInvScan(); }
 function processInvScan() {
   const code = document.getElementById('inv-scan-input').value.trim();
-  if(!code){showToast('QR ì½”ë“œë¥¼ ìž…ë ¥í•˜ì„¸ìš”');return;}
+  if(!code){showToast('QR 코드를 입력하세요');return;}
   const lotRec = LOT_INVENTORY[code];
-  if(!lotRec){showToast('âŒ ë“±ë¡ë˜ì§€ ì•Šì€ QR ì½”ë“œ');return;}
+  if(!lotRec){showToast('❌ 등록되지 않은 QR 코드');return;}
   const master = ITEM_DB[lotRec.matId];
   if(!master){return;}
   currentScanData = {code,lotRec,master};
@@ -1233,29 +1233,29 @@ function processInvScan() {
   const isExpired=dLeft<=0;
   const isFG=code.split('|')[1]==='FG';
   const barColor=isExpired?'var(--danger)':dLeft<=7?'var(--danger)':dLeft<=30?'var(--warning)':'var(--success)';
-  const barLabel=isExpired?'ðŸ”´ ë§Œë£Œ':dLeft<=7?`ðŸ”´ D-${dLeft} ìž„ë°•`:dLeft<=30?`ðŸŸ  D-${dLeft} ì£¼ì˜`:`âœ… D-${dLeft}`;
+  const barLabel=isExpired?'🔴 만료':dLeft<=7?`🔴 D-${dLeft} 임박`:dLeft<=30?`🟠 D-${dLeft} 주의`:`✅ D-${dLeft}`;
   const pct=Math.max(0,Math.min(100,(dLeft/(master.shelfDays||270))*100));
   let fgBanner='';
   if(isFG&&lotRec.prodLot){
     fgBanner=`<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px">
-      <div style="font-weight:700;color:var(--primary);margin-bottom:4px">ðŸ­ ìƒì‚° ì´ë ¥</div>
+      <div style="font-weight:700;color:var(--primary);margin-bottom:4px">🏭 생산 이력</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;color:var(--text-sub)">
-        <span>ìƒì‚° LOT</span><b style="font-family:monospace">${lotRec.prodLot}</b>
-        <span>ìŠ¹ì¸ìž</span><b style="color:var(--success)">${lotRec.approvedBy} âœ…</b>
-        <span>ìŠ¹ì¸ì¼ì‹œ</span><b>${lotRec.approvedAt}</b>
+        <span>생산 LOT</span><b style="font-family:monospace">${lotRec.prodLot}</b>
+        <span>승인자</span><b style="color:var(--success)">${lotRec.approvedBy} ✅</b>
+        <span>승인일시</span><b>${lotRec.approvedAt}</b>
       </div></div>`;
   }
   const btns = isFG ?
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <button onclick="doInvAction('ship')" style="padding:12px;border:2px solid #93c5fd;border-radius:10px;background:#f0f9ff;font-size:13px;font-weight:700;cursor:pointer;color:#0369a1">ðŸš› ì¶œí•˜</button>
-      <button onclick="doInvAction('dispose')" style="padding:12px;border:2px solid #fca5a5;border-radius:10px;background:#fef2f2;font-size:13px;font-weight:700;cursor:pointer;color:var(--danger)">ðŸ—‘ï¸ íê¸°</button>
+      <button onclick="doInvAction('ship')" style="padding:12px;border:2px solid #93c5fd;border-radius:10px;background:#f0f9ff;font-size:13px;font-weight:700;cursor:pointer;color:#0369a1">🚛 출하</button>
+      <button onclick="doInvAction('dispose')" style="padding:12px;border:2px solid #fca5a5;border-radius:10px;background:#fef2f2;font-size:13px;font-weight:700;cursor:pointer;color:var(--danger)">🗑️ 폐기</button>
     </div>` :
     `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-      <button onclick="doInvAction('in')" style="padding:10px;border:2px solid #86efac;border-radius:10px;background:#f0fdf4;font-size:12px;font-weight:700;cursor:pointer;color:#166534">ðŸ“¥ ìž…ê³ </button>
-      <button onclick="doInvAction('out')" style="padding:10px;border:2px solid #93c5fd;border-radius:10px;background:#eff6ff;font-size:12px;font-weight:700;cursor:pointer;color:var(--primary)">ðŸ“¤ ë¶ˆì¶œ</button>
-      <button onclick="doInvAction('dispose')" style="padding:10px;border:2px solid #fca5a5;border-radius:10px;background:#fef2f2;font-size:12px;font-weight:700;cursor:pointer;color:var(--danger)">ðŸ—‘ï¸ íê¸°</button>
+      <button onclick="doInvAction('in')" style="padding:10px;border:2px solid #86efac;border-radius:10px;background:#f0fdf4;font-size:12px;font-weight:700;cursor:pointer;color:#166534">📥 입고</button>
+      <button onclick="doInvAction('out')" style="padding:10px;border:2px solid #93c5fd;border-radius:10px;background:#eff6ff;font-size:12px;font-weight:700;cursor:pointer;color:var(--primary)">📤 불출</button>
+      <button onclick="doInvAction('dispose')" style="padding:10px;border:2px solid #fca5a5;border-radius:10px;background:#fef2f2;font-size:12px;font-weight:700;cursor:pointer;color:var(--danger)">🗑️ 폐기</button>
     </div>`;
-  const note = isFG?'ì™„ì œí’ˆ: ì¶œí•˜ ë˜ëŠ” íê¸°ë§Œ ì„ íƒ ê°€ëŠ¥':'ì›ìž¬ë£Œ: ìŠ¤ìº” 1íšŒ = í¬ìž¥ë‹¨ìœ„ 1ê°œ ì²˜ë¦¬ (ìˆ˜ëŸ‰ ìž…ë ¥ ì—†ìŒ)';
+  const note = isFG?'완제품: 출하 또는 폐기만 선택 가능':'원재료: 스캔 1회 = 포장단위 1개 처리 (수량 입력 없음)';
   const noteColor = isFG?'#eff6ff':'#fffbeb';
   document.getElementById('inv-scan-result').style.display='block';
   document.getElementById('inv-scan-result').innerHTML=`
@@ -1267,14 +1267,14 @@ function processInvScan() {
       </div>
       ${fgBanner}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;margin-bottom:10px">
-        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">ë°°ì¹˜ LOT</span><b style="font-family:monospace;font-size:10px">${lotRec.batchLot}</b></div>
-        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">ë‹¨ìœ„ë²ˆí˜¸</span><b>#${lotRec.unitSeq}</b></div>
-        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">ìž…ê³ ì¼</span><b>${lotRec.rcvDate}</b></div>
-        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">ë³´ê´€</span><b style="font-size:10px">${master.storage}</b></div>
+        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">배치 LOT</span><b style="font-family:monospace;font-size:10px">${lotRec.batchLot}</b></div>
+        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">단위번호</span><b>#${lotRec.unitSeq}</b></div>
+        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">입고일</span><b>${lotRec.rcvDate}</b></div>
+        <div style="background:#f9fafb;border-radius:6px;padding:6px 8px"><span style="color:var(--text-sub);display:block">보관</span><b style="font-size:10px">${master.storage}</b></div>
       </div>
       <div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-          <span style="color:var(--text-sub)">ìœ í†µê¸°í•œ ${exp}</span><span style="color:${barColor};font-weight:700">${barLabel}</span>
+          <span style="color:var(--text-sub)">유통기한 ${exp}</span><span style="color:${barColor};font-weight:700">${barLabel}</span>
         </div>
         <div style="height:8px;background:#f3f4f6;border-radius:4px"><div style="height:8px;background:${barColor};border-radius:4px;width:${pct}%"></div></div>
       </div>
@@ -1286,7 +1286,7 @@ function doInvAction(action) {
   const d=currentScanData; if(!d) return;
   if(action==='dispose'){
     confirmDispose(
-      `<b>${d.master.icon} ${d.master.name} #${d.lotRec.unitSeq}</b><br>LOT: ${d.lotRec.batchLot}<br><br>ì´ í’ˆëª©ì„ íê¸° ì²˜ë¦¬í•˜ì‹œê² ìŠµë‹ˆê¹Œ?<br><span style="color:var(--danger)">ì²˜ë¦¬ í›„ ì·¨ì†Œê°€ ë¶ˆê°€í•©ë‹ˆë‹¤.</span>`,
+      `<b>${d.master.icon} ${d.master.name} #${d.lotRec.unitSeq}</b><br>LOT: ${d.lotRec.batchLot}<br><br>이 품목을 폐기 처리하시겠습니까?<br><span style="color:var(--danger)">처리 후 취소가 불가합니다.</span>`,
       ()=>_execInvAction(action, d)
     );
     return;
@@ -1294,8 +1294,8 @@ function doInvAction(action) {
   _execInvAction(action, d);
 }
 function _execInvAction(action, d){
-  const labels={in:'ìž…ê³ ',out:'ë¶ˆì¶œ',ship:'ì¶œí•˜',dispose:'íê¸°'};
-  const icons={in:'ðŸ“¥',out:'ðŸ“¤',ship:'ðŸš›',dispose:'ðŸ—‘ï¸'};
+  const labels={in:'입고',out:'불출',ship:'출하',dispose:'폐기'};
+  const icons={in:'📥',out:'📤',ship:'🚛',dispose:'🗑️'};
   const logList=document.getElementById('inv-log-list');
   const now=new Date(); const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
   const colors={in:'var(--success)',out:'var(--primary-light)',ship:'#0ea5e9',dispose:'var(--danger)'};
@@ -1304,14 +1304,14 @@ function _execInvAction(action, d){
   entry.innerHTML=`<span style="color:${colors[action]};font-weight:700">${icons[action]} ${labels[action]}</span><span style="color:#f8fafc;flex:1">${d.master.name} #${d.lotRec.unitSeq}</span><span style="color:#64748b;font-size:10px">${t}</span>`;
   logList.insertBefore(entry,logList.firstChild);
   while(logList.children.length>10) logList.removeChild(logList.lastChild);
-  showToast(`${icons[action]} ${d.master.name} #${d.lotRec.unitSeq} ${labels[action]} ì²˜ë¦¬ ì™„ë£Œ Â· ìˆ˜ë¶ˆì¶œì´ë ¥ ê¸°ë¡ë¨`);
+  showToast(`${icons[action]} ${d.master.name} #${d.lotRec.unitSeq} ${labels[action]} 처리 완료 · 수불출이력 기록됨`);
   document.getElementById('inv-scan-result').style.display='none';
   document.getElementById('inv-scan-input').value='';
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// ìž…ê³  ë“±ë¡ (RECEIVING)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
+// 입고 등록 (RECEIVING)
+// ═══════════════════════════════════
 let recvState = {itemId:'',qty:1};
 function openReceivingModal(){document.getElementById('recv-modal').classList.add('open'); recvGoStep(1);}
 function closeRecvModal(){document.getElementById('recv-modal').classList.remove('open');}
@@ -1325,7 +1325,7 @@ function onRecvItemSelect(val){
   document.getElementById('recv-supplier').textContent=it.supplier;
   document.getElementById('recv-unit').textContent=it.pkg;
   document.getElementById('recv-storage').textContent=it.storage;
-  document.getElementById('recv-shelf').textContent=it.shelfDays?it.shelfDays+'ì¼':'í•´ë‹¹ì—†ìŒ';
+  document.getElementById('recv-shelf').textContent=it.shelfDays?it.shelfDays+'일':'해당없음';
   // auto fill expiry
   if(it.shelfDays){const d=new Date('2026-03-27'); d.setDate(d.getDate()+it.shelfDays); document.getElementById('recv-expiry').value=d.toISOString().split('T')[0];}
   document.getElementById('recv-supplier-input').value=it.supplier;
@@ -1361,7 +1361,7 @@ function confirmReceiving(){
   const d=rcvDate.replace(/-/g,'').slice(2); // YYMMDD
   const lotBase=`L-${recvState.itemId.replace('MAT-','')}-${d}`;
   recvState.lot=lotBase; recvState.qty=qty; recvState.expiry=expiry; recvState.name=it.name; recvState.icon=it.icon;
-  document.getElementById('recv-confirm-summary').textContent=`${it.icon} ${it.name} Â· ${qty}${it.unitLabel} ìž…ê³  Â· LOT: ${lotBase} Â· ìœ í†µê¸°í•œ: ${expiry}`;
+  document.getElementById('recv-confirm-summary').textContent=`${it.icon} ${it.name} · ${qty}${it.unitLabel} 입고 · LOT: ${lotBase} · 유통기한: ${expiry}`;
   // Add new lot to RAW_LOTS
   const newUnits = Array.from({length:qty},(_, i)=>({seq:String(i+1).padStart(3,'0'),status:'available'}));
   RAW_LOTS.push({lotId:lotBase, matId:recvState.itemId, rcvDate, expiry, supplier:document.getElementById('recv-supplier-input').value||it.supplier, units:newUnits, note:''});
@@ -1375,14 +1375,14 @@ function confirmReceiving(){
     grid.innerHTML+=`<div class="qr-label">
       ${makeQRSVG(barcodeStr)}
       <div class="qr-label-title">${it.icon} ${it.name}</div>
-      <div class="qr-label-lot">#${seq} Â· LOT ${lotBase}</div>
-      <div class="qr-label-lot">ìœ í†µê¸°í•œ: ${expiry}</div>
+      <div class="qr-label-lot">#${seq} · LOT ${lotBase}</div>
+      <div class="qr-label-lot">유통기한: ${expiry}</div>
       <div class="qr-label-lot" style="font-size:7px;word-break:break-all">${barcodeStr}</div>
     </div>`;
   }
   recvGoStep(3);
 }
-function printLabels(){showToast('ðŸ–¨ï¸ ë¼ë²¨ í”„ë¦°í„° ì „ì†¡ ì™„ë£Œ Â· '+recvState.qty+'ìž¥ ì¶œë ¥');}
+function printLabels(){showToast('🖨️ 라벨 프린터 전송 완료 · '+recvState.qty+'장 출력');}
 function makeQRSVG(data){
   // deterministic pseudo-QR visual from data hash
   let hash=0; for(let c of data){hash=(hash*31+c.charCodeAt(0))>>>0;}
@@ -1399,32 +1399,32 @@ function makeQRSVG(data){
   return `<svg width="${SIZE*CELLW}" height="${SIZE*CELLW}" style="display:block">${cells}</svg>`;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// ìž‘ì—…ì§€ì‹œì„œ íŒ¨ë„
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
+// 작업지시서 패널
+// ═══════════════════════════════════
 let wo={step:0,plannedBatches:3,photosDone:{},mixPhotos:{},ingrStatus:{},currentIngrIdx:0,approved:false,metalDone:false,freezeStart:null,prodQty:0,lotNum:'',completed:false};
 
 const WO_STEPS=[
-  {id:0,icon:'ðŸ“Š',title:'ê³„íš ìˆ˜ëŸ‰ ì„¤ì •',type:'qty'},
-  {id:1,icon:'ðŸ”',title:'ì›ë£Œ ìƒíƒœ í™•ì¸',type:'ingr'},
-  {id:2,icon:'ðŸ’§',title:'ì •ì œìˆ˜ ê³„ëŸ‰',type:'measure',itemId:'MAT-H01',unit:'mL',perBatch:1250,photo:true},
-  {id:3,icon:'ðŸ¥š',title:'ê³„ëž€ ê³„ëŸ‰',type:'measure',itemId:'MAT-H02',unit:'g',perBatch:600,photo:true},
-  {id:4,icon:'âš™ï¸',title:'1ì°¨ ë°°í•© (ì €ì†)',type:'mix',speed:2,time:3,desc:'ì •ì œìˆ˜+ê³„ëž€ ê· ì¼ í˜¼í•©',photo:true},
-  {id:5,icon:'ðŸŒ¾',title:'í”„ë¦¬ë¯¹ìŠ¤1 ê³„ëŸ‰ ë° íˆ¬ìž…',type:'measure',itemId:'MAT-H03',unit:'g',perBatch:2400,photo:true,add:true},
-  {id:6,icon:'ðŸ§ª',title:'í”„ë¦¬ë¯¹ìŠ¤2 ê³„ëŸ‰ ë° íˆ¬ìž…',type:'measure',itemId:'MAT-H04',unit:'g',perBatch:500,photo:true,add:true},
-  {id:7,icon:'ðŸ¥„',title:'íƒ€í”¼ì˜¤ì¹´ì „ë¶„ ê³„ëŸ‰ ë° íˆ¬ìž…',type:'measure',itemId:'MAT-H05',unit:'g',perBatch:250,photo:true,add:true},
-  {id:8,icon:'âš™ï¸',title:'2ì°¨ ë°°í•© (ì¤‘ì†)',type:'mix',speed:5,time:8,desc:'ìµœì¢… ë°˜ì£½ ê· ì¼ í˜¼í•©',photo:true},
-  {id:9,icon:'ðŸ“¦',title:'ì¶©ì§„ (5kg ë‹¨ìœ„)',type:'fill'},
-  {id:10,icon:'âœ…',title:'í’ˆì§ˆ í™•ì¸',type:'quality'},
-  {id:11,icon:'ðŸ·ï¸',title:'ê´€ë¦¬ìž ìŠ¹ì¸ Â· QR ìƒì„±',type:'approval'},
-  {id:12,icon:'ðŸ”',title:'[CCP-2P] ê¸ˆì†ê²€ì¶œ',type:'ccp_metal'},
-  {id:13,icon:'â„ï¸',title:'[CCP-1B] ë™ê²°ê³µì • ë“±ë¡',type:'ccp_freeze'},
-  {id:14,icon:'ðŸš›',title:'ì¶œí•˜ ì¤€ë¹„ Â· ë°•ìŠ¤ í¬ìž¥',type:'ship_prep'}
+  {id:0,icon:'📊',title:'계획 수량 설정',type:'qty'},
+  {id:1,icon:'🔍',title:'원료 상태 확인',type:'ingr'},
+  {id:2,icon:'💧',title:'정제수 계량',type:'measure',itemId:'MAT-H01',unit:'mL',perBatch:1250,photo:true},
+  {id:3,icon:'🥚',title:'계란 계량',type:'measure',itemId:'MAT-H02',unit:'g',perBatch:600,photo:true},
+  {id:4,icon:'⚙️',title:'1차 배합 (저속)',type:'mix',speed:2,time:3,desc:'정제수+계란 균일 혼합',photo:true},
+  {id:5,icon:'🌾',title:'프리믹스1 계량 및 투입',type:'measure',itemId:'MAT-H03',unit:'g',perBatch:2400,photo:true,add:true},
+  {id:6,icon:'🧪',title:'프리믹스2 계량 및 투입',type:'measure',itemId:'MAT-H04',unit:'g',perBatch:500,photo:true,add:true},
+  {id:7,icon:'🥄',title:'타피오카전분 계량 및 투입',type:'measure',itemId:'MAT-H05',unit:'g',perBatch:250,photo:true,add:true},
+  {id:8,icon:'⚙️',title:'2차 배합 (중속)',type:'mix',speed:5,time:8,desc:'최종 반죽 균일 혼합',photo:true},
+  {id:9,icon:'📦',title:'충진 (5kg 단위)',type:'fill'},
+  {id:10,icon:'✅',title:'품질 확인',type:'quality'},
+  {id:11,icon:'🏷️',title:'관리자 승인 · QR 생성',type:'approval'},
+  {id:12,icon:'🔍',title:'[CCP-2P] 금속검출',type:'ccp_metal'},
+  {id:13,icon:'❄️',title:'[CCP-1B] 동결공정 등록',type:'ccp_freeze'},
+  {id:14,icon:'🚛',title:'출하 준비 · 박스 포장',type:'ship_prep'}
 ];
 
 function openWOPanel(sopId){
   wo={step:0,plannedBatches:3,photosDone:{},mixPhotos:{},ingrStatus:{},currentIngrIdx:0,approved:false,metalDone:false,freezeStart:null,prodQty:0,lotNum:'',completed:false};
-  document.getElementById('wo-panel-title').textContent='í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ Â· SOP-HDR-v2.0';
+  document.getElementById('wo-panel-title').textContent='호두과자 전용반죽 · SOP-HDR-v2.0';
   document.getElementById('wo-panel').classList.add('open');
   renderProgDots(); renderStep(0);
 }
@@ -1438,7 +1438,7 @@ function renderProgDots(){
     if(s.id<wo.step) cls+=' done'; else if(s.id===wo.step) cls+=' active';
     c.innerHTML+=`<div class="${cls}" onclick="if(${s.id}<${wo.step}) renderStep(${s.id})" title="${s.title}">${s.id===0?'S':s.id}</div>`;
   });
-  document.getElementById('wo-step-label').textContent=`ë‹¨ê³„ ${wo.step+1} / ${WO_STEPS.length} â€” ${WO_STEPS[wo.step].title}`;
+  document.getElementById('wo-step-label').textContent=`단계 ${wo.step+1} / ${WO_STEPS.length} — ${WO_STEPS[wo.step].title}`;
 }
 
 function renderStep(n){
@@ -1447,22 +1447,22 @@ function renderStep(n){
   const nb=wo.plannedBatches||3;
 
   // Step header
-  body.innerHTML+=`<div class="wo-step-header"><div class="wo-step-icon">${s.icon}</div><div><div class="wo-step-num">STEP ${n} Â· ${n>=12?'CCP':''}</div><div class="wo-step-name">${s.title}</div></div></div>`;
+  body.innerHTML+=`<div class="wo-step-header"><div class="wo-step-icon">${s.icon}</div><div><div class="wo-step-num">STEP ${n} · ${n>=12?'CCP':''}</div><div class="wo-step-name">${s.title}</div></div></div>`;
 
   if(s.type==='qty'){
     body.innerHTML+=`<div class="wo-step-card">
-      <div class="form-row"><div class="form-label">ê³„íš ë°°ì¹˜ ìˆ˜ (5kg ë‹¨ìœ„)</div>
+      <div class="form-row"><div class="form-label">계획 배치 수 (5kg 단위)</div>
         <div style="display:flex;align-items:center;gap:10px">
           <input type="number" class="form-input" id="wo-batches" value="${nb}" min="1" max="20" style="width:80px" oninput="wo.plannedBatches=parseInt(this.value)||1;updateQtyCalc()">
-          <span style="font-size:13px;font-weight:700">ë°°ì¹˜ Ã— 5kg</span>
+          <span style="font-size:13px;font-weight:700">배치 × 5kg</span>
         </div>
       </div>
       <div id="qty-calc" style="background:#f9fafb;border-radius:8px;padding:12px;font-size:12px"></div>
       <div style="background:#eff6ff;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:11px;color:#1e40af">
-        ðŸ“‹ SOP-HDR-v2.0 ê¸°ì¤€ ë ˆì‹œí”¼ ìžë™ ê³„ì‚°<br><span style="color:var(--text-sub)">ì—¬ìœ ìœ¨ +5% í¬í•¨ íˆ¬ìž…ëŸ‰ í‘œì‹œ</span>
+        📋 SOP-HDR-v2.0 기준 레시피 자동 계산<br><span style="color:var(--text-sub)">여유율 +5% 포함 투입량 표시</span>
       </div>
     </div>
-    <button class="btn-primary" onclick="wo.plannedBatches=parseInt(document.getElementById('wo-batches').value)||1;renderStep(1)">ë‹¤ìŒ ë‹¨ê³„ â†’ ì›ë£Œ ìƒíƒœ í™•ì¸</button>`;
+    <button class="btn-primary" onclick="wo.plannedBatches=parseInt(document.getElementById('wo-batches').value)||1;renderStep(1)">다음 단계 → 원료 상태 확인</button>`;
     setTimeout(updateQtyCalc,50);
 
   } else if(s.type==='ingr'){
@@ -1474,66 +1474,66 @@ function renderStep(n){
       const ok=st&&st.ok;
       const disposed=st&&st.disposed;
       const reqAmt=Math.round(ing.amount*nb*1.05);
-      // ì •ì œìˆ˜ â€” ìž¬ê³ ê´€ë¦¬ ì œì™¸ í’ˆëª©, ë‹¨ìˆœ í™•ì¸ë§Œ
+      // 정제수 — 재고관리 제외 품목, 단순 확인만
       if(ing.itemId==='MAT-H01'){
         cards+=`<div class="ingr-card ${ok?'ok':'pending'}" id="ingr-card-${idx}">
           <div class="ingr-card-head">
             <span style="font-size:22px">${ing.icon}</span>
             <div style="flex:1"><div class="ingr-name">${ing.name}</div>
-              <div class="ingr-lot">ëª©í‘œ ${reqAmt}${ing.unit} Â· ìž¬ê³ ê´€ë¦¬ ì œì™¸ í’ˆëª©</div>
-            </div>${ok?'<span class="pill pill-ok">âœ… í™•ì¸ì™„ë£Œ</span>':'<span class="pill" style="background:#e0f2fe;color:#0369a1">ðŸ’§ ë¯¸í™•ì¸</span>'}
+              <div class="ingr-lot">목표 ${reqAmt}${ing.unit} · 재고관리 제외 품목</div>
+            </div>${ok?'<span class="pill pill-ok">✅ 확인완료</span>':'<span class="pill" style="background:#e0f2fe;color:#0369a1">💧 미확인</span>'}
           </div>
           <div class="ingr-details">
-            <div style="background:#eff6ff;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:#1e40af">ìˆ˜ë„ ì§ì ‘ ê³µê¸‰ í’ˆëª© â€” QR ìŠ¤ìº” ì—†ì´ ì‚¬ìš© ê°€ëŠ¥ ì—¬ë¶€ë§Œ í™•ì¸</div>
+            <div style="background:#eff6ff;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:#1e40af">수도 직접 공급 품목 — QR 스캔 없이 사용 가능 여부만 확인</div>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
               <input type="checkbox" ${ok?'checked':''} style="width:17px;height:17px;accent-color:var(--success)" onchange="confirmWater(${idx},this.checked)">
-              <span style="font-size:12px;font-weight:600">ì •ì œìˆ˜ ê³µê¸‰ ì •ìƒ í™•ì¸ (${reqAmt}${ing.unit} ì‚¬ìš© ê°€ëŠ¥)</span>
+              <span style="font-size:12px;font-weight:600">정제수 공급 정상 확인 (${reqAmt}${ing.unit} 사용 가능)</span>
             </label>
           </div>
         </div>`;
         return;
       }
       let cardClass='ingr-card '+(disposed?'bad':scanned?(ok?'ok':'bad'):'pending');
-      let badge=disposed?'<span class="pill pill-danger">ðŸ—‘ï¸ íê¸°</span>':scanned?(ok?'<span class="pill pill-ok">âœ… í™•ì¸ì™„ë£Œ</span>':'<span class="pill pill-danger">âŒ ë¶ˆëŸ‰</span>'):'<span class="pill pill-waiting">â³ ë¯¸í™•ì¸</span>';
-      const scanBtnHtml = scanned?'':`<button onclick="woScanIngr(${idx})" style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:10px;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px">ðŸ“· QR ìŠ¤ìº”</button>`;
+      let badge=disposed?'<span class="pill pill-danger">🗑️ 폐기</span>':scanned?(ok?'<span class="pill pill-ok">✅ 확인완료</span>':'<span class="pill pill-danger">❌ 불량</span>'):'<span class="pill pill-waiting">⏳ 미확인</span>';
+      const scanBtnHtml = scanned?'':`<button onclick="woScanIngr(${idx})" style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:10px;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px">📷 QR 스캔</button>`;
       cards+=`<div class="${cardClass}" id="ingr-card-${idx}">
         <div class="ingr-card-head">
           <span style="font-size:22px">${ing.icon}</span>
           <div style="flex:1"><div class="ingr-name">${ing.name}</div>
-            <div class="ingr-lot">SOPê¸°ì¤€ ${ing.amount*nb}${ing.unit} (+5%â†’${reqAmt}${ing.unit})</div>
+            <div class="ingr-lot">SOP기준 ${ing.amount*nb}${ing.unit} (+5%→${reqAmt}${ing.unit})</div>
           </div>${badge}
         </div>
         <div class="ingr-details">
           ${scanned&&!disposed?`<div class="ingr-detail-grid">
-            <div class="ingr-detail-item"><span class="dk">ë‹¨ìœ„ë²ˆí˜¸</span><span class="dv">#${wo.ingrStatus[idx].unitSeq||'â€”'}</span></div>
-            <div class="ingr-detail-item"><span class="dk">ìž…ê³ ì¼</span><span class="dv">${wo.ingrStatus[idx].rcvDate||'â€”'}</span></div>
-            <div class="ingr-detail-item"><span class="dk">ìœ í†µê¸°í•œ</span><span class="dv ok">${wo.ingrStatus[idx].expiry||'â€”'}</span></div>
-            <div class="ingr-detail-item"><span class="dk">ê³µê¸‰ì—…ì²´</span><span class="dv" style="font-size:10px">${(ITEM_DB[ing.itemId]||{}).supplier||'â€”'}</span></div>
+            <div class="ingr-detail-item"><span class="dk">단위번호</span><span class="dv">#${wo.ingrStatus[idx].unitSeq||'—'}</span></div>
+            <div class="ingr-detail-item"><span class="dk">입고일</span><span class="dv">${wo.ingrStatus[idx].rcvDate||'—'}</span></div>
+            <div class="ingr-detail-item"><span class="dk">유통기한</span><span class="dv ok">${wo.ingrStatus[idx].expiry||'—'}</span></div>
+            <div class="ingr-detail-item"><span class="dk">공급업체</span><span class="dv" style="font-size:10px">${(ITEM_DB[ing.itemId]||{}).supplier||'—'}</span></div>
           </div>
-          <div style="font-size:11px;font-weight:700;margin-bottom:6px">ì™¸ê´€ / ì´ë¬¼ í™•ì¸</div>
+          <div style="font-size:11px;font-weight:700;margin-bottom:6px">외관 / 이물 확인</div>
           <div class="judge-row">
-            <button class="judge-btn ${wo.ingrStatus[idx].visual==='ok'?'ok':''}" onclick="setJudge(${idx},'visual','ok')">ì™¸ê´€ ì •ìƒ</button>
-            <button class="judge-btn ${wo.ingrStatus[idx].visual==='bad'?'bad':''}" onclick="setJudge(${idx},'visual','bad')">ì™¸ê´€ ë¶ˆëŸ‰ ðŸ—‘ï¸</button>
+            <button class="judge-btn ${wo.ingrStatus[idx].visual==='ok'?'ok':''}" onclick="setJudge(${idx},'visual','ok')">외관 정상</button>
+            <button class="judge-btn ${wo.ingrStatus[idx].visual==='bad'?'bad':''}" onclick="setJudge(${idx},'visual','bad')">외관 불량 🗑️</button>
           </div>
           <div class="judge-row">
-            <button class="judge-btn ${wo.ingrStatus[idx].foreign==='ok'?'ok':''}" onclick="setJudge(${idx},'foreign','ok')">ì´ë¬¼ ì •ìƒ</button>
-            <button class="judge-btn ${wo.ingrStatus[idx].foreign==='bad'?'bad':''}" onclick="setJudge(${idx},'foreign','bad')">ì´ë¬¼ ë°œê²¬ ðŸ—‘ï¸</button>
+            <button class="judge-btn ${wo.ingrStatus[idx].foreign==='ok'?'ok':''}" onclick="setJudge(${idx},'foreign','ok')">이물 정상</button>
+            <button class="judge-btn ${wo.ingrStatus[idx].foreign==='bad'?'bad':''}" onclick="setJudge(${idx},'foreign','bad')">이물 발견 🗑️</button>
           </div>` : scanBtnHtml}
         </div>
       </div>`;
     });
     const allDone=ingrs.every((_,i)=>wo.ingrStatus[i]&&(wo.ingrStatus[i].ok));
     body.innerHTML+=`<div class="wo-step-card" style="padding:0;overflow:visible">
-      <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-sub)">ê° ì›ìž¬ë£Œ QR ìŠ¤ìº” â†’ ì •ë³´í™•ì¸ â†’ ì™¸ê´€/ì´ë¬¼ íŒì •</div>
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-sub)">각 원재료 QR 스캔 → 정보확인 → 외관/이물 판정</div>
       <div style="padding:12px">${cards}</div>
     </div>
     <div style="background:#f9fafb;border-radius:8px;padding:10px 12px;font-size:11px;margin-bottom:12px">
-      í™•ì¸ì™„ë£Œ: <b style="color:var(--success)">${Object.values(wo.ingrStatus).filter(s=>s&&s.ok).length}</b>ì¢… Â· 
-      íê¸°: <b style="color:var(--danger)">${Object.values(wo.ingrStatus).filter(s=>s&&s.disposed).length}</b>ì¢… Â· 
-      ë¯¸í™•ì¸: <b style="color:var(--warning)">${RECIPE_HDR.perBatch5kg.length-Object.values(wo.ingrStatus).filter(s=>s&&(s.ok||s.disposed)).length}</b>ì¢…
+      확인완료: <b style="color:var(--success)">${Object.values(wo.ingrStatus).filter(s=>s&&s.ok).length}</b>종 · 
+      폐기: <b style="color:var(--danger)">${Object.values(wo.ingrStatus).filter(s=>s&&s.disposed).length}</b>종 · 
+      미확인: <b style="color:var(--warning)">${RECIPE_HDR.perBatch5kg.length-Object.values(wo.ingrStatus).filter(s=>s&&(s.ok||s.disposed)).length}</b>종
     </div>
     <button class="btn-primary" id="ingr-next-btn" ${allDone?'':'disabled'} onclick="renderStep(2)">
-      ${allDone?'âœ… ì›ë£Œ í™•ì¸ ì™„ë£Œ â†’ ê³„ëŸ‰ ì‹œìž‘':'ì „ì²´ ì›ë£Œ í™•ì¸ ì™„ë£Œ í›„ ì§„í–‰ ê°€ëŠ¥'}
+      ${allDone?'✅ 원료 확인 완료 → 계량 시작':'전체 원료 확인 완료 후 진행 가능'}
     </button>`;
 
   } else if(s.type==='measure'){
@@ -1545,122 +1545,122 @@ function renderStep(n){
     const addDone = wo.addDone && wo.addDone[n];
     body.innerHTML+=`
     <div class="measure-target-box">
-      <div class="measure-target-label">âš–ï¸ ê³„ëŸ‰ ëª©í‘œëŸ‰ (+5% ë§ˆì§„ ì ìš©)</div>
+      <div class="measure-target-label">⚖️ 계량 목표량 (+5% 마진 적용)</div>
       <div class="measure-target-amount">${targetWith5.toLocaleString()}<span style="font-size:18px;font-weight:600;margin-left:4px">${s.unit}</span></div>
-      <div class="measure-tolerance">í—ˆìš© ì˜¤ì°¨ Â±1% â†’ ${tolMin.toLocaleString()}~${tolMax.toLocaleString()}${s.unit}</div>
-      <div style="font-size:10px;opacity:.7;margin-top:6px">SOPê¸°ì¤€ ${target.toLocaleString()}${s.unit} Ã— 1.05 = ${targetWith5.toLocaleString()}${s.unit}</div>
+      <div class="measure-tolerance">허용 오차 ±1% → ${tolMin.toLocaleString()}~${tolMax.toLocaleString()}${s.unit}</div>
+      <div style="font-size:10px;opacity:.7;margin-top:6px">SOP기준 ${target.toLocaleString()}${s.unit} × 1.05 = ${targetWith5.toLocaleString()}${s.unit}</div>
     </div>
     <div class="wo-step-card">
-      <div style="font-size:12px;font-weight:700;margin-bottom:10px">ðŸ“¸ ê³„ëŸ‰ ì €ìš¸ ì‚¬ì§„ ì´¬ì˜</div>
-      <div style="font-size:11px;color:var(--text-sub);margin-bottom:10px">ì €ìš¸ ëˆˆê¸ˆì´ ëª©í‘œëŸ‰(${targetWith5}${s.unit}) ë²”ìœ„ ë‚´ì¸ì§€ í™•ì¸ í›„ ì´¬ì˜í•˜ì„¸ìš”.</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">📸 계량 저울 사진 촬영</div>
+      <div style="font-size:11px;color:var(--text-sub);margin-bottom:10px">저울 눈금이 목표량(${targetWith5}${s.unit}) 범위 내인지 확인 후 촬영하세요.</div>
       <div class="photo-btn ${photoDone?'attached':''}" id="photo-btn-${n}" onclick="attachPhoto(${n})">
-        ${photoDone?'âœ… ê³„ëŸ‰ ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ â€” ì €ìš¸ ëˆˆê¸ˆ í™•ì¸ë¨':'ðŸ“· ê³„ëŸ‰ ì €ìš¸ ì‚¬ì§„ ì´¬ì˜'}
+        ${photoDone?'✅ 계량 사진 첨부 완료 — 저울 눈금 확인됨':'📷 계량 저울 사진 촬영'}
       </div>
     </div>
     <div class="wo-step-card" style="margin-top:-4px">
-      <div style="background:#fffbeb;border-radius:8px;padding:8px 10px;font-size:11px;color:#92400e;margin-bottom:10px">ðŸ“¤ ê³„ëŸ‰ ì™„ë£Œ í›„ ë°°í•©ê¸°ì— íˆ¬ìž…í•˜ê³  ì•„ëž˜ë¥¼ ì²´í¬í•˜ì„¸ìš”</div>
+      <div style="background:#fffbeb;border-radius:8px;padding:8px 10px;font-size:11px;color:#92400e;margin-bottom:10px">📤 계량 완료 후 배합기에 투입하고 아래를 체크하세요</div>
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:4px 0">
         <input type="checkbox" id="wo-add-${n}" ${addDone?'checked':''} style="width:18px;height:18px;accent-color:var(--success)" onchange="wo.addDone=wo.addDone||{}; wo.addDone[${n}]=this.checked; document.getElementById('add-lbl-${n}').style.color=this.checked?'var(--success)':'var(--text)'">
-        <span id="add-lbl-${n}" style="font-size:13px;font-weight:700;color:${addDone?'var(--success)':'var(--text)'}">ë°°í•©ê¸° íˆ¬ìž… ì™„ë£Œ í™•ì¸</span>
+        <span id="add-lbl-${n}" style="font-size:13px;font-weight:700;color:${addDone?'var(--success)':'var(--text)'}">배합기 투입 완료 확인</span>
       </label>
     </div>
-    <button class="btn-primary" onclick="validateMeasureStep(${n})">ë‹¤ìŒ ë‹¨ê³„ â†’</button>`;
+    <button class="btn-primary" onclick="validateMeasureStep(${n})">다음 단계 →</button>`;
 
   } else if(s.type==='mix'){
     const mp=wo.mixPhotos[n]||{};
     body.innerHTML+=`
     <div class="wo-step-card">
       <div style="background:#f5f3ff;border-radius:8px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:6px">âš™ï¸ SOC ë°°í•© ê¸°ì¤€</div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">⚙️ SOP 배합 기준</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-          <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">ë°°í•© ì†ë„</span><br><b style="font-size:20px">${s.speed}ë‹¨ê³„</b></div>
-          <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">ë°°í•© ì‹œê°„</span><br><b style="font-size:20px">${s.time}ë¶„</b></div>
+          <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">배합 속도</span><br><b style="font-size:20px">${s.speed}단계</b></div>
+          <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">배합 시간</span><br><b style="font-size:20px">${s.time}분</b></div>
         </div>
         <div style="font-size:11px;color:var(--text-sub);margin-top:8px">${s.desc}</div>
       </div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:10px">ðŸ“¸ ë‹¨ê³„ë³„ ì‚¬ì§„ ì´¬ì˜ (ìˆœì„œëŒ€ë¡œ)</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">📸 단계별 사진 촬영 (순서대로)</div>
       <div class="photo-step-row">
         <div class="photo-step-item ${mp.speed?'done':''}">
           <div class="photo-step-num">1</div>
           <div class="photo-step-info">
-            <div class="photo-step-title">ë°°í•©ê¸° ì†ë„ ì„¤ì • ì‚¬ì§„</div>
-            <div style="font-size:10px;color:var(--text-sub)">ì†ë„ ë‹¤ì´ì–¼ Â· ${s.speed}ë‹¨ê³„ ì„¤ì • í™”ë©´</div>
+            <div class="photo-step-title">배합기 속도 설정 사진</div>
+            <div style="font-size:10px;color:var(--text-sub)">속도 다이얼 · ${s.speed}단계 설정 화면</div>
           </div>
-          <button class="photo-step-btn ${mp.speed?'done':''}" onclick="attachMixPhoto(${n},'speed')">${mp.speed?'âœ… ì™„ë£Œ':'ðŸ“· ì´¬ì˜'}</button>
+          <button class="photo-step-btn ${mp.speed?'done':''}" onclick="attachMixPhoto(${n},'speed')">${mp.speed?'✅ 완료':'📷 촬영'}</button>
         </div>
         <div class="photo-step-item ${mp.start?'done':''}">
           <div class="photo-step-num">2</div>
           <div class="photo-step-info">
-            <div class="photo-step-title">ë°°í•© ì‹œìž‘ ì‹œê°„ ì‚¬ì§„</div>
-            <div style="font-size:10px;color:var(--text-sub)">íƒ€ì´ë¨¸ ì‹œìž‘ Â· ë²½ì‹œê³„ ë˜ëŠ” ë””ì§€í„¸ í‘œì‹œ</div>
+            <div class="photo-step-title">배합 시작 시간 사진</div>
+            <div style="font-size:10px;color:var(--text-sub)">타이머 시작 · 벽시계 또는 디지털 표시</div>
           </div>
-          <button class="photo-step-btn ${mp.start?'done':''}" onclick="attachMixPhoto(${n},'start')">${mp.start?'âœ… ì™„ë£Œ':'ðŸ“· ì´¬ì˜'}</button>
+          <button class="photo-step-btn ${mp.start?'done':''}" onclick="attachMixPhoto(${n},'start')">${mp.start?'✅ 완료':'📷 촬영'}</button>
         </div>
         <div class="photo-step-item ${mp.end?'done':''}">
           <div class="photo-step-num">3</div>
           <div class="photo-step-info">
-            <div class="photo-step-title">ë°°í•© ì¢…ë£Œ ì‹œê°„ ì‚¬ì§„</div>
-            <div style="font-size:10px;color:var(--text-sub)">ë°°í•© ì™„ë£Œ ì‹œê° Â· ${s.time}ë¶„ ê²½ê³¼ í›„</div>
+            <div class="photo-step-title">배합 종료 시간 사진</div>
+            <div style="font-size:10px;color:var(--text-sub)">배합 완료 시각 · ${s.time}분 경과 후</div>
           </div>
-          <button class="photo-step-btn ${mp.end?'done':''}" onclick="attachMixPhoto(${n},'end')">${mp.end?'âœ… ì™„ë£Œ':'ðŸ“· ì´¬ì˜'}</button>
+          <button class="photo-step-btn ${mp.end?'done':''}" onclick="attachMixPhoto(${n},'end')">${mp.end?'✅ 완료':'📷 촬영'}</button>
         </div>
       </div>
     </div>
-    <button class="btn-primary" onclick="validateMixStep(${n})">ë‹¤ìŒ ë‹¨ê³„ â†’</button>`;
+    <button class="btn-primary" onclick="validateMixStep(${n})">다음 단계 →</button>`;
 
   } else if(s.type==='fill'){
     const totalTarget=nb*5; const tolKg=(totalTarget*0.01).toFixed(2);
     const tolMin=(totalTarget*0.99).toFixed(2); const tolMax=(totalTarget*1.01).toFixed(2);
     body.innerHTML+=`<div class="wo-step-card">
       <div style="background:#eff6ff;border-radius:8px;padding:12px;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:6px">ðŸ“¦ ì¶©ì§„ ëª©í‘œëŸ‰</div>
-        <div style="font-size:26px;font-weight:900;color:var(--primary)">${nb}ë´‰ Ã— 5kg = <span>${totalTarget}kg</span></div>
-        <div style="font-size:11px;color:var(--text-sub);margin-top:4px">ë´‰ ë‹¨ìœ„ ê¸°ì¤€ 5kg, ì´ëŸ‰ ê¸°ì¤€ ì˜¤ì°¨ ì ìš©</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">📦 충진 목표량</div>
+        <div style="font-size:26px;font-weight:900;color:var(--primary)">${nb}봉 × 5kg = <span>${totalTarget}kg</span></div>
+        <div style="font-size:11px;color:var(--text-sub);margin-top:4px">봉 단위 기준 5kg, 총량 기준 오차 적용</div>
       </div>
       <div style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:12px">
-        <b style="color:#92400e">âš–ï¸ ì˜¤ì°¨ ê¸°ì¤€ â€” ì´ëŸ‰ì˜ Â±1%</b><br>
-        <span style="color:#78350f">í—ˆìš© ë²”ìœ„: <b>${tolMin}kg ~ ${tolMax}kg</b> (Â±${tolKg}kg)</span><br>
-        <span style="color:var(--text-sub);font-size:10px">ë²”ìœ„ ì´ˆê³¼ ì‹œ ìž¬ì¶©ì§„ ë˜ëŠ” ëœì–´ë‚´ê¸° í•„ìš”</span>
+        <b style="color:#92400e">⚖️ 오차 기준 — 총량의 ±1%</b><br>
+        <span style="color:#78350f">허용 범위: <b>${tolMin}kg ~ ${tolMax}kg</b> (±${tolKg}kg)</span><br>
+        <span style="color:var(--text-sub);font-size:10px">범위 초과 시 재충진 또는 덜어내기 필요</span>
       </div>
-      <div class="form-row"><div class="form-label">ì‹¤ì œ ìƒì‚° ë´‰ ìˆ˜ (5kg/ë´‰)</div>
+      <div class="form-row"><div class="form-label">실제 생산 봉 수 (5kg/봉)</div>
         <input type="number" class="form-input" id="wo-fill-qty" value="${nb}" min="1" oninput="wo.prodQty=parseInt(this.value)||0;updateFillCalc(this.value)">
       </div>
-      <div class="form-row"><div class="form-label">ì‹¤ì¸¡ ì´ ìƒì‚°ëŸ‰ (kg)</div>
+      <div class="form-row"><div class="form-label">실측 총 생산량 (kg)</div>
         <input type="number" class="form-input" id="wo-fill-kg" value="${totalTarget}" step="0.1" oninput="checkFillTolerance(this.value,${totalTarget})">
-        <div id="fill-judge" style="font-size:11px;margin-top:4px;color:var(--success)">âœ… ëª©í‘œ ë²”ìœ„ ë‚´</div>
+        <div id="fill-judge" style="font-size:11px;margin-top:4px;color:var(--success)">✅ 목표 범위 내</div>
       </div>
     </div>
-    <button class="btn-primary" onclick="validateFillStep(${nb})">ë‹¤ìŒ ë‹¨ê³„ â†’ í’ˆì§ˆ í™•ì¸</button>`;
+    <button class="btn-primary" onclick="validateFillStep(${nb})">다음 단계 → 품질 확인</button>`;
 
   } else if(s.type==='quality'){
     body.innerHTML+=`<div class="wo-step-card">
-      <div style="font-size:12px;font-weight:700;margin-bottom:12px">ì¶©ì§„ ì¤‘ í’ˆì§ˆ í™•ì¸ (ì „ëŸ‰ í™•ì¸)</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:12px">충진 중 품질 확인 (전량 확인)</div>
       <div class="form-row">
-        <div class="form-label">ìƒ‰ìƒ</div>
+        <div class="form-label">색상</div>
         <div style="display:flex;gap:8px">
-          <button class="judge-btn" id="qlt-color-ok" onclick="setQuality('color','ok',this)">ì •ìƒ (ì—°í™©ìƒ‰)</button>
-          <button class="judge-btn" id="qlt-color-bad" onclick="setQuality('color','bad',this)">ì´ìƒ (ë³€ìƒ‰)</button>
+          <button class="judge-btn" id="qlt-color-ok" onclick="setQuality('color','ok',this)">정상 (연황색)</button>
+          <button class="judge-btn" id="qlt-color-bad" onclick="setQuality('color','bad',this)">이상 (변색)</button>
         </div>
       </div>
       <div class="form-row">
-        <div class="form-label">í˜¼í•© ê· ì¼ë„</div>
+        <div class="form-label">혼합 균일도</div>
         <div style="display:flex;gap:8px">
-          <button class="judge-btn" id="qlt-mix-ok" onclick="setQuality('mix','ok',this)">ì–‘í˜¸ (ê· ì¼)</button>
-          <button class="judge-btn" id="qlt-mix-bad" onclick="setQuality('mix','bad',this)">ë¶ˆëŸ‰ (ë¶„ë¦¬Â·ë©ì–´ë¦¬)</button>
+          <button class="judge-btn" id="qlt-mix-ok" onclick="setQuality('mix','ok',this)">양호 (균일)</button>
+          <button class="judge-btn" id="qlt-mix-bad" onclick="setQuality('mix','bad',this)">불량 (분리·덩어리)</button>
         </div>
       </div>
       <div class="form-row">
-        <div class="form-label">ëƒ„ìƒˆ</div>
+        <div class="form-label">냄새</div>
         <div style="display:flex;gap:8px">
-          <button class="judge-btn" id="qlt-smell-ok" onclick="setQuality('smell','ok',this)">ì •ìƒ (ê³ ì†Œí•œ í–¥)</button>
-          <button class="judge-btn" id="qlt-smell-bad" onclick="setQuality('smell','bad',this)">ì´ìƒ (ì´ì·¨)</button>
+          <button class="judge-btn" id="qlt-smell-ok" onclick="setQuality('smell','ok',this)">정상 (고소한 향)</button>
+          <button class="judge-btn" id="qlt-smell-bad" onclick="setQuality('smell','bad',this)">이상 (이취)</button>
         </div>
       </div>
-      <div class="form-row"><div class="form-label">íŠ¹ì´ì‚¬í•­</div><textarea class="form-input" id="wo-qlt-note" rows="2" placeholder="ì´ìƒ ì—†ìœ¼ë©´ ìƒëžµ"></textarea></div>
+      <div class="form-row"><div class="form-label">특이사항</div><textarea class="form-input" id="wo-qlt-note" rows="2" placeholder="이상 없으면 생략"></textarea></div>
     </div>
     <div style="display:flex;gap:8px">
-      <button style="flex:1;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:13px;font-weight:700;cursor:pointer" onclick="qualityPass()">âœ… ì´ìƒì—†ìŒ â†’ ê´€ë¦¬ìž ìŠ¹ì¸ ìš”ì²­</button>
-      <button style="flex:1;background:var(--danger);color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:13px;font-weight:700;cursor:pointer" onclick="qualityFail()">âš ï¸ ì´ìƒìžˆìŒ â†’ ê´€ë¦¬ìž ìš”ì²­</button>
+      <button style="flex:1;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:13px;font-weight:700;cursor:pointer" onclick="qualityPass()">✅ 이상없음 → 관리자 승인 요청</button>
+      <button style="flex:1;background:var(--danger);color:#fff;border:none;border-radius:var(--radius-sm);padding:13px;font-size:13px;font-weight:700;cursor:pointer" onclick="qualityFail()">⚠️ 이상있음 → 관리자 요청</button>
     </div>`;
 
   } else if(s.type==='approval'){
@@ -1669,101 +1669,101 @@ function renderStep(n){
       ${wo.approved?`
       <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:14px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span style="font-size:22px">âœ…</span>
+          <span style="font-size:22px">✅</span>
           <div>
-            <div style="font-size:14px;font-weight:800;color:var(--success)">ê´€ë¦¬ìž ìŠ¹ì¸ ì™„ë£Œ Â· ìž‘ì—…ì§€ì‹œì„œ ì™„ë£Œ</div>
-            <div style="font-size:11px;color:var(--text-sub)">ìŠ¹ì¸ìž: ë°•ê´€ë¦¬ìž Â· ${tStr}</div>
+            <div style="font-size:14px;font-weight:800;color:var(--success)">관리자 승인 완료 · 작업지시서 완료</div>
+            <div style="font-size:11px;color:var(--text-sub)">승인자: 박관리자 · ${tStr}</div>
           </div>
         </div>
         <div style="background:#dcfce7;border-radius:7px;padding:8px 10px;font-size:12px">
-          ìƒì‚° LOT: <b style="font-family:monospace;color:var(--success)">${wo.lotNum}</b><br>
-          <span style="color:var(--text-sub)">${wo.prodQty||nb}ë´‰ Â· ${(wo.prodQty||nb)*5}kg Â· ìœ í†µê¸°í•œ 2026-12-27</span>
+          생산 LOT: <b style="font-family:monospace;color:var(--success)">${wo.lotNum}</b><br>
+          <span style="color:var(--text-sub)">${wo.prodQty||nb}봉 · ${(wo.prodQty||nb)*5}kg · 유통기한 2026-12-27</span>
         </div>
       </div>
       <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:8px">ðŸ·ï¸ QR ë¼ë²¨ (${wo.prodQty||nb}ë´‰) â€” ì–¸ì œë“ ì§€ ìž¬ì¶œë ¥ ê°€ëŠ¥</div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:8px">🏷️ QR 라벨 (${wo.prodQty||nb}봉) — 언제든지 재출력 가능</div>
         <div id="prod-label-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px"></div>
       </div>
-      <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">ðŸ–¨ï¸ QR ë¼ë²¨ ì¶œë ¥</button>
-      <button class="btn-primary" onclick="renderStep(12)">ë‹¤ìŒ â†’ CCP-2P ê¸ˆì†ê²€ì¶œ</button>`
+      <button onclick="printLabels()" style="width:100%;background:#1e293b;color:#fff;border:none;border-radius:var(--radius-sm);padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🖨️ QR 라벨 출력</button>
+      <button class="btn-primary" onclick="renderStep(12)">다음 → CCP-2P 금속검출</button>`
       :`<div style="text-align:center;padding:20px 10px">
-        <div style="font-size:44px;margin-bottom:12px">ðŸ“¨</div>
-        <div style="font-size:15px;font-weight:800;margin-bottom:6px">ê´€ë¦¬ìž ìŠ¹ì¸ ìš”ì²­</div>
-        <div style="font-size:12px;color:var(--text-sub);margin-bottom:4px">ìƒì‚°ëŸ‰: ${wo.prodQty||nb}ë´‰ Â· ${(wo.prodQty||nb)*5}kg</div>
-        <div style="font-size:11px;color:var(--text-sub);margin-bottom:18px">ìŠ¹ì¸ ì™„ë£Œ ì‹œ LOT ë²ˆí˜¸ ë¶€ì—¬ Â· ìž‘ì—…ì§€ì‹œì„œ ì™„ë£Œ ìƒíƒœë¡œ ë³€ê²½</div>
-        <button onclick="simulateApproval()" style="background:var(--warning);color:#fff;border:none;border-radius:10px;padding:14px 28px;font-size:14px;font-weight:700;cursor:pointer">ðŸ“± ê´€ë¦¬ìžì—ê²Œ ì•Œë¦¼ ë°œì†¡</button>
-        <div style="font-size:10px;color:var(--text-sub);margin-top:10px">ìŠ¹ì¸ í›„ ìž‘ì—…ì§€ì‹œì„œ ëª©ë¡ì—ì„œ QR ë¼ë²¨ ìž¬ì¶œë ¥ ê°€ëŠ¥</div>
+        <div style="font-size:44px;margin-bottom:12px">📨</div>
+        <div style="font-size:15px;font-weight:800;margin-bottom:6px">관리자 승인 요청</div>
+        <div style="font-size:12px;color:var(--text-sub);margin-bottom:4px">생산량: ${wo.prodQty||nb}봉 · ${(wo.prodQty||nb)*5}kg</div>
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:18px">승인 완료 시 LOT 번호 부여 · 작업지시서 완료 상태로 변경</div>
+        <button onclick="simulateApproval()" style="background:var(--warning);color:#fff;border:none;border-radius:10px;padding:14px 28px;font-size:14px;font-weight:700;cursor:pointer">📱 관리자에게 알림 발송</button>
+        <div style="font-size:10px;color:var(--text-sub);margin-top:10px">승인 후 작업지시서 목록에서 QR 라벨 재출력 가능</div>
       </div>`}
     </div>`;
     if(wo.approved) setTimeout(buildProdLabels,50);
 
   } else if(s.type==='ccp_metal'){
     body.innerHTML+=`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:13px;margin-bottom:12px">
-      <div style="font-size:12px;font-weight:800;color:var(--danger);margin-bottom:6px">âš ï¸ CCP-2P ê¸ˆì†ê²€ì¶œ í•œê³„ê¸°ì¤€</div>
+      <div style="font-size:12px;font-weight:800;color:var(--danger);margin-bottom:6px">⚠️ CCP-2P 금속검출 한계기준</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
         <div style="background:#fff;border-radius:8px;padding:8px 10px;text-align:center">
-          <div style="font-size:10px;color:var(--text-sub)">ì²  (Fe)</div>
-          <div style="font-size:18px;font-weight:900;color:var(--danger)">â‰¥ 2.5mm</div>
-          <div style="font-size:10px;color:var(--text-sub)">ì´ìƒ ë¶ˆê²€ì¶œ</div>
+          <div style="font-size:10px;color:var(--text-sub)">철 (Fe)</div>
+          <div style="font-size:18px;font-weight:900;color:var(--danger)">≥ 2.5mm</div>
+          <div style="font-size:10px;color:var(--text-sub)">이상 불검출</div>
         </div>
         <div style="background:#fff;border-radius:8px;padding:8px 10px;text-align:center">
-          <div style="font-size:10px;color:var(--text-sub)">ìŠ¤í…Œì¸ë¦¬ìŠ¤ (SUS)</div>
-          <div style="font-size:18px;font-weight:900;color:var(--danger)">â‰¥ 4.0mm</div>
-          <div style="font-size:10px;color:var(--text-sub)">ì´ìƒ ë¶ˆê²€ì¶œ</div>
+          <div style="font-size:10px;color:var(--text-sub)">스테인리스 (SUS)</div>
+          <div style="font-size:18px;font-weight:900;color:var(--danger)">≥ 4.0mm</div>
+          <div style="font-size:10px;color:var(--text-sub)">이상 불검출</div>
         </div>
       </div>
     </div>
     <div class="wo-step-card">
-      <div style="font-size:12px;font-weight:700;margin-bottom:10px">â‘  ìž‘ì—…ì „ ì‹œíŽ¸ ê°ë„ í™•ì¸</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">① 작업전 시편 감도 확인</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px;padding:10px;background:#f9fafb;border-radius:8px;cursor:pointer"><input type="checkbox" id="ccp-fe-ok"> Fe <b>2.5mm</b> ì‹œíŽ¸ ê²€ì¶œ í™•ì¸</label>
-        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px;padding:10px;background:#f9fafb;border-radius:8px;cursor:pointer"><input type="checkbox" id="ccp-sts-ok"> SUS <b>4.0mm</b> ì‹œíŽ¸ ê²€ì¶œ í™•ì¸</label>
+        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px;padding:10px;background:#f9fafb;border-radius:8px;cursor:pointer"><input type="checkbox" id="ccp-fe-ok"> Fe <b>2.5mm</b> 시편 검출 확인</label>
+        <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:12px;padding:10px;background:#f9fafb;border-radius:8px;cursor:pointer"><input type="checkbox" id="ccp-sts-ok"> SUS <b>4.0mm</b> 시편 검출 확인</label>
       </div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px">â‘¡ ì œí’ˆ ê¸ˆì†ê²€ì¶œê¸° í†µê³¼</div>
-      <div class="form-row"><div class="form-label">ê²€ì‚¬ ì œí’ˆ ìˆ˜ (ë´‰)</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px">② 제품 금속검출기 통과</div>
+      <div class="form-row"><div class="form-label">검사 제품 수 (봉)</div>
         <input type="number" class="form-input" id="ccp-total" value="${wo.prodQty||nb}">
       </div>
-      <div class="form-row"><div class="form-label">ê¸ˆì† ê²€ì¶œ ì´ìƒ ì œí’ˆ ìˆ˜</div>
+      <div class="form-row"><div class="form-label">금속 검출 이상 제품 수</div>
         <input type="number" class="form-input" id="ccp-detected" value="0" min="0" oninput="updateMetalResult(this.value)">
       </div>
-      <div id="metal-result" style="font-size:11px;color:var(--success);margin-top:4px">âœ… ì´ìƒ ì—†ìŒ â†’ ì „ëŸ‰ ì¶œí•˜ ê°€ëŠ¥</div>
+      <div id="metal-result" style="font-size:11px;color:var(--success);margin-top:4px">✅ 이상 없음 → 전량 출하 가능</div>
     </div>
-    <div class="form-row"><div class="form-label">ðŸ“¸ ê¸ˆì†ê²€ì¶œê¸° í†µê³¼ ì‚¬ì§„</div>
+    <div class="form-row"><div class="form-label">📸 금속검출기 통과 사진</div>
       <div class="photo-btn ${wo.photosDone[12]?'attached':''}" id="photo-btn-12" onclick="attachPhoto(12)">
-        ${wo.photosDone[12]?'âœ… ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ':'ðŸ“· ê¸ˆì†ê²€ì¶œê¸° ìž‘ë™ ì‚¬ì§„ ì´¬ì˜'}
+        ${wo.photosDone[12]?'✅ 사진 첨부 완료':'📷 금속검출기 작동 사진 촬영'}
       </div>
     </div>
-    <button class="btn-primary" onclick="submitMetalDetection()">ê¸ˆì†ê²€ì¶œ ì™„ë£Œ â†’ ë‹¤ìŒ ë‹¨ê³„</button>`;
+    <button class="btn-primary" onclick="submitMetalDetection()">금속검출 완료 → 다음 단계</button>`;
 
   } else if(s.type==='ccp_freeze'){
     const now=new Date('2026-03-27T'+document.createElement('input').value||'10:00');
     body.innerHTML+=`<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px;margin-bottom:12px;font-size:11px">
-      <b style="color:var(--primary)">â„ï¸ CCP-1B ë™ê²°ê³µì • í•œê³„ê¸°ì¤€</b><br>
-      ëƒ‰ë™ì˜¨ë„ <b>-16Â°C ì´í•˜</b> Â· ëƒ‰ë™ì‹œê°„ <b>12ì‹œê°„ ì´ìƒ</b> (ëª©í‘œ -18Â°C)
+      <b style="color:var(--primary)">❄️ CCP-1B 동결공정 한계기준</b><br>
+      냉동온도 <b>-16°C 이하</b> · 냉동시간 <b>12시간 이상</b> (목표 -18°C)
     </div>
     <div class="wo-step-card">
-      <div class="form-row"><div class="form-label">ëƒ‰ë™ì°½ê³  ìœ„ì¹˜</div>
+      <div class="form-row"><div class="form-label">냉동창고 위치</div>
         <select class="form-select" id="freeze-loc">
-          <option>ëƒ‰ë™ì°½ê³  A-1 (-18Â°C)</option>
-          <option>ëƒ‰ë™ì°½ê³  A-2 (-18Â°C)</option>
-          <option>ëƒ‰ë™ì°½ê³  B-1 (-20Â°C)</option>
+          <option>냉동창고 A-1 (-18°C)</option>
+          <option>냉동창고 A-2 (-18°C)</option>
+          <option>냉동창고 B-1 (-20°C)</option>
         </select>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-row"><div class="form-label">ëƒ‰ë™ ì‹œìž‘ ì‹œê°</div><input type="time" class="form-input" id="freeze-start" value="11:00"></div>
-        <div class="form-row"><div class="form-label">ëƒ‰ë™ ì˜¨ë„ (Â°C)</div><input type="number" class="form-input" id="freeze-temp" value="-18" step="0.1" oninput="checkFreezeTemp(this.value)"></div>
+        <div class="form-row"><div class="form-label">냉동 시작 시각</div><input type="time" class="form-input" id="freeze-start" value="11:00"></div>
+        <div class="form-row"><div class="form-label">냉동 온도 (°C)</div><input type="number" class="form-input" id="freeze-temp" value="-18" step="0.1" oninput="checkFreezeTemp(this.value)"></div>
       </div>
-      <div id="freeze-temp-status" style="font-size:11px;color:var(--success);margin-bottom:8px">âœ… í•œê³„ê¸°ì¤€ ì Ý•© (-16Â°C ì´í•˜)</div>
+      <div id="freeze-temp-status" style="font-size:11px;color:var(--success);margin-bottom:8px">✅ 한계기준 적합 (-16°C 이하)</div>
       <div style="background:#f0fdf4;border-radius:8px;padding:10px 12px;font-size:11px;color:#166534">
-        â° ëƒ‰ë™ ì™„ë£Œ ì˜ˆì •: <b id="freeze-complete-time">23:00</b> (12ì‹œê°„ í›„ ì¶œí•˜ê°€ëŠ¥)
+        ⏰ 냉동 완료 예정: <b id="freeze-complete-time">23:00</b> (12시간 후 출하가능)
       </div>
     </div>
-    <div class="form-row"><div class="form-label">ðŸ“¸ ëƒ‰ë™ì°½ê³  ìž…ê³  ì‚¬ì§„ (ì˜¨ë„ê³„ í¬í•¨)</div>
+    <div class="form-row"><div class="form-label">📸 냉동창고 입고 사진 (온도계 포함)</div>
       <div class="photo-btn ${wo.photosDone[13]?'attached':''}" id="photo-btn-13" onclick="attachPhoto(13)">
-        ${wo.photosDone[13]?'âœ… ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ':'ðŸ“· ëƒ‰ë™ì°½ê³ Â·ì˜¨ë„ê³„ ì‚¬ì§„ ì´¬ì˜'}
+        ${wo.photosDone[13]?'✅ 사진 첨부 완료':'📷 냉동창고·온도계 사진 촬영'}
       </div>
     </div>
-    <button class="btn-primary" onclick="submitFreezing()">â„ï¸ ë™ê²°ê³µì • ë“±ë¡ ì™„ë£Œ â†’ ì¶œí•˜ê°€ëŠ¥ ìž¬ê³  ì „í™˜</button>`;
+    <button class="btn-primary" onclick="submitFreezing()">❄️ 동결공정 등록 완료 → 출하가능 재고 전환</button>`;
     // update complete time on input change
     setTimeout(()=>{
       document.getElementById('freeze-start').addEventListener('input',function(){
@@ -1777,36 +1777,36 @@ function renderStep(n){
     const qty=wo.prodQty||nb;
     const boxes=Math.floor(qty/4); const loose=qty%4;
     body.innerHTML+=`<div style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:700;color:var(--success);margin-bottom:4px">ðŸŽ‰ ì „ ê³µì • ì™„ë£Œ Â· ì¶œí•˜ ì¤€ë¹„</div>
+      <div style="font-size:13px;font-weight:700;color:var(--success);margin-bottom:4px">🎉 전 공정 완료 · 출하 준비</div>
       <div style="font-size:11px;color:var(--text-sub)">LOT: <b style="font-family:monospace">${wo.lotNum}</b></div>
     </div>
     <div class="wo-step-card">
-      <div style="font-size:12px;font-weight:700;margin-bottom:10px">ðŸ“¦ ë°•ìŠ¤ í¬ìž¥ ê³„íš (5kg Ã— 4ë´‰ = 1ë°•ìŠ¤ Â· 20kg)</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">📦 박스 포장 계획 (5kg × 4봉 = 1박스 · 20kg)</div>
       <div style="background:#f9fafb;border-radius:8px;padding:12px;font-size:12px;margin-bottom:10px">
-        <div>ìƒì‚° ì™„ë£Œ: <b>${qty}ë´‰</b> (${qty*5}kg)</div>
-        <div style="margin-top:4px">ì™„ì„± ë°•ìŠ¤: <b style="color:var(--success)">${boxes}ë°•ìŠ¤</b> (${boxes*4}ë´‰)</div>
-        ${loose?`<div style="color:var(--warning);margin-top:4px">ë‚±ë´‰: <b>${loose}ë´‰</b> â†’ ë‹¤ìŒ ë°°ì¹˜ í•©ì‚° í›„ ë°•ìŠ¤ ì™„ì„±</div>`:''}
+        <div>생산 완료: <b>${qty}봉</b> (${qty*5}kg)</div>
+        <div style="margin-top:4px">완성 박스: <b style="color:var(--success)">${boxes}박스</b> (${boxes*4}봉)</div>
+        ${loose?`<div style="color:var(--warning);margin-top:4px">낱봉: <b>${loose}봉</b> → 다음 배치 합산 후 박스 완성</div>`:''}
       </div>
-      <div class="form-row"><div class="form-label">ë‚©í’ˆ ê±°ëž˜ì²˜</div>
+      <div class="form-row"><div class="form-label">납품 거래처</div>
         <select class="form-select" id="ship-cust-wo">
-          <option>â€” ê±°ëž˜ì²˜ ì„ íƒ â€”</option>
-          <option>ãˆœí•œêµ­ìœ í†µ Â· ì„œìš¸ ê°•ë‚¨êµ¬</option>
-          <option>ãˆœì‹ ì„ ë§ˆíŠ¸ Â· ê²½ê¸° ì„±ë‚¨ì‹œ</option>
-          <option>ãˆœí˜¸ë‘ê³¼ìžì²´ì¸ Â· ì „êµ­</option>
+          <option>— 거래처 선택 —</option>
+          <option>㈜한국유통 · 서울 강남구</option>
+          <option>㈜신선마트 · 경기 성남시</option>
+          <option>㈜호두과자체인 · 전국</option>
         </select>
       </div>
-      <div class="form-row"><div class="form-label">ëƒ‰ë™ íƒë°°ì‚¬</div>
+      <div class="form-row"><div class="form-label">냉동 택배사</div>
         <select class="form-select">
-          <option>CJëŒ€í•œí†µìš´ ëƒ‰ë™íƒë°°</option>
-          <option>ë¡¯ë°íƒë°° ëƒ‰ë™</option>
+          <option>CJ대한통운 냉동택배</option>
+          <option>롯데택배 냉동</option>
         </select>
       </div>
     </div>
-    <button class="btn-success" onclick="finalShipment()">ðŸš› ì¶œí•˜ í™•ì • Â· ìž‘ì—…ì§€ì‹œì„œ ì™„ë£Œ</button>`;
+    <button class="btn-success" onclick="finalShipment()">🚛 출하 확정 · 작업지시서 완료</button>`;
   }
-  // ì´ì „ ë‹¨ê³„ ë²„íŠ¼ (ëª¨ë“  ë‹¨ê³„, ë‹¨ 0ë²ˆ ì œì™¸)
+  // 이전 단계 버튼 (모든 단계, 단 0번 제외)
   if(n > 0 && s.type !== 'ship_prep'){
-    body.innerHTML += `<button class="btn-prev-step" onclick="goToPrevStep(${n})">â† ì´ì „ ë‹¨ê³„ë¡œ ëŒì•„ê°€ê¸°</button>`;
+    body.innerHTML += `<button class="btn-prev-step" onclick="goToPrevStep(${n})">← 이전 단계로 돌아가기</button>`;
   }
 }
 
@@ -1814,14 +1814,14 @@ function updateQtyCalc(){
   const nb=wo.plannedBatches||3;
   let rows=RECIPE_HDR.perBatch5kg.map(ing=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6"><span>${ing.icon} ${ing.name}</span><span style="font-family:monospace">${(ing.amount*nb).toLocaleString()}${ing.unit} <span style="color:var(--text-sub)">(+5%: ${(ing.amount*nb*1.05).toFixed(0)})</span></span></div>`).join('');
   const el=document.getElementById('qty-calc');
-  if(el) el.innerHTML=`<div style="font-weight:700;margin-bottom:8px">ðŸ“‹ ë ˆì‹œí”¼ ìžë™ ê³„ì‚° (${nb}ë°°ì¹˜ Ã— 5kg = ${nb*5}kg)</div>${rows}<div style="margin-top:8px;font-size:12px;color:var(--primary);font-weight:700">ëª©í‘œ ìƒì‚°ëŸ‰: ${nb*5}kg Â· ìµœì¢… ì™„ì œí’ˆ ${nb}ë´‰</div>`;
+  if(el) el.innerHTML=`<div style="font-weight:700;margin-bottom:8px">📋 레시피 자동 계산 (${nb}배치 × 5kg = ${nb*5}kg)</div>${rows}<div style="margin-top:8px;font-size:12px;color:var(--primary);font-weight:700">목표 생산량: ${nb*5}kg · 최종 완제품 ${nb}봉</div>`;
 }
 
 function confirmWater(idx, checked){
   if(!wo.ingrStatus[idx]) wo.ingrStatus[idx]={};
   wo.ingrStatus[idx].ok=checked;
   wo.ingrStatus[idx].scanned=checked;
-  if(checked) showToast('ðŸ’§ ì •ì œìˆ˜ ê³µê¸‰ í™•ì¸ ì™„ë£Œ');
+  if(checked) showToast('💧 정제수 공급 확인 완료');
   renderStep(1);
 }
 function woScanIngr(idx){
@@ -1833,20 +1833,20 @@ function woScanIngr(idx){
   else rec={matId:ing.itemId,batchLot:`L-${ing.itemId.replace('MAT-','')}-20260320`,unitSeq:'001',rcvDate:'2026-03-20',expiry:'2027-03-20',status:'normal'};
   if(!wo.ingrStatus[idx]) wo.ingrStatus[idx]={};
   Object.assign(wo.ingrStatus[idx],{scanned:true,unitSeq:rec.unitSeq,rcvDate:rec.rcvDate,expiry:rec.expiry,visual:null,foreign:null,ok:false,disposed:false});
-  showToast(`ðŸ“· ${ing.icon} ${ing.name} #${rec.unitSeq} ìŠ¤ìº” ì™„ë£Œ`);
+  showToast(`📷 ${ing.icon} ${ing.name} #${rec.unitSeq} 스캔 완료`);
   renderStep(1);
 }
 
 function setJudge(idx,field,val){
-  if(&wo.ingrStatus[idx]) return;
+  if(!wo.ingrStatus[idx]) return;
   if(val==='bad'){
     const ing=RECIPE_HDR.perBatch5kg[idx];
     confirmDispose(
-      `<b>${ing.icon} ${ing.name}</b><br><br>${field==='visual'?'ì™¸ê´€ ë¶ˆëŸ‰':'ì´ë¬¼ ë°œê²¬'}ìœ¼ë¡œ íê¸° ì²˜ë¦¬í•˜ì‹œê² ìŠµë‹ˆê¹Œ?<br><span style="color:var(--danger)">íê¸° í›„ ëŒ€ì²´ ì›ë£Œë¥¼ ìž¬ìŠ¤ìº”í•´ì•¼ í•©ë‹ˆë‹¤.</span>`,
+      `<b>${ing.icon} ${ing.name}</b><br><br>${field==='visual'?'외관 불량':'이물 발견'}으로 폐기 처리하시겠습니까?<br><span style="color:var(--danger)">폐기 후 대체 원료를 재스캔해야 합니다.</span>`,
       ()=>{
         wo.ingrStatus[idx].disposed=true;
         wo.ingrStatus[idx].ok=false;
-        showToast('ðŸ—‘ï¸ íê¸° ì²˜ë¦¬ ì™„ë£Œ. ëŒ€ì²´ ì›ë£Œë¥¼ ìž¬ìŠ¤ìº”í•˜ì„¸ìš”.');
+        showToast('🗑️ 폐기 처리 완료. 대체 원료를 재스캔하세요.');
         setTimeout(()=>{ wo.ingrStatus[idx]={scanned:false,ok:false,disposed:false}; renderStep(1); },800);
       }
     );
@@ -1854,7 +1854,7 @@ function setJudge(idx,field,val){
   }
   wo.ingrStatus[idx][field]=val;
   const v=wo.ingrStatus[idx].visual; const f=wo.ingrStatus[idx].foreign;
-  if(v==='ok'&&f==='ok'){ wo.ingrStatus[idx].ok=true; showToast('âœ… í™•ì¸ ì™„ë£Œ'); renderStep(1); }
+  if(v==='ok'&&f==='ok'){ wo.ingrStatus[idx].ok=true; showToast('✅ 확인 완료'); renderStep(1); }
   else renderStep(1);
 }
 
@@ -1865,7 +1865,7 @@ function setQuality(field,val,btn){
 }
 
 function qualityPass(){ renderStep(11); }
-function qualityFail(){ showToast('âš ï¸ ê´€ë¦¬ìžì—ê²Œ ì•Œë¦¼ ë°œì†¡ â€” íê¸°ì—¬ë¶€ ìŠ¹ì¸ ìš”ì²­'); renderStep(11); }
+function qualityFail(){ showToast('⚠️ 관리자에게 알림 발송 — 폐기여부 승인 요청'); renderStep(11); }
 
 function simulateApproval(){
   const d=new Date(); const t=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
@@ -1873,15 +1873,15 @@ function simulateApproval(){
   wo.completed=true;
   wo.lotNum=`WL-20260327-HDR-00${Math.floor(Math.random()*5+3)}`;
   if(!wo.prodQty) wo.prodQty=wo.plannedBatches||3;
-  // ì™„ë£Œ ëª©ë¡ì— ì¶”ê°€
-  COMPLETED_LOTS.push({lot:wo.lotNum,qty:wo.prodQty,approvedAt:`2026-03-27 ${t}`,status:'ë™ê²°ëŒ€ê¸°'});
-  // WO ëª©ë¡ ì—…ë°ì´íŠ¸ (ë™ì  ë°°ì§€ ì¶”ê°€)
+  // 완료 목록에 추가
+  COMPLETED_LOTS.push({lot:wo.lotNum,qty:wo.prodQty,approvedAt:`2026-03-27 ${t}`,status:'동결대기'});
+  // WO 목록 업데이트 (동적 배지 추가)
   markWOCompleted(wo.lotNum, wo.prodQty);
-  showToast('âœ… ë°•ê´€ë¦¬ìž ìŠ¹ì¸ ì™„ë£Œ Â· ìž‘ì—…ì§€ì‹œì„œ ì™„ë£Œ ìƒíƒœ ì „í™˜ Â· LOT ë¶€ì—¬ë¨');
+  showToast('✅ 박관리자 승인 완료 · 작업지시서 완료 상태 전환 · LOT 부여됨');
   renderStep(11);
 }
 function markWOCompleted(lotNum, qty){
-  // í˜„ìž¬ ì§„í–‰ì¤‘ WO ì¹´ë“œ ì—…ë°ì´íŠ¸ (ë°ëª¨ìš©)
+  // 현재 진행중 WO 카드 업데이트 (데모용)
   const cards=document.querySelectorAll('.wo-card.ongoing');
   cards.forEach(card=>{
     const lotEl=card.querySelector('.wo-lot');
@@ -1889,7 +1889,7 @@ function markWOCompleted(lotNum, qty){
       card.classList.remove('ongoing');
       card.classList.add('approved');
       const pill=card.querySelector('.pill');
-      if(pill){pill.className='pill pill-approve'; pill.textContent='âœ… ì™„ë£Œ';}
+      if(pill){pill.className='pill pill-approve'; pill.textContent='✅ 완료';}
       card.onclick=()=>openCompletedWOQR(lotNum,qty);
     }
   });
@@ -1905,9 +1905,9 @@ function buildProdLabels(){
     const barcodeStr=`MTT|FG|FG-HDR|FP-${fullId}|20261227`;
     grid.innerHTML+=`<div class="qr-label">
       ${makeQRSVG(barcodeStr)}
-      <div class="qr-label-title">ðŸ¡ í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg</div>
-      <div class="qr-label-lot">#${seq} Â· ${wo.lotNum}</div>
-      <div class="qr-label-lot">ìœ í†µê¸°í•œ: 2026-12-27</div>
+      <div class="qr-label-title">🍡 호두과자 전용반죽 5kg</div>
+      <div class="qr-label-lot">#${seq} · ${wo.lotNum}</div>
+      <div class="qr-label-lot">유통기한: 2026-12-27</div>
     </div>`;
   }
 }
@@ -1916,22 +1916,22 @@ function checkMeasure(el,target,diffId,judgeId){
   const v=parseFloat(el.value); if(isNaN(v)) return;
   const diff=v-target; const pct=(diff/target*100).toFixed(1);
   const diffEl=document.getElementById(diffId); const judgeEl=document.getElementById(judgeId);
-  if(diffEl) diffEl.textContent=`ì°¨ì´: ${diff>0?'+':''}${diff}${el.id.includes('mL')?'mL':''}  (${pct}%)`;
-  if(Math.abs(parseFloat(pct))<=5){ if(judgeEl) judgeEl.innerHTML='<span class="pill pill-ok" style="font-size:10px">âœ… í—ˆìš©ë²”ìœ„ ì´ë‚´</span>';}
-  else { if(judgeEl) judgeEl.innerHTML='<span class="pill pill-danger" style="font-size:10px">âš ï¸ í—ˆìš©ë²”ìœ„ ì´ˆê³¼</span>';}
+  if(diffEl) diffEl.textContent=`차이: ${diff>0?'+':''}${diff}${el.id.includes('mL')?'mL':''}  (${pct}%)`;
+  if(Math.abs(parseFloat(pct))<=5){ if(judgeEl) judgeEl.innerHTML='<span class="pill pill-ok" style="font-size:10px">✅ 허용범위 이내</span>';}
+  else { if(judgeEl) judgeEl.innerHTML='<span class="pill pill-danger" style="font-size:10px">⚠️ 허용범위 초과</span>';}
 }
 
 function validateMeasureStep(n){
-  if(!vo.photosDone[n]){showToast('ê³„ëŸ‰ ì €ìš¸ ì‚¬ì§„ì„ ë¨¼ì € ì´¬ì˜í•˜ì„¸ìš”');return;}
+  if(!wo.photosDone[n]){showToast('계량 저울 사진을 먼저 촬영하세요');return;}
   const cb=document.getElementById(`wo-add-${n}`);
-  if(!cb||!cb.checked){showToast('ë°°í•©ê¸° íˆ¬ìž… ì™„ë£Œë¥¼ í™•ì¸í•˜ì„¸ìš”');return;}
+  if(!cb||!cb.checked){showToast('배합기 투입 완료를 확인하세요');return;}
   renderStep(n+1);
 }
 function validateMixStep(n){
   const mp=wo.mixPhotos[n]||{};
-  if(!mp.speed){showToast('ë°°í•©ê¸° ì†ë„ ì„¤ì • ì‚¬ì§„ì„ ì´¬ì˜í•˜ì„¸ìš”');return;}
-  if(!mp.start){showToast('ë°°í•© ì‹œìž‘ ì‹œê°„ ì‚¬ì§„ì„ ì´¬ì˜í•˜ì„¸ìš”');return;}
-  if(!mp.end){showToast('ë°°í•© ì¢…ë£Œ ì‹œê°„ ì‚¬ì§„ì„ ì´¬ì˜í•˜ì„¸ìš”');return;}
+  if(!mp.speed){showToast('배합기 속도 설정 사진을 촬영하세요');return;}
+  if(!mp.start){showToast('배합 시작 시간 사진을 촬영하세요');return;}
+  if(!mp.end){showToast('배합 종료 시간 사진을 촬영하세요');return;}
   renderStep(n+1);
 }
 function validateFillStep(nb){
@@ -1939,7 +1939,7 @@ function validateFillStep(nb){
   const kg=parseFloat(document.getElementById('wo-fill-kg').value)||nb*5;
   const tolMin=nb*5*0.99; const tolMax=nb*5*1.01;
   if(kg<tolMin||kg>tolMax){
-    showToast(`âš ï¸ ì´ëŸ‰ ${kg}knì´ í—ˆìš©ë²”ìœ„(${tolMin.toFixed(2)}~${tolMax.toFixed(2)}kg) ì´ˆê³¼`);
+    showToast(`⚠️ 총량 ${kg}kg이 허용범위(${tolMin.toFixed(2)}~${tolMax.toFixed(2)}kg) 초과`);
     return;
   }
   wo.prodQty=qty;
@@ -1950,14 +1950,14 @@ function checkFillTolerance(val,target){
   const el=document.getElementById('fill-judge');
   if(!el) return;
   const min=target*0.99; const max=target*1.01;
-  if(kg>=min&&kg<=max) el.innerHTML=`<span style="color:var(--success)">âœ… í—ˆìš©ë²”ìœ„ ì´ë‚´ (${(min).toFixed(2)}}${(max).toFixed(2)}kg)</span>`;
-  else el.innerHTML=`<span style="color:var(--danger)">âš ï¸ í—ˆìš©ë²”ìœ„ ì´ˆê³¼ â€” ìž¬ì¶©ì§„ í•„ìš”</span>`;
+  if(kg>=min&&kg<=max) el.innerHTML<`<span style="color:var(--success)">✅ 허용범위 이내 (${(min).toFixed(2)}~${(max).toFixed(2)}kg)</span>`;
+  else el.innerHTML=`<span style="color:var(--danger)">⚠️ 허용범위 초과 — 재충진 필요</span>`;
 }
 function attachMixPhoto(n, key){
   if(!wo.mixPhotos[n]) wo.mixPhotos[n]={};
   wo.mixPhotos[n][key]=true;
-  const labels={speed:'ë°°í•©ê¸° ì†ë„',start:'ë°°í•© ì‹œìž‘ ì‹œê°„',end:'ë°°í•© ì¢…ë£Œ ì‹œê°„'};
-  showToast(`ðŸ“· ${labels[key]} ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ`);
+  const labels={speed:'배합기 속도',start:'배합 시작 시간',end:'배합 종료 시간'};
+  showToast(`📷 ${labels[key]} 사진 첨부 완료`);
   renderStep(n); // re-render to update UI
 }
 function goToPrevStep(n){
@@ -1965,9 +1965,9 @@ function goToPrevStep(n){
 }
 function processShip(lot, qtyInputId){
   const qty=parseInt(document.getElementById(qtyInputId).value)||0;
-  if(!qty){showToast('ì¶œí•˜ ìˆ˜ëŸ‰ì„ ìž…ë ¥í•˜ì„¸ìš”');return;}
+  if(!qty){showToast('출하 수량을 입력하세요');return;}
   confirmDispose(
-    `LOT <b>${lot}</b>ì—ì„œ <b>${qty}ë´‰</b>ì„ ì¶œí•˜ ì²˜ë¦¬í•˜ì‹œê² ìŠµë‹ˆê¹Œ?<br><span style="color:var(--text-sub)">ì²˜ë¦¬ í›„ ìž¬ê³ ì—ì„œ ì°¨ê°ë©ë‹ˆë‹¤.</span>`,
+    `LOT <b>${lot}</b>에서 <b>${qty}봉</b>을 출하 처리하시겠습니까?<br><span style="color:var(--text-sub)">처리 후 재고에서 차감됩니다.</span>`,
     ()=>{
       const fg = FG_LOTS.find(l=>l.lotId===lot);
       if(fg){ let q=qty; fg.units.forEach(u=>{if(q>0&&u.status==='available'){u.status='shipped';q--;}}); renderFGLotInventory(); }
@@ -1977,9 +1977,9 @@ function processShip(lot, qtyInputId){
       const entry=document.createElement('div');
       entry.style.cssText='background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;animation:fadeIn .3s';
       const now=new Date(); const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      entry.innerHTML<`<span style="color:#0ea5e9;font-weight:700">ðŸš› ì¶œí•˜</span><span style="color:#f8fafc;flex:1">${lot} ${qty}ë´‰</span><span style="color:#475569;font-size:10px">${t}</span>`;
+      entry.innerHTML=`<span style="color:#0ea5e9;font-weight:700">🚛 출하</span><span style="color:#f8fafc;flex:1">${lot} ${qty}봉</span><span style="color:#475569;font-size:10px">${t}</span>`;
       logList.insertBefore(entry,logList.firstChild);
-      showToast(`ðŸš› ${lot} ${qty}ë´‰ ì¶œí•˜ ì²˜ë¦¬ ì™„ë£Œ`);
+      showToast(`🚛 ${lot} ${qty}봉 출하 처리 완료`);
     }
   );
 }
@@ -1995,39 +1995,39 @@ function refreshFIFOSection(){
       <div class="fifo-batch-top">
         <div>
           <div style="font-size:11px;font-family:monospace;color:var(--text-sub)">${i+1+1} ${lot.lot}</div>
-          <div style="font-size:13px;font-weight:800;margin-top:2px">í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg</div>
-          <div style="font-size:11px;color:var(--text-sub);margin-top:1px">ìƒì‚°ì¼: ${lot.prodDate} Â· ìœ í†µê¸°í•œ: ${lot.expiry}</div>
+          <div style="font-size:13px;font-weight:800;margin-top:2px">호두과자 전용반죽 5kg</div>
+          <div style="font-size:11px;color:var(--text-sub);margin-top:1px">생산일: ${lot.prodDate} · 유통기한: ${lot.expiry}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:22px;font-weight:800;color:var(--success)">${lot.qty}</div>
-          <div style="font-size:10px;color:var(--text-sub)">ë´‰ ìž¬ê³ </div>
+          <div style="font-size:10px;color:var(--text-sub)">봉 재고</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-        <div style="flex:1"><div style="font-size:10px;color:var(--text-sub);margin-bottom:3px">ì¶œí•˜ ìˆ˜ëŸ‰ (ë´‰)</div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--text-sub);margin-bottom:3px">출하 수량 (봉)</div>
           <input type="number" class="form-input" id="${inputId}" value="${lot.qty}" min="1" max="${lot.qty}" style="font-size:13px;padding:7px 10px">
         </div>
-        <button onclick="processShip('${lot.lot}','${inputId}')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;margin-top:14px">ðŸš› ì¶œí•˜</button>
+        <button onclick="processShip('${lot.lot}','${inputId}')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;margin-top:14px">🚛 출하</button>
       </div>
     </div>`;
   });
   const badge=document.getElementById('fifo-total-badge');
   const total2=SHIP_READY_LOTS.reduce((s,l)=>s+l.qty,0);
-  if(badge) badge.textContent=`${total2}ë´‰ ëŒ€ê¸°`;
+  if(badge) badge.textContent=`${total2}봉 대기`;
 }
 function openCompletedWOQR(lotNum, qty){
   const expiry='2026-12-27';
-  document.getElementById('qr-sheet-title').textContent='QR ë¼ë²¨ ìž¬ì¶œë ¥ â€” ' + lotNum;
-  document.getElementById('qr-sheet-info').innerHTML=`âœ… ì™„ë£Œëœ ìž‘ì—…ì§€ì‹œì„œ Â· LOT: <b>${lotNum}</b> Â· ${qty}ë´‰ Â· ìœ í†µê¸°í•œ: ${expiry}`;
+  document.getElementById('qr-sheet-title').textContent='QR 라벨 재출력 — ' + lotNum;
+  document.getElementById('qr-sheet-info').innerHTML=`✅ 완료된 작업지시서 · LOT: <b>${lotNum}</b> · ${qty}봉 · 유통기한: ${expiry}`;
   const grid=document.getElementById('qr-sheet-labels'); grid.innerHTML='';
   for(let i=1;i<=qty;i++){
     const seq=String(i).padStart(3,'0');
     const barcodeStr=`MTT|FG|FG-HDR|FP-${lotNum}-${seq}|${expiry.replace(/-/g,'')}`;
     grid.innerHTML+=`<div class="qr-label">
       ${makeQRSVG(barcodeStr)}
-      <div class="qr-label-title">ðŸ¡ í˜¸ë‘ê³¼ìž ì „ìš©ë°˜ì£½ 5kg</div>
-      <div class="qr-label-lot">#${seq} Â· ${lotNum}</div>
-      <div class="qr-label-lot">ìœ í†µê¸°í•œ: ${expiry}</div>
+      <div class="qr-label-title">🍡 호두과자 전용반죽 5kg</div>
+      <div class="qr-label-lot">#${seq} · ${lotNum}</div>
+      <div class="qr-label-lot">유통기한: ${expiry}</div>
     </div>`;
   }
   document.getElementById('qr-sheet-overlay').classList.add('open');
@@ -2036,43 +2036,43 @@ function openCompletedWOQR(lotNum, qty){
 function attachPhoto(n){
   wo.photosDone[n]=true;
   const btn=document.getElementById('photo-btn-'+n);
-  if(btn){btn.classList.add('attached'); btn.textContent='âœ… ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ';}
-  showToast('ðŸ“· ì‚¬ì§„ ì²¨ë¶€ ì™„ë£Œ');
+  if(btn){btn.classList.add('attached'); btn.textContent='✅ 사진 첨부 완료';}
+  showToast('📷 사진 첨부 완료');
 }
 
 function updateMetalResult(val){
   const n=parseInt(val)||0;
   const el=document.getElementById('metal-result');
   if(!el) return;
-  if(n===0) el.innerHTML='<span style="color:var(--success)">âœ… ì´ìƒ ì—†ìŒ â†’ ì „ëŸ‰ ì¶œí•˜ ê°€ëŠ¥</span>';
-  else el.innerHTML<`<span style="color:var(--danger)">âš ï¸ ${n}ë´‰ ì´ìƒ ê²€ì¶œ â†’ ê²©ë¦¬ í›„ ê´€ë¦¬ìž ë³´ê³  í•„ìš”</span>`;
+  if(n===0) el.innerHTML='<span style="color:var(--success)">✅ 이상 없음 → 전량 출하 가능</span>';
+  else el.innerHTML=`<span style="color:var(--danger)">⚠️ ${n}봉 이상 검출 → 격리 후 관리자 보고 필요</span>`;
 }
 
 function submitMetalDetection(){
   const fe=document.getElementById('ccp-fe-ok'); const sts=document.getElementById('ccp-sts-ok');
-  if(!fe||!fe.checked){showToast('Fe 2.5mm ì‹œíŽ¸ ê²€ì¶œ í™•ì¸ì„ ì²´í¬í•˜ì„¸ìš”');return;}
-  if(!sts||!sts.checked){showToast('SUS 4.0mm ì‹œíŽ¸ ê²€ì¶œ í™•ì¸ì„ ì²´í¬í•˜ì„¸ìš”');return;}
+  if(!fe||!fe.checked){showToast('Fe 2.5mm 시편 검출 확인을 체크하세요');return;}
+  if(!sts||!sts.checked){showToast('SUS 4.0mm 시편 검출 확인을 체크하세요');return;}
   wo.metalDone=true;
-  showToast('âœ… CCP-2P ê¸ˆì†ê²€ì¶œ ì™„ë£Œ (Feâ‰¥2.5mm Â· SUSâ‰¥4.0mm) Â· ì´ë ¥ ê¸°ë¡ë¨');
+  showToast('✅ CCP-2P 금속검출 완료 (Fe≥2.5mm · SUS≥4.0mm) · 이력 기록됨');
   renderStep(13);
 }
 
 function checkFreezeTemp(val){
   const t=parseFloat(val); const el=document.getElementById('freeze-temp-status');
   if(!el) return;
-  if(t<=-16) el.innerHTML='<span style="color:var(--success)">âœ… í•œê³„ê¸°ì¤€ ì í•© (-16Â°C ì´í•˜)</span>';
-  else el.innerHTML='<span style="color:var(--danger)">âš ï¸ í•œê³„ê¸°ì¤€ ì´íƒˆ â€” ì¦‰ì‹œ ìž‘ì—… ì¤‘ì§€ í›„ ê´€ë¦¬ìž ë³´ê³ </span>';
+  if(t<=-16) el.innerHTML='<span style="color:var(--success)">✅ 한계기준 적합 (-16°C 이하)</span>';
+  else el.innerHTML='<span style="color:var(--danger)">⚠️ 한계기준 이탈 — 즉시 작업 중지 후 관리자 보고</span>';
 }
 
 function submitFreezing(){
   const temp=parseFloat(document.getElementById('freeze-temp').value||'-18');
-  if(temp>-16){showToast('âš ï¸ ëƒ‰ë™ì˜¨ë„ í•œê³„ê¸°ì¤€ ì´íƒˆ. ê´€ë¦¬ìž ë³´ê³  í•„ìš”');return;}
+  if(temp>-16){showToast('⚠️ 냉동온도 한계기준 이탈. 관리자 보고 필요');return;}
   const start=document.getElementById('freeze-start').value||'11:00';
   const [h,m]=start.split(':').map(Number);
   const comp=new Date(2026,2,27,h+12,m);
   const compStr=`${String(comp.getHours()).padStart(2,'0')}:${String(comp.getMinutes()).padStart(2,'0')}`;
   wo.freezeStart=start;
-  // ì¶œí•˜ ê°€ëŠ¥ ìž¬ê³ ì— ì¶”ê°€
+  // 출하 가능 재고에 추가
   const readyLot={
     lot:wo.lotNum,
     qty:wo.prodQty||wo.plannedBatches||3,
@@ -2083,46 +2083,46 @@ function submitFreezing(){
     expiry:'2026-12-27'
   };
   SHIP_READY_LOTS.push(readyLot);
-  // COMPLETED_LOTS ìƒíƒœ ì—…ë°ì´íŠ¸
+  // COMPLETED_LOTS 상태 업데이트
   const cl=COMPLETED_LOTS.find(c=>c.lot===wo.lotNum);
-  if(cl) cl.status='ëƒ‰ë™ì™„ë£ŒÂ·ì¶œí•˜ê°€ëŠ¥';
-  // FIFO ì„¹ì…˜ ì—…ë°ì´íŠ¸
+  if(cl) cl.status='냉동완료·출하가능';
+  // FIFO 섹션 업데이트
   refreshFIFOSection();
-  showToast(`â„ï¸ ë™ê²°ê³µì • ë“±ë¡ ì™„ë£Œ Â· ì¶œí•˜ê°€ëŠ¥ ìž¬ê³  ì „í™˜ Â· ${compStr} ì´í›„ ì¶œí•˜ ê°€ëŠ¥`);
+  showToast(`❄️ 동결공정 등록 완료 · 출하가능 재고 전환 · ${compStr} 이후 출하 가능`);
   renderStep(14);
 }
 
 function finalShipment(){
   const cust=document.getElementById('ship-cust-wo');
-  if(!cust||!cust.value||cust.value.includes('ì„ íƒ')){showToast('ê±°ëž˜ì²˜ë¥¼ ì„ íƒí•˜ì„¸ìš”');return;}
-  showToast('ðŸš› ì¶œí•˜ ì™„ë£Œ Â· ìž‘ì—…ì§€ì‹œì„œ ë§ˆê°ë¨');
-  setTimeout(()=>{closeWOPanel(); showToast('âœ… '+wo.lotNum+' ì¶œí•˜ ì™„ë£Œ Â· ì „ ê¸°ë¡ ì €ìž¥ë¨');},1000);
+  if(!cust||!cust.value||cust.value.includes('선택')){showToast('거래처를 선택하세요');return;}
+  showToast('🚛 출하 완료 · 작업지시서 마감됨');
+  setTimeout(()=>{closeWOPanel(); showToast('✅ '+wo.lotNum+' 출하 완료 · 전 기록 저장됨');},1000);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // SOP Manager (stub)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-function openSopManager(){ showToast('SOP ê´€ë¦¬ íŒ¨ë„ â€” ê´€ë¦¬ìž ê¶Œí•œ í•„ìš”'); }
+// ═══════════════════════════════════
+function openSopManager(){ showToast('SOP 관리 패널 — 관리자 권한 필요'); }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 // Ship Panel (from inventory)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════
 function openShipPanel(lotId){
-  document.getElementById('ship-lot-info').textContent=lotId+' Â· 3ë´‰ (15kg) Â· ëƒ‰ë™ì™„ë£Œ âœ…';
-  document.getElementById('ship-box-calc').innerHTML='5kg Ã— 3ë´‰ â†’ <b>0ë°•ìŠ¤ ì™„ì„±</b>, ë‚±ë´‰ 3ê°œ (4ë´‰ ì‹œ 1ë°•ìŠ¤)<br><span style="color:var(--warning)">âš ï¸ 4ë´‰ ë¯¸ë§Œ â€” ë‚±ë´‰ ì¶œí•˜ ë˜ëŠ” ë‹¤ìŒ ë°°ì¹˜ ëŒ€ê¸°</span>';
+  document.getElementById('ship-lot-info').textContent=lotId+' · 3봉 (15kg) · 냉동완료 ✅';
+  document.getElementById('ship-box-calc').innerHTML='5kg × 3봉 → <b>0박스 완성</b>, 낱봉 3개 (4봉 시 1박스)<br><span style="color:var(--warning)">⚠️ 4봉 미만 — 낱봉 출하 또는 다음 배치 대기</span>';
   document.getElementById('ship-panel').classList.add('open');
 }
 function closeShipPanel(){ document.getElementById('ship-panel').classList.remove('open'); }
 function confirmShipment(){
   const c=document.getElementById('ship-customer');
-  if(!c||!c.value||c.value.includes('ì„ íƒ')){showToast('ê±°ëž˜ì²˜ë¥¼ ì„ íƒí•˜ì„¸ìš”');return;}
-  showToast('ðŸš› ì¶œí•˜ ì™„ë£Œ Â· ìž¬ê³  ë°˜ì˜ë¨');
+  if(!c||!c.value||c.value.includes('선택')){showToast('거래처를 선택하세요');return;}
+  showToast('🚛 출하 완료 · 재고 반영됨');
   closeShipPanel();
 }
 
 function showCCPDetail(ccp){
-  const msgs={'1B':'â„ï¸ CCP-1B ë™ê²°ê³µì •\nëƒ‰ë™ì°½ê³  A-2 í˜„ìž¬ -15Â°C\ní•œê³„ê¸°ì¤€: -16Â°C ì´í•˜\nâ†’ ì¦‰ì‹œ ìž‘ì—… ì¤‘ì§€ Â· ê´€ë¦¬ìž ë³´ê³ ','2P':'ðŸ” CCP-2P ê¸ˆì†ê²€ì¶œ\nê¸°ì¤€: Feâ‰¥2.5mm Â· SUSâ‰¥4.0mm\nìµœê·¼ ê²€ì‚¬: ë¯¸ê²€ì¶œ\në‹¤ìŒ 2ì‹œê°„ ì •ê¸°ê²€ì‚¬: 12:00'};
-  showToast(msgs[ccp]||'CCP ìƒì„¸');
+  const msgs={'1B':'❄️ CCP-1B 동결공정\n냉동창고 A-2 현재 -15°C\n한계기준: -16°C 이하\n→ 즉시 작업 중지 · 관리자 보고','2P':'🔍 CCP-2P 금속검출\n기준: Fe≥2.5mm · SUS≥4.0mm\n최근 검사: 미검출\n다음 2시간 정기검사: 12:00'};
+  showToast(msgs[ccp]||'CCP 상세');
 }
 
 // Call lot inventory render if user is already logged in (e.g., dev mode)
