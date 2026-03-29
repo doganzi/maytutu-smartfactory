@@ -825,7 +825,7 @@ function processInvScan() {
       <button onclick="doInvAction('dispose')" style="padding:10px;border:2px solid #fca5a5;border-radius:10px;background:#fef2f2;font-size:12px;font-weight:700;cursor:pointer;color:var(--danger)">🗑️ 폐기</button>
     </div>`;
   const note = isFG?'완제품: 출하 또는 폐기만 선택 가능':'원재료: 스캔 1회 = 포장단위 1개 처리 (수량 입력 없음)';
-  const noteColor = isFG?'#eff6ff':##fffbeb';
+  const noteColor = isFG?'#eff6ff':'#fffbeb';
   document.getElementById('inv-scan-result').style.display='block';
   document.getElementById('inv-scan-result').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:14px;box-shadow:var(--shadow-md);border-left:4px solid ${barColor}">
