@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>메이투투 스마트팩토리</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{--primary:#1e40af;--primary-light:#3b82f6;--primary-bg:#eff6ff;--success:#16a34a;--success-bg:#f0fdf4;--warning:#d97706;--warning-bg:#fffbeb;--danger:#dc2626;--danger-bg:#fef2f2;--gray:#6b7280;--border:#e5e7eb;--text:#111827;--text-sub:#6b7280;--radius:12px;--radius-sm:8px;--shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);--shadow-md:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06);}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
@@ -37,7 +39,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .card-title{font-size:13px;font-weight:700;}
 .card-body{padding:12px 16px;}
 .tbl{width:100%;border-collapse:collapse;font-size:12px;}
-.tbl th{background:#f9fafb;color:var(--text-sub);font-weight:600;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:11px;}
+.tbl th{background:#f9fafb;color:var(--text-sub);font-weight:600;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowraw;font-size:11px;}
 .tbl td{padding:9px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
 .tbl tr:last-child td{border-bottom:none;}
 .pill{display:inline-flex;align-items:center;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap;}
@@ -221,6 +223,41 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 #toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 18px;border-radius:99px;font-size:12px;font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
 #toast.show{opacity:1;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+/* ─── Google Login Overlay ─── */
+#login-overlay{display:flex;position:fixed;inset:0;background:var(--primary);z-index:9999;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
+.login-card{background:#fff;border-radius:20px;padding:32px 24px;width:100%;max-width:360px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.3);}
+.login-logo{font-size:48px;margin-bottom:12px;}
+.login-title{font-size:20px;font-weight:900;color:var(--primary);margin-bottom:4px;}
+.login-sub{font-size:12px;color:var(--text-sub);margin-bottom:24px;}
+#google-btn-wrapper{display:flex;justify-content:center;min-height:44px;}
+.login-note{font-size:10px;color:var(--text-sub);margin-top:16px;line-height:1.6;}
+.login-user-info{background:#f0fdf4;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;display:flex;align-items:center;gap:10px;text-align:left;}
+.login-user-avatar{width:36px;height:36px;border-radius:50%;border:2px solid var(--success);}
+/* ─── QR Camera Modal ─── */
+#qr-camera-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:700;flex-direction:column;align-items:center;justify-content:center;}
+#qr-camera-modal.open{display:flex;}
+#qr-video{width:100%;max-width:400px;border-radius:12px;border:3px solid var(--primary-light);}
+.qr-cam-bar{background:#fff;border-radius:12px;padding:12px 16px;margin-top:12px;width:100%;max-width:400px;text-align:center;}
+.qr-scan-line{position:absolute;width:80%;max-width:300px;height:2px;background:var(--primary-light);animation:scanLine 2s linear infinite;}
+@keyframes scanLine{0%{top:15%;}50%{top:80%;}100%{top:15%;}}
+#qr-cam-result{font-size:12px;color:var(--text-sub);margin-top:6px;}
+/* ─── LOT Inventory Cards ─── */
+.lot-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:8px;overflow:hidden;border-left:4px solid var(--success);cursor:pointer;}
+.lot-card-head{display:flex;align-items:center;gap:12px;padding:12px 14px;}
+.lot-card-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.lot-card-info{flex:1;min-width:0;}
+.lot-card-name{font-size:13px;font-weight:700;}
+.lot-card-meta{font-size:10px;color:var(--text-sub);margin-top:2px;font-family:monospace;}
+.lot-card-arrow{font-size:18px;color:#d1d5db;transition:transform .2s;}
+.lot-card.expanded .lot-card-arrow{transform:rotate(90deg);}
+.lot-card-body{display:none;padding:0 14px 14px;border-top:1px solid #f3f4f6;}
+.lot-card.expanded .lot-card-body{display:block;}
+.lot-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;}
+.lot-detail-item{background:#f9fafb;border-radius:6px;padding:6px 8px;}
+.lot-detail-key{font-size:9px;color:var(--text-sub);display:block;}
+.lot-detail-val{font-size:11px;font-weight:600;}
+.btn-reprint{background:#1e293b;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;width:100%;justify-content:center;}
 /* scan log */
 #inv-log-list>div{animation:fadeIn .3s;}
 .tbl-input{border:1.5px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;text-align:right;}
@@ -229,11 +266,48 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 <body>
 <div id="toast"></div>
 
+<!-- ═══ GOOGLE LOGIN OVERLAY ═══ -->
+<div id="login-overlay">
+  <div class="login-card">
+    <div class="login-logo">🏭</div>
+    <div class="login-title">메이투투 스마트팩토리</div>
+    <div class="login-sub">사내 Google Workspace 계정으로 로그인하세요</div>
+    <div id="login-user-display" style="display:none" class="login-user-info">
+      <img id="login-avatar" class="login-user-avatar" src="" alt="">
+      <div>
+        <div style="font-weight:700" id="login-name">—</div>
+        <div style="color:var(--text-sub)" id="login-email">—</div>
+        <div id="login-role-badge" class="pill pill-blue" style="margin-top:3px;font-size:9px">역할 확인 중</div>
+      </div>
+    </div>
+    <div id="google-btn-wrapper"></div>
+    <div class="login-note">메이투투 Google Workspace 계정(@anghodu.biz)만<br>로그인 가능합니다</div>
+  </div>
+</div>
+
+<!-- ═══ QR CAMERA MODAL ═══ -->
+<div id="qr-camera-modal">
+  <div style="position:relative;display:flex;align-items:center;justify-content:center;width:100%;max-width:400px;">
+    <video id="qr-video" autoplay playsinline muted></video>
+    <div class="qr-scan-line" style="position:absolute;left:10%;width:80%;"></div>
+  </div>
+  <div class="qr-cam-bar">
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px">📷 QR 코드에 카메라를 비추세요</div>
+    <div id="qr-cam-result">스캔 대기 중...</div>
+    <button onclick="closeQRCamera()" style="margin-top:10px;background:var(--danger);color:#fff;border:none;border-radius:8px;padding:10px 28px;font-size:13px;font-weight:700;cursor:pointer">✕ 닫기</button>
+  </div>
+</div>
+
+
 <!-- TOP BAR -->
 <div class="topbar">
   <div class="topbar-logo">메이투투 <span>스마트팩토리</span></div>
-  <span class="topbar-badge">알림 3</span>
-  <span style="font-size:12px;opacity:.8">이상연 작업자</span>
+  <span class="topbar-badge" id="alert-badge">알림 3</span>
+  <span id="topbar-user" style="font-size:11px;opacity:.9;display:flex;align-items:center;gap:5px">
+    <img id="topbar-avatar" src="" style="width:24px;height:24px;border-radius:50%;display:none;border:1.5px solid rgba(255,255,255,.5)">
+    <span id="topbar-name">—</span>
+    <button onclick="logoutGoogle()" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;padding:2px 7px;font-size:10px;color:#fff;cursor:pointer;font-weight:600">로그아웃</button>
+  </span>
 </div>
 
 <!-- PAGE: 대시보드 -->
@@ -271,7 +345,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 <div id="page-inventory" class="page">
   <div class="section-header">
     <span class="section-title">📦 재고 현황</span>
-    <button onclick="openReceivingModal()" style="background:var(--success);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">+ 입고 등록</button>
+    <button onclick="openReceivingModal()" style="background:var(--success);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(22,163,74,.4);display:flex;align-items:center;gap:6px">📥 + 입고 등록</button>
   </div>
 
   <!-- QR 스캔 -->
@@ -291,52 +365,17 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     </div>
   </div>
 
-  <!-- 원재료 재고 -->
-  <div class="section-header"><span class="section-title">🌾 원재료 재고</span></div>
-  <div class="card"><div class="card-body">
-    <div style="background:#eff6ff;border-radius:8px;padding:8px 12px;margin-bottom:4px;font-size:11px;color:#1e40af;display:flex;align-items:center;gap:8px">
-      <span style="font-size:16px">💧</span><div><b>정제수</b> (MAT-H01) — 수도 직접 공급 품목 · 재고 관리 제외<br><span style="color:#3b82f6">작업 시 사용 가능 여부만 현장 확인합니다.</span></div>
-    </div>
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#fef9c3">🥚</div>
-      <div class="inv-info"><div class="inv-name">계란 (전란)</div><div class="inv-meta">MAT-H02 · LOT: L-H02-20260325 · D-19</div>
-        <div style="margin-top:5px"><div class="prog-bg"><div class="prog-bar" style="width:28%;background:var(--danger)"></div></div></div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--danger)">2</div><div class="inv-unit">판(1kg) / 오늘필요7판</div><span class="pill pill-danger" style="margin-top:4px;font-size:10px">🔴 긴급</span></div>
-    </div>
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#f5f3ff">🌾</div>
-      <div class="inv-info"><div class="inv-name">호두과자 프리믹스1</div><div class="inv-meta">MAT-H03 · LOT: L-H03-20260320</div>
-        <div style="margin-top:5px"><div class="prog-bg"><div class="prog-bar" style="width:22%;background:var(--warning)"></div></div></div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--warning)">3.2</div><div class="inv-unit">kg / 오늘필요12kg</div><span class="pill pill-warn" style="margin-top:4px;font-size:10px">🟠 부족</span></div>
-    </div>
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#fef2f2">🧪</div>
-      <div class="inv-info"><div class="inv-name">호두과자 프리믹스2</div><div class="inv-meta">MAT-H04 · LOT: L-H04-20260301</div>
-        <div style="margin-top:5px"><div class="prog-bg"><div class="prog-bar" style="width:75%;background:var(--success)"></div></div></div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--success)">3.75</div><div class="inv-unit">kg / 5kg봉</div><span class="pill pill-ok" style="margin-top:4px;font-size:10px">✅ 정상</span></div>
-    </div>
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#f0fdf4">🥄</div>
-      <div class="inv-info"><div class="inv-name">타피오카전분</div><div class="inv-meta">MAT-H05 · LOT: L-H05-20260310</div>
-        <div style="margin-top:5px"><div class="prog-bg"><div class="prog-bar" style="width:62%;background:var(--success)"></div></div></div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--success)">12.4</div><div class="inv-unit">kg / 20kg포대</div><span class="pill pill-ok" style="margin-top:4px;font-size:10px">✅ 정상</span></div>
-    </div>
-  </div></div>
+  <!-- 원재료 재고 (LOT별) -->
+  <div class="section-header"><span class="section-title">🌾 원재료 재고 (LOT별)</span><span class="pill pill-blue" id="raw-lot-count">4 LOTs</span></div>
+  <div id="raw-lot-list">
+    <!-- LOT cards rendered by JS -->
+  </div>
 
-  <!-- 완제품 재고 -->
-  <div class="section-header"><span class="section-title">📦 완제품 재고 (호두과자 전용반죽)</span></div>
-  <div class="card"><div class="card-body">
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#f0fdf4">🍡</div>
-      <div class="inv-info"><div class="inv-name">호두과자 전용반죽 5kg</div><div class="inv-meta">FG-HDR · WL-20260327-HDR-001 · 냉동완료 ✅</div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--success)">3</div><div class="inv-unit">봉 (출하가능)</div><span class="pill pill-approve" style="margin-top:4px;font-size:10px">❄️ 출하가능</span></div>
-    </div>
-    <div class="inv-item">
-      <div class="inv-icon" style="background:#eff6ff">🍡</div>
-      <div class="inv-info"><div class="inv-name">호두과자 전용반죽 5kg</div><div class="inv-meta">FG-HDR · WL-20260327-HDR-002 · 냉동중 ❄️</div></div>
-      <div class="inv-right"><div class="inv-qty" style="color:var(--text-sub)">5</div><div class="inv-unit">봉 (냉동중)</div><span class="pill pill-waiting" style="margin-top:4px;font-size:10px">⏳ 냉동중</span></div>
-    </div>
-  </div></div>
+  <!-- 완제품 재고 (LOT별) -->
+  <div class="section-header"><span class="section-title">📦 완제품 재고 (LOT별)</span><span class="pill pill-approve" id="fg-lot-count">2 LOTs</span></div>
+  <div id="fg-lot-list">
+    <!-- LOT cards rendered by JS -->
+  </div>
 
   <!-- 출하 가능 재고 (선입선출) -->
   <div class="section-header"><span class="section-title">🚛 출하 가능 재고 (선입선출 FIFO)</span><span class="pill pill-approve" id="fifo-total-badge">3봉 대기</span></div>
@@ -538,7 +577,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav">
-  <button class="bnav-item active" onclick="showTab('dashboard',this)"><span class="bnav-icon">🍊</span><span class="bnav-label">대시보드</span></button>
+  <button class="bnav-item active" onclick="showTab('dashboard',this)"><span class="bnav-icon">📊</span><span class="bnav-label">대시보드</span></button>
   <button class="bnav-item" onclick="showTab('inventory',this)"><span class="bnav-icon">📦</span><span class="bnav-label">재고관리</span></button>
   <button class="bnav-item" onclick="showTab('production',this)"><span class="bnav-icon">🏭</span><span class="bnav-label">생산관리</span></button>
   <button class="bnav-item" onclick="showTab('equipment',this)"><span class="bnav-icon">⚙️</span><span class="bnav-label">기기관리</span></button>
@@ -564,7 +603,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
         <div class="form-label">원재료 선택</div>
         <select class="form-select" id="recv-item-select" onchange="onRecvItemSelect(this.value)">
           <option value="">— 원재료 선택 —</option>
-          <option value="MAT-H01">💧 정제수 (20L/통)</option>
           <option value="MAT-H02">🥚 계란 전란 (1kg/판)</option>
           <option value="MAT-H03">🌾 호두과자 프리믹스1 (20kg/포대)</option>
           <option value="MAT-H04">🧪 호두과자 프리믹스2 (5kg/봉)</option>
@@ -715,6 +753,399 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 </div>
 
 <script>
+// ═══════════════════════════════════
+// CONFIG — Google Workspace
+// ═══════════════════════════════════
+const GWS_CONFIG = {
+  clientId: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com', // Google Cloud Console에서 발급
+  allowedDomain: 'anghodu.biz',  // 사내 Workspace 도메인
+  adminEmails: [], // 관리자 이메일 목록 (비어있으면 도메인 전체 작업자로 처리)
+};
+
+// ─── 로그인 상태 ───
+let currentUser = null;
+let currentRole = 'worker'; // 'admin' | 'worker'
+
+// ─── Google Identity Services 초기화 ───
+function initGoogleSignIn() {
+  if (typeof google === 'undefined') {
+    setTimeout(initGoogleSignIn, 300);
+    return;
+  }
+  google.accounts.id.initialize({
+    client_id: GWS_CONFIG.clientId,
+    callback: handleGoogleLogin,
+    auto_select: false,
+    cancel_on_tap_outside: false,
+    hd: GWS_CONFIG.allowedDomain,  // Google Workspace 도메인 제한
+  });
+  google.accounts.id.renderButton(
+    document.getElementById('google-btn-wrapper'),
+    { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ko', width: 300 }
+  );
+  google.accounts.id.prompt();
+}
+
+function handleGoogleLogin(response) {
+  try {
+    const payload = JSON.parse(atob(response.credential.split('.')[1]));
+    const email = payload.email || '';
+    const domain = email.split('@')[1] || '';
+    if (GWS_CONFIG.allowedDomain && domain !== GWS_CONFIG.allowedDomain) {
+      alert('⚠️ 사내(' + GWS_CONFIG.allowedDomain + ') Google Workspace 계정만 로그인 가능합니다.');
+      return;
+    }
+    currentUser = {
+      name: payload.name,
+      email: payload.email,
+      picture: payload.picture,
+    };
+    // Role: if adminEmails list is set, check it; otherwise treat all as workers
+    if (GWS_CONFIG.adminEmails.length > 0 && GWS_CONFIG.adminEmails.includes(email)) {
+      currentRole = 'admin';
+    } else if (email.includes('admin') || email.includes('manager') || email.includes('mgr')) {
+      currentRole = 'admin';
+    } else {
+      currentRole = 'worker';
+    }
+    finishLogin();
+  } catch(e) {
+    console.error('Login parse error:', e);
+    alert('로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+  }
+}
+
+function finishLogin() {
+  if (!currentUser) return;
+  // Update topbar
+  document.getElementById('topbar-name').textContent = currentUser.name + ' (' + (currentRole === 'admin' ? '관리자' : '작업자') + ')';
+  const avatar = document.getElementById('topbar-avatar');
+  if (currentUser.picture) { avatar.src = currentUser.picture; avatar.style.display = 'block'; }
+  // Update login overlay display
+  document.getElementById('login-avatar').src = currentUser.picture || '';
+  document.getElementById('login-name').textContent = currentUser.name;
+  document.getElementById('login-email').textContent = currentUser.email;
+  const roleBadge = document.getElementById('login-role-badge');
+  roleBadge.textContent = currentRole === 'admin' ? '👑 관리자' : '🔧 작업자';
+  roleBadge.className = 'pill ' + (currentRole === 'admin' ? 'pill-blue' : 'pill-ok');
+  // Hide login overlay
+  document.getElementById('login-overlay').style.display = 'none';
+  // Init lot inventory
+  renderRawLotInventory();
+  renderFGLotInventory();
+}
+
+function logoutGoogle() {
+  if (!confirm('로그아웃 하시겠습니까?')) return;
+  currentUser = null; currentRole = 'worker';
+  if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
+  location.reload();
+}
+
+// ─── DEV MODE: auto-login for demo ───
+// (Comment out in production — requires real Google Client ID)
+function devAutoLogin() {
+  currentUser = { name: '이상연', email: 'sangyeon@anghodu.biz', picture: '' };
+  currentRole = 'worker';
+  finishLogin();
+}
+// Uncomment below line if you don't have a Google Client ID set up yet:
+// window.addEventListener('DOMContentLoaded', () => setTimeout(devAutoLogin, 500));
+
+window.addEventListener('load', () => {
+  initGoogleSignIn();
+  // If Google GSI library fails to load (e.g., in offline test), fallback to dev mode
+  setTimeout(() => {
+    if (!currentUser && document.getElementById('login-overlay').style.display !== 'none') {
+      // Show fallback login button
+      const wrapper = document.getElementById('google-btn-wrapper');
+      if (!wrapper.querySelector('iframe') && !wrapper.querySelector('button')) {
+        wrapper.innerHTML = '<button onclick="devAutoLogin()" style="background:#1e40af;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer;width:100%">🔐 테스트 로그인 (개발용)</button>';
+      }
+    }
+  }, 3000);
+});
+
+// ═══════════════════════════════════
+// QR CAMERA SCANNER
+// ═══════════════════════════════════
+let qrStream = null;
+let qrScanTarget = 'inv'; // 'inv' | 'wo'
+let qrAnimFrame = null;
+
+function openQRCamera(target) {
+  qrScanTarget = target || 'inv';
+  const modal = document.getElementById('qr-camera-modal');
+  modal.classList.add('open');
+  document.getElementById('qr-cam-result').textContent = '스캔 대기 중...';
+  const video = document.getElementById('qr-video');
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    .then(stream => {
+      qrStream = stream;
+      video.srcObject = stream;
+      video.play();
+      video.addEventListener('loadedmetadata', startQRScan, { once: true });
+    })
+    .catch(err => {
+      document.getElementById('qr-cam-result').textContent = '카메라 권한이 필요합니다: ' + err.message;
+    });
+}
+
+function startQRScan() {
+  const video = document.getElementById('qr-video');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  function tick() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = typeof jsQR !== 'undefined' ? jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' }) : null;
+      if (code && code.data) {
+        handleQRResult(code.data);
+        return;
+      }
+    }
+    qrAnimFrame = requestAnimationFrame(tick);
+  }
+  qrAnimFrame = requestAnimationFrame(tick);
+}
+
+function handleQRResult(data) {
+  closeQRCamera();
+  if (qrScanTarget === 'inv') {
+    document.getElementById('inv-scan-input').value = data;
+    processInvScan();
+    showToast('📷 QR 스캔 완료: ' + data.substring(0, 30) + '...');
+  } else if (qrScanTarget === 'wo') {
+    // For work order ingredient scan
+    const idx = parseInt(document.getElementById('qr-camera-modal').dataset.woIdx || '0');
+    simulateWoScanWithCode(idx, data);
+  }
+}
+
+function closeQRCamera() {
+  const modal = document.getElementById('qr-camera-modal');
+  modal.classList.remove('open');
+  if (qrAnimFrame) { cancelAnimationFrame(qrAnimFrame); qrAnimFrame = null; }
+  if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
+}
+
+// ═══════════════════════════════════
+// LOT INVENTORY DATA (원재료 LOT)
+// ═══════════════════════════════════
+let RAW_LOTS = [
+  {
+    lotId: 'L-H02-20260325',
+    matId: 'MAT-H02',
+    rcvDate: '2026-03-25',
+    expiry: '2026-04-15',
+    supplier: '(주)자연농원',
+    units: [
+      { seq: '001', status: 'available' },
+      { seq: '002', status: 'used' },
+    ],
+    note: ''
+  },
+  {
+    lotId: 'L-H03-20260320',
+    matId: 'MAT-H03',
+    rcvDate: '2026-03-20',
+    expiry: '2027-03-20',
+    supplier: '(주)식품원료',
+    units: [
+      { seq: '001', status: 'used' },
+      { seq: '002', status: 'used' },
+      { seq: '003', status: 'available' },
+    ],
+    note: ''
+  },
+  {
+    lotId: 'L-H04-20260301',
+    matId: 'MAT-H04',
+    rcvDate: '2026-03-01',
+    expiry: '2028-03-01',
+    supplier: '(주)식품원료',
+    units: [
+      { seq: '001', status: 'available' },
+      { seq: '002', status: 'available' },
+      { seq: '003', status: 'available' },
+    ],
+    note: ''
+  },
+  {
+    lotId: 'L-H05-20260310',
+    matId: 'MAT-H05',
+    rcvDate: '2026-03-10',
+    expiry: '2028-03-10',
+    supplier: '(주)동아전분',
+    units: [
+      { seq: '001', status: 'used' },
+      { seq: '002', status: 'available' },
+      { seq: '003', status: 'available' },
+    ],
+    note: ''
+  },
+];
+
+let FG_LOTS = [
+  {
+    lotId: 'WL-20260327-HDR-001',
+    matId: 'FG-HDR',
+    prodDate: '2026-03-27',
+    expiry: '2026-12-27',
+    batches: 3,
+    status: 'shippable',
+    frozenAt: '07:30',
+    approvedBy: '박관리자',
+    units: [
+      { seq: '001', status: 'available' },
+      { seq: '002', status: 'available' },
+      { seq: '003', status: 'available' },
+    ]
+  },
+  {
+    lotId: 'WL-20260327-HDR-002',
+    matId: 'FG-HDR',
+    prodDate: '2026-03-27',
+    expiry: '2026-12-27',
+    batches: 5,
+    status: 'freezing',
+    frozenAt: '10:10',
+    approvedBy: '박관리자',
+    units: [
+      { seq: '001', status: 'freezing' },
+      { seq: '002', status: 'freezing' },
+      { seq: '003', status: 'freezing' },
+      { seq: '004', status: 'freezing' },
+      { seq: '005', status: 'freezing' },
+    ]
+  },
+];
+
+function renderRawLotInventory() {
+  const container = document.getElementById('raw-lot-list');
+  if (!container) return;
+  const today = new Date('2026-03-27');
+  let html = '';
+  RAW_LOTS.forEach((lot, i) => {
+    const master = ITEM_DB[lot.matId] || {};
+    const available = lot.units.filter(u => u.status === 'available').length;
+    const exp = new Date(lot.expiry);
+    const dLeft = Math.ceil((exp - today) / 864e5);
+    const expColor = dLeft <= 7 ? 'var(--danger)' : dLeft <= 30 ? 'var(--warning)' : 'var(--success)';
+    const expLabel = dLeft <= 0 ? '❌ 만료' : dLeft <= 7 ? `🔴 D-${dLeft}` : dLeft <= 30 ? `🟠 D-${dLeft}` : `✅ D-${dLeft}`;
+    const statusPill = available === 0
+      ? '<span class="pill pill-gray">소진</span>'
+      : `<span class="pill pill-ok">${available}/${lot.units.length} 재고</span>`;
+    html += `<div class="lot-card" id="raw-lot-${i}" style="border-left-color:${expColor}">
+      <div class="lot-card-head" onclick="toggleLotCard('raw-lot-${i}')">
+        <div class="lot-card-icon" style="background:#f9fafb">${master.icon||'📦'}</div>
+        <div class="lot-card-info">
+          <div class="lot-card-name">${master.name || lot.matId}</div>
+          <div class="lot-card-meta">${lot.lotId} · 유통기한 ${lot.expiry} <span style="color:${expColor};font-weight:700">${expLabel}</span></div>
+        </div>
+        ${statusPill}
+        <div class="lot-card-arrow">›</div>
+      </div>
+      <div class="lot-card-body">
+        <div class="lot-detail-grid">
+          <div class="lot-detail-item"><span class="lot-detail-key">입고일</span><span class="lot-detail-val">${lot.rcvDate}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">공급업체</span><span class="lot-detail-val">${lot.supplier}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">유통기한</span><span class="lot-detail-val" style="color:${expColor}">${lot.expiry}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">재고 현황</span><span class="lot-detail-val">${available}/${lot.units.length} ${master.unitLabel||'개'}</span></div>
+        </div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:6px">단위 라벨 재프린트</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          ${lot.units.map(u => {
+            const qrStr = 'MTT|RM|' + lot.matId + '|' + lot.lotId + '-' + u.seq + '|' + lot.expiry.replace(/-/g,'');
+            const statusCls = u.status === 'available' ? 'pill-ok' : 'pill-gray';
+            const statusTxt = u.status === 'available' ? '재고' : '사용됨';
+            return `<div style="background:#f9fafb;border-radius:8px;padding:8px;text-align:center;border:1px solid #e5e7eb">
+              <div style="font-size:9px;font-family:monospace;color:var(--text-sub);margin-bottom:4px">#${u.seq}</div>
+              <span class="pill ${statusCls}" style="font-size:9px">${statusTxt}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <button class="btn-reprint" onclick="reprintRawLotLabels(${i})">🖨️ LOT 라벨 전체 재프린트 (${lot.units.length}장)</button>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
+  document.getElementById('raw-lot-count').textContent = RAW_LOTS.length + ' LOTs';
+}
+
+function renderFGLotInventory() {
+  const container = document.getElementById('fg-lot-list');
+  if (!container) return;
+  const today = new Date('2026-03-27');
+  let html = '';
+  FG_LOTS.forEach((lot, i) => {
+    const master = ITEM_DB[lot.matId] || {};
+    const available = lot.units.filter(u => u.status === 'available').length;
+    const exp = new Date(lot.expiry);
+    const dLeft = Math.ceil((exp - today) / 864e5);
+    const expColor = dLeft <= 30 ? 'var(--warning)' : 'var(--success)';
+    const statusInfo = lot.status === 'shippable'
+      ? { color: 'var(--success)', label: '❄️ 출하가능', pill: '<span class="pill pill-approve">출하가능</span>' }
+      : { color: '#7c3aed', label: '❄️ 냉동중', pill: '<span class="pill" style="background:#ede9fe;color:#5b21b6">냉동중</span>' };
+    html += `<div class="lot-card" id="fg-lot-${i}" style="border-left-color:${statusInfo.color}">
+      <div class="lot-card-head" onclick="toggleLotCard('fg-lot-${i}')">
+        <div class="lot-card-icon" style="background:#f0fdf4">${master.icon||'🍡'}</div>
+        <div class="lot-card-info">
+          <div class="lot-card-name">${master.name || lot.matId}</div>
+          <div class="lot-card-meta">${lot.lotId} · 생산 ${lot.prodDate}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${statusInfo.pill}<span style="font-size:10px;color:var(--text-sub)">${available}봉</span></div>
+        <div class="lot-card-arrow">›</div>
+      </div>
+      <div class="lot-card-body">
+        <div class="lot-detail-grid">
+          <div class="lot-detail-item"><span class="lot-detail-key">생산일</span><span class="lot-detail-val">${lot.prodDate}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">냉동 시작</span><span class="lot-detail-val">${lot.frozenAt}</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">유통기한</span><span class="lot-detail-val">${lot.expiry} (D-${dLeft})</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">승인자</span><span class="lot-detail-val" style="color:var(--success)">${lot.approvedBy} ✅</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">재고 현황</span><span class="lot-detail-val">${available}/${lot.units.length}봉</span></div>
+          <div class="lot-detail-item"><span class="lot-detail-key">상태</span><span class="lot-detail-val">${statusInfo.label}</span></div>
+        </div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:6px">봉별 라벨 재프린트</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          ${lot.units.map(u => {
+            const qrStr = 'MTT|FG|' + lot.matId + '|FP-' + lot.lotId + '-' + u.seq + '|' + lot.expiry.replace(/-/g,'');
+            const statusCls = u.status === 'available' ? 'pill-approve' : u.status === 'freezing' ? '' : 'pill-gray';
+            const statusTxt = u.status === 'available' ? '출하가능' : u.status === 'freezing' ? '냉동중' : '출하됨';
+            return `<div style="background:#f9fafb;border-radius:8px;padding:8px;text-align:center;border:1px solid #e5e7eb">
+              <div style="font-size:9px;font-family:monospace;color:var(--text-sub);margin-bottom:4px">#${u.seq}</div>
+              <span class="pill ${statusCls}" style="font-size:9px;background:${u.status==='freezing'?'#ede9fe':'undefined'};color:${u.status==='freezing'?'#5b21b6':'undefined'}">${statusTxt}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <button class="btn-reprint" onclick="reprintFGLotLabels(${i})">🖨️ LOT 라벨 전체 재프린트 (${lot.units.length}장)</button>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
+  document.getElementById('fg-lot-count').textContent = FG_LOTS.length + ' LOTs';
+}
+
+function toggleLotCard(id) {
+  const card = document.getElementById(id);
+  if (card) card.classList.toggle('expanded');
+}
+
+function reprintRawLotLabels(idx) {
+  const lot = RAW_LOTS[idx];
+  if (!lot) return;
+  showToast('🖨️ ' + lot.lotId + ' 라벨 ' + lot.units.length + '장 프린터 전송 완료');
+}
+
+function reprintFGLotLabels(idx) {
+  const lot = FG_LOTS[idx];
+  if (!lot) return;
+  showToast('🖨️ ' + lot.lotId + ' 라벨 ' + lot.units.length + '장 프린터 전송 완료');
+}
+
 // ═══════════════════════════════════
 // MASTER DATA
 // ═══════════════════════════════════
@@ -870,7 +1301,7 @@ function _execInvAction(action, d){
   const colors={in:'var(--success)',out:'var(--primary-light)',ship:'#0ea5e9',dispose:'var(--danger)'};
   const entry=document.createElement('div');
   entry.style.cssText='background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;gap:6px;animation:fadeIn .3s';
-  entry.innerHTML<`<span style="color:${colors[action]};font-weight:700">${icons[action]} ${labels[action]}</span><span style="color:#f8fafc;flex:1">${d.master.name} #${d.lotRec.unitSeq}</span><span style="color:#64748b;font-size:10px">${t}</span>`;
+  entry.innerHTML=`<span style="color:${colors[action]};font-weight:700">${icons[action]} ${labels[action]}</span><span style="color:#f8fafc;flex:1">${d.master.name} #${d.lotRec.unitSeq}</span><span style="color:#64748b;font-size:10px">${t}</span>`;
   logList.insertBefore(entry,logList.firstChild);
   while(logList.children.length>10) logList.removeChild(logList.lastChild);
   showToast(`${icons[action]} ${d.master.name} #${d.lotRec.unitSeq} ${labels[action]} 처리 완료 · 수불출이력 기록됨`);
@@ -931,6 +1362,10 @@ function confirmReceiving(){
   const lotBase=`L-${recvState.itemId.replace('MAT-','')}-${d}`;
   recvState.lot=lotBase; recvState.qty=qty; recvState.expiry=expiry; recvState.name=it.name; recvState.icon=it.icon;
   document.getElementById('recv-confirm-summary').textContent=`${it.icon} ${it.name} · ${qty}${it.unitLabel} 입고 · LOT: ${lotBase} · 유통기한: ${expiry}`;
+  // Add new lot to RAW_LOTS
+  const newUnits = Array.from({length:qty},(_, i)=>({seq:String(i+1).padStart(3,'0'),status:'available'}));
+  RAW_LOTS.push({lotId:lotBase, matId:recvState.itemId, rcvDate, expiry, supplier:document.getElementById('recv-supplier-input').value||it.supplier, units:newUnits, note:''});
+  renderRawLotInventory();
   // build label grid
   const grid=document.getElementById('recv-label-grid'); grid.innerHTML='';
   for(let i=1;i<=qty;i++){
@@ -1077,7 +1512,7 @@ function renderStep(n){
           </div>
           <div style="font-size:11px;font-weight:700;margin-bottom:6px">외관 / 이물 확인</div>
           <div class="judge-row">
-            <button class="judge-btn ${wo.ingrStatus[idx].visual==='ok'?'ok':''}" onclick="setJudge(${idx},"visual','ok')">외관 정상</button>
+            <button class="judge-btn ${wo.ingrStatus[idx].visual==='ok'?'ok':''}" onclick="setJudge(${idx},'visual','ok')">외관 정상</button>
             <button class="judge-btn ${wo.ingrStatus[idx].visual==='bad'?'bad':''}" onclick="setJudge(${idx},'visual','bad')">외관 불량 🗑️</button>
           </div>
           <div class="judge-row">
@@ -1136,7 +1571,7 @@ function renderStep(n){
     body.innerHTML+=`
     <div class="wo-step-card">
       <div style="background:#f5f3ff;border-radius:8px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:6px">⚙️ SOP 배합 기준</div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">⚙️ SOC 배합 기준</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
           <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">배합 속도</span><br><b style="font-size:20px">${s.speed}단계</b></div>
           <div style="background:#fff;border-radius:6px;padding:8px 10px"><span style="color:var(--text-sub)">배합 시간</span><br><b style="font-size:20px">${s.time}분</b></div>
@@ -1318,7 +1753,7 @@ function renderStep(n){
         <div class="form-row"><div class="form-label">냉동 시작 시각</div><input type="time" class="form-input" id="freeze-start" value="11:00"></div>
         <div class="form-row"><div class="form-label">냉동 온도 (°C)</div><input type="number" class="form-input" id="freeze-temp" value="-18" step="0.1" oninput="checkFreezeTemp(this.value)"></div>
       </div>
-      <div id="freeze-temp-status" style="font-size:11px;color:var(--success);margin-bottom:8px">✅ 한계기준 적합 (-16°C 이하)</div>
+      <div id="freeze-temp-status" style="font-size:11px;color:var(--success);margin-bottom:8px">✅ 한계기준 적ݕ� (-16°C 이하)</div>
       <div style="background:#f0fdf4;border-radius:8px;padding:10px 12px;font-size:11px;color:#166534">
         ⏰ 냉동 완료 예정: <b id="freeze-complete-time">23:00</b> (12시간 후 출하가능)
       </div>
@@ -1403,7 +1838,7 @@ function woScanIngr(idx){
 }
 
 function setJudge(idx,field,val){
-  if(!wo.ingrStatus[idx]) return;
+  if(&wo.ingrStatus[idx]) return;
   if(val==='bad'){
     const ing=RECIPE_HDR.perBatch5kg[idx];
     confirmDispose(
@@ -1487,7 +1922,7 @@ function checkMeasure(el,target,diffId,judgeId){
 }
 
 function validateMeasureStep(n){
-  if(!wo.photosDone[n]){showToast('계량 저울 사진을 먼저 촬영하세요');return;}
+  if(!vo.photosDone[n]){showToast('계량 저울 사진을 먼저 촬영하세요');return;}
   const cb=document.getElementById(`wo-add-${n}`);
   if(!cb||!cb.checked){showToast('배합기 투입 완료를 확인하세요');return;}
   renderStep(n+1);
@@ -1504,7 +1939,7 @@ function validateFillStep(nb){
   const kg=parseFloat(document.getElementById('wo-fill-kg').value)||nb*5;
   const tolMin=nb*5*0.99; const tolMax=nb*5*1.01;
   if(kg<tolMin||kg>tolMax){
-    showToast(`⚠️ 총량 ${kg}kg이 허용범위(${tolMin.toFixed(2)}~${tolMax.toFixed(2)}kg) 초과`);
+    showToast(`⚠️ 총량 ${kg}kn이 허용범위(${tolMin.toFixed(2)}~${tolMax.toFixed(2)}kg) 초과`);
     return;
   }
   wo.prodQty=qty;
@@ -1515,7 +1950,7 @@ function checkFillTolerance(val,target){
   const el=document.getElementById('fill-judge');
   if(!el) return;
   const min=target*0.99; const max=target*1.01;
-  if(kg>=min&&kg<=max) el.innerHTML=`<span style="color:var(--success)">✅ 허용범위 이내 (${(min).toFixed(2)}~${(max).toFixed(2)}kg)</span>`;
+  if(kg>=min&&kg<=max) el.innerHTML=`<span style="color:var(--success)">✅ 허용범위 이내 (${(min).toFixed(2)}}${(max).toFixed(2)}kg)</span>`;
   else el.innerHTML=`<span style="color:var(--danger)">⚠️ 허용범위 초과 — 재충진 필요</span>`;
 }
 function attachMixPhoto(n, key){
@@ -1531,20 +1966,22 @@ function goToPrevStep(n){
 function processShip(lot, qtyInputId){
   const qty=parseInt(document.getElementById(qtyInputId).value)||0;
   if(!qty){showToast('출하 수량을 입력하세요');return;}
-  const idx=SHIP_READY_LOTS.findIndex(l=>l.lot===lot);
-  if(idx>=0){
-    SHIP_READY_LOTS[idx].qty-=qty;
-    if(SHIP_READY_LOTS[idx].qty<=0) SHIP_READY_LOTS.splice(idx,1);
-  }
-  // add to log
-  const logList=document.getElementById('inv-log-list');
-  const now=new Date(); const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  const entry=document.createElement('div');
-  entry.style.cssText='background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;gap:6px';
-  entry.innerHTML=`<span style="color:#0ea5e9;font-weight:700">🚛 출하</span><span style="color:#f8fafc;flex:1">호두과자반죽 ${qty}봉 (${lot})</span><span style="color:#64748b;font-size:10px">${t}</span>`;
-  if(logList){logList.insertBefore(entry,logList.firstChild);}
-  showToast(`🚛 ${lot} ${qty}봉 출하 처리 완료 · 재고 반영됨`);
-  refreshFIFOSection();
+  confirmDispose(
+    `LOT <b>${lot}</b>에서 <b>${qty}봉</b>을 출하 처리하시겠습니까?<br><span style="color:var(--text-sub)">처리 후 재고에서 차감됩니다.</span>`,
+    ()=>{
+      const fg = FG_LOTS.find(l=>l.lotId===lot);
+      if(fg){ let q=qty; fg.units.forEach(u=>{if(q>0&&u.status==='available'){u.status='shipped';q--;}}); renderFGLotInventory(); }
+      const idx2=SHIP_READY_LOTS.findIndex(l=>l.lot===lot);
+      if(idx2>=0){ SHIP_READY_LOTS[idx2].qty-=qty; if(SHIP_READY_LOTS[idx2].qty<=0) SHIP_READY_LOTS.splice(idx2,1); }
+      const logList=document.getElementById('inv-log-list');
+      const entry=document.createElement('div');
+      entry.style.cssText='background:#0f172a;border-radius:6px;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;animation:fadeIn .3s';
+      const now=new Date(); const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      entry.innerHTML<`<span style="color:#0ea5e9;font-weight:700">🚛 출하</span><span style="color:#f8fafc;flex:1">${lot} ${qty}봉</span><span style="color:#475569;font-size:10px">${t}</span>`;
+      logList.insertBefore(entry,logList.firstChild);
+      showToast(`🚛 ${lot} ${qty}봉 출하 처리 완료`);
+    }
+  );
 }
 function refreshFIFOSection(){
   const dyn=document.getElementById('fifo-dynamic-lots'); if(!dyn) return;
@@ -1608,7 +2045,7 @@ function updateMetalResult(val){
   const el=document.getElementById('metal-result');
   if(!el) return;
   if(n===0) el.innerHTML='<span style="color:var(--success)">✅ 이상 없음 → 전량 출하 가능</span>';
-  else el.innerHTML=`<span style="color:var(--danger)">⚠️ ${n}봉 이상 검출 → 격리 후 관리자 보고 필요</span>`;
+  else el.innerHTML<`<span style="color:var(--danger)">⚠️ ${n}봉 이상 검출 → 격리 후 관리자 보고 필요</span>`;
 }
 
 function submitMetalDetection(){
@@ -1687,6 +2124,14 @@ function showCCPDetail(ccp){
   const msgs={'1B':'❄️ CCP-1B 동결공정\n냉동창고 A-2 현재 -15°C\n한계기준: -16°C 이하\n→ 즉시 작업 중지 · 관리자 보고','2P':'🔍 CCP-2P 금속검출\n기준: Fe≥2.5mm · SUS≥4.0mm\n최근 검사: 미검출\n다음 2시간 정기검사: 12:00'};
   showToast(msgs[ccp]||'CCP 상세');
 }
+
+// Call lot inventory render if user is already logged in (e.g., dev mode)
+document.addEventListener('DOMContentLoaded', () => {
+  if (currentUser) {
+    renderRawLotInventory();
+    renderFGLotInventory();
+  }
+});
 </script>
 </body>
 </html>
