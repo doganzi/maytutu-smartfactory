@@ -355,7 +355,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     <div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:10px">
         <input id="inv-scan-input" class="form-input" placeholder="QR 스캔 또는 코드 입력..." style="flex:1;font-family:monospace;font-size:12px">
-        <button onclick="processInvScan()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">📷</button>
+        <button onclick="openQRCamera('inv')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">📷</button>
       </div>
       <div style="display:flex;gap:5px;flex-wrap:wrap">
         <button onclick="invSample('MTT|RM|MAT-H03|L-H03-20260320-003|20270320')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">샘플:프리믹스1 #003</button>
@@ -619,7 +619,10 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
           <div><span style="color:var(--text-sub)">표준유통기한</span><br><b id="recv-shelf">—</b></div>
         </div>
       </div>
-      <button class="btn-primary" id="recv-s1-next" disabled onclick="recvGoStep(2)">다음 단계 →</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-secondary" style="flex:1" onclick="closeRecvModal()">✕ 취소</button>
+        <button class="btn-primary" id="recv-s1-next" style="flex:2" disabled onclick="recvGoStep(2)">다음 단계 →</button>
+      </div>
     </div>
 
     <!-- Step 2: 입고 정보 입력 -->
@@ -896,7 +899,7 @@ function initTokenClient() {
     client_id: GWS_CONFIG.clientId,
     scope: SHEET_CONFIG.scope,
     callback: async (resp) => {
-      if (resp.error) { showToast('⚠️ 시트 연결 실패: ' + resp.error); return; }
+      if (resp.error) { if (resp.error === 'interaction_required' || resp.error === 'access_denied') { gTokenClient.requestAccessToken({ prompt: 'consent' }); } else { showToast('⚠️ 시트 연결 실패: ' + resp.error); } return; }
       gAccessToken = resp.access_token;
       showToast('🔗 구글 시트 연동 중...');
       await initSheetsStructure();
