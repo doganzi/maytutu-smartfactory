@@ -39,7 +39,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .card-title{font-size:13px;font-weight:700;}
 .card-body{padding:12px 16px;}
 .tbl{width:100%;border-collapse:collapse;font-size:12px;}
-.tbl th{background:#f9fafb;color:var(--text-sub);font-weight:600;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowraw;font-size:11px;}
+.tbl th{background:#f9fafb;color:var(--text-sub);font-weight:600;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:11px;}
 .tbl td{padding:9px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
 .tbl tr:last-child td{border-bottom:none;}
 .pill{display:inline-flex;align-items:center;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap;}
@@ -166,7 +166,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .photo-step-num{width:26px;height:26px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
 .photo-step-item.done .photo-step-num{background:var(--success);}
 .photo-step-title{font-size:12px;font-weight:700;flex:1;}
-.photo-step-btn{background:#fff;border:1.5px solid #94a3b8;border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text-sub);white-space:nowraw;}
+.photo-step-btn{background:#fff;border:1.5px solid #94a3b8;border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text-sub);white-space:nowrap;}
 .photo-step-btn.done{background:#dcfce7;border-color:var(--success);color:#166534;}
 /* FIFO batch */
 .fifo-batch{background:#fff;border-radius:var(--radius);padding:14px 16px;margin-bottom:8px;box-shadow:var(--shadow);border-left:4px solid var(--success);}
@@ -306,6 +306,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
   <span id="topbar-user" style="font-size:11px;opacity:.9;display:flex;align-items:center;gap:5px">
     <img id="topbar-avatar" src="" style="width:24px;height:24px;border-radius:50%;display:none;border:1.5px solid rgba(255,255,255,.5)">
     <span id="topbar-name">—</span>
+    <button onclick="openSheetsDB()" title="구글 시트 DB 열기" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;padding:2px 7px;font-size:10px;color:#fff;cursor:pointer;font-weight:600">📊 DB</button>
     <button onclick="logoutGoogle()" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;padding:2px 7px;font-size:10px;color:#fff;cursor:pointer;font-weight:600">로그아웃</button>
   </span>
 </div>
@@ -762,6 +763,40 @@ const GWS_CONFIG = {
   adminEmails: [], // 관리자 이메일 목록 (비어있으면 도메인 전체 작업자로 처리)
 };
 
+// ═══════════════════════════════════
+// CONFIG — Google Sheets DB
+// ═══════════════════════════════════
+const SHEET_CONFIG = {
+  spreadsheetId: '1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4',
+  scope: 'https://www.googleapis.com/auth/spreadsheets',
+};
+const SHEETS = {
+  RAW_LOTS:  '원재료LOT',
+  FG_LOTS:   '완제품LOT',
+  WO:        '작업기록',
+  RECEIVING: '입고기록',
+  SHIPPING:  '출하기록',
+  ITEM_RAW:  '원재료품목',
+  ITEM_FG:   '완제품품목',
+  SUPPLIERS: '거래처',
+  USERS:     '사용자',
+  SOP:       'SOP',
+  EQUIPMENT: '기기관리',
+};
+const SHEET_HEADERS = {
+  '원재료LOT':  ['LOT ID','품목코드','품목명','공급사LOT','입고일','유통기한','총량(kg)','가용수량','총수량','상태','비고'],
+  '완제품LOT':  ['LOT ID','품목코드','제품명','생산일','유통기한','총량(kg)','가용수량','총수량','상태','냉동시작','출고가능시각'],
+  '작업기록':   ['일자','작업지시번호','제품명','수량(EA)','총량(kg)','상태','작업자','완료시각'],
+  '입고기록':   ['일자','시각','LOT ID','품목코드','품목명','공급사','공급사LOT','수량','단위','kg','유통기한','작업자','비고'],
+  '출하기록':   ['일자','시각','LOT ID','제품명','고객사','수량(EA)','kg','작업자','비고'],
+  '원재료품목': ['품목코드','품목명','아이콘','공급사','포장단위','보관방법','유통기한(일)','단위명','최소재고','비고'],
+  '완제품품목': ['품목코드','제품명','아이콘','포장단위','보관방법','유통기한(일)','단위명','비고'],
+  '거래처':     ['거래처코드','거래처명','담당자','전화','이메일','주소','취급품목','비고'],
+  '사용자':     ['이메일','이름','권한','부서','전화','활성','등록일','비고'],
+  'SOP':        ['SOP번호','제목','버전','분류','설명','단계','수정일','수정자'],
+  '기기관리':   ['기기코드','기기명','모델','시리얼','위치','최근점검','다음점검','상태','스펙','비고'],
+};
+
 // ─── 로그인 상태 ───
 let currentUser = null;
 let currentRole = 'worker'; // 'admin' | 'worker'
@@ -784,6 +819,7 @@ function initGoogleSignIn() {
     { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ko', width: 300 }
   );
   google.accounts.id.prompt();
+  initTokenClient();
 }
 
 function handleGoogleLogin(response) {
@@ -830,16 +866,247 @@ function finishLogin() {
   roleBadge.className = 'pill ' + (currentRole === 'admin' ? 'pill-blue' : 'pill-ok');
   // Hide login overlay
   document.getElementById('login-overlay').style.display = 'none';
-  // Init lot inventory
+  // Init lot inventory (will be overwritten by Sheets data after token grant)
   renderRawLotInventory();
   renderFGLotInventory();
+  // Request Sheets access token
+  setTimeout(requestSheetsAccess, 400);
 }
 
 function logoutGoogle() {
   if (!confirm('로그아웃 하시겠습니까?')) return;
   currentUser = null; currentRole = 'worker';
+  gAccessToken = null; sheetsReady = false;
   if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
   location.reload();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GOOGLE SHEETS 연동 (DB)
+// ═══════════════════════════════════════════════════════════════
+let gTokenClient = null;
+let gAccessToken = null;
+let sheetsReady = false;
+
+function initTokenClient() {
+  if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+    setTimeout(initTokenClient, 600); return;
+  }
+  gTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GWS_CONFIG.clientId,
+    scope: SHEET_CONFIG.scope,
+    callback: async (resp) => {
+      if (resp.error) { showToast('⚠️ 시트 연결 실패: ' + resp.error); return; }
+      gAccessToken = resp.access_token;
+      showToast('🔗 구글 시트 연동 중...');
+      await initSheetsStructure();
+      await loadAllSheetsData();
+    },
+  });
+}
+
+function requestSheetsAccess() {
+  if (!gTokenClient) { initTokenClient(); setTimeout(requestSheetsAccess, 800); return; }
+  gTokenClient.requestAccessToken({ prompt: '' });
+}
+
+// ─── REST API 헬퍼 ───
+async function sheetsAPI(method, path, body) {
+  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + SHEET_CONFIG.spreadsheetId;
+  try {
+    const res = await fetch(base + path, {
+      method: method || 'GET',
+      headers: { 'Authorization': 'Bearer ' + gAccessToken, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || res.status); }
+    return res.json();
+  } catch(e) { console.error('sheetsAPI error:', path, e); throw e; }
+}
+
+async function sheetsRead(tab, range) {
+  try {
+    const r = encodeURIComponent(tab + '!' + (range || 'A1:ZZ'));
+    const d = await sheetsAPI('GET', '/values/' + r);
+    return d.values || [];
+  } catch(e) { return []; }
+}
+
+async function sheetsAppend(tab, rows) {
+  if (!gAccessToken || !rows || !rows.length) return;
+  try {
+    const r = encodeURIComponent(tab + '!A1');
+    await sheetsAPI('POST', '/values/' + r + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', { values: rows });
+  } catch(e) { console.error('sheetsAppend:', tab, e); }
+}
+
+async function sheetsUpdate(tab, range, rows) {
+  if (!gAccessToken) return;
+  try {
+    const r = encodeURIComponent(tab + '!' + range);
+    await sheetsAPI('PUT', '/values/' + r + '?valueInputOption=USER_ENTERED', { values: rows });
+  } catch(e) { console.error('sheetsUpdate:', tab, e); }
+}
+
+// ─── 시트 구조 초기화 (최초 1회) ───
+async function initSheetsStructure() {
+  showToast('📋 시트 구조 확인 중...');
+  let info;
+  try { info = await sheetsAPI('GET', '?fields=sheets.properties'); } catch(e) { showToast('❌ 시트 접근 오류'); return; }
+  const existing = (info.sheets || []).map(s => s.properties.title);
+  const needed = Object.values(SHEETS);
+  const toCreate = needed.filter(n => !existing.includes(n));
+
+  if (toCreate.length > 0 || existing.includes('Sheet1') || existing.includes('시트1')) {
+    const requests = [];
+    // 기존 Sheet1 이름 변경
+    if (existing.includes('Sheet1') || existing.includes('시트1')) {
+      const s1 = info.sheets[0];
+      requests.push({ updateSheetProperties: { properties: { sheetId: s1.properties.sheetId, title: SHEETS.RAW_LOTS }, fields: 'title' } });
+    }
+    // 새 탭 생성
+    toCreate.filter(n => n !== SHEETS.RAW_LOTS || (!existing.includes('Sheet1') && !existing.includes('시트1')))
+      .forEach(title => requests.push({ addSheet: { properties: { title } } }));
+    if (requests.length) await sheetsAPI('POST', ':batchUpdate', { requests });
+  }
+
+  // 헤더 기록 (없는 경우만)
+  for (const [tabName, headers] of Object.entries(SHEET_HEADERS)) {
+    const rows = await sheetsRead(tabName, 'A1:ZZ1');
+    if (!rows.length || !rows[0].length) {
+      await sheetsUpdate(tabName, 'A1:' + colLetter(headers.length) + '1', [headers]);
+    }
+  }
+
+  // 초기 마스터 데이터 입력
+  await seedMasterData();
+  sheetsReady = true;
+  showToast('✅ 시트 구조 초기화 완료');
+}
+
+function colLetter(n) {
+  let s = ''; while (n > 0) { s = String.fromCharCode(64 + (n % 26 || 26)) + s; n = Math.floor((n - 1) / 26); } return s;
+}
+
+async function seedMasterData() {
+  // 원재료 품목 마스터
+  const rawItem = await sheetsRead(SHEETS.ITEM_RAW, 'A2:A');
+  if (!rawItem.length) {
+    const rows = Object.entries(ITEM_DB).map(([id, v]) =>
+      [id, v.name||'', v.icon||'', v.supplier||'', v.pkg||'', v.storage||'', v.shelfDays||0, v.unitLabel||'', '', '']);
+    if (rows.length) await sheetsAppend(SHEETS.ITEM_RAW, rows);
+  }
+  // 원재료 LOT 초기 데이터
+  const rawLot = await sheetsRead(SHEETS.RAW_LOTS, 'A2:A');
+  if (!rawLot.length) {
+    const rows = RAW_LOTS.map(lot => {
+      const avail = (lot.units||[]).filter(u=>u.status==='available').length;
+      const total = (lot.units||[]).length;
+      const m = ITEM_DB[lot.matId] || {};
+      return [lot.lotId, lot.matId, m.name||'', lot.suppLot||lot.batchLot||'', lot.arrivalDate||lot.rcvDate||'2026-03-27', lot.expiry||'', lot.totalKg||'', avail, total, 'available', ''];
+    });
+    if (rows.length) await sheetsAppend(SHEETS.RAW_LOTS, rows);
+  }
+  // 완제품 LOT 초기 데이터
+  const fgLot = await sheetsRead(SHEETS.FG_LOTS, 'A2:A');
+  if (!fgLot.length) {
+    const rows = FG_LOTS.map(lot => {
+      const avail = (lot.units||[]).filter(u=>u.status==='available').length;
+      const total = (lot.units||[]).length;
+      const m = ITEM_DB[lot.matId] || {};
+      return [lot.lotId, lot.matId, m.name||'', lot.prodDate||'', lot.expiry||'', lot.totalKg||'', avail, total, lot.status||'available', '', ''];
+    });
+    if (rows.length) await sheetsAppend(SHEETS.FG_LOTS, rows);
+  }
+}
+
+// ─── 데이터 로드 (로그인 후) ───
+async function loadAllSheetsData() {
+  showToast('📥 시트에서 데이터 로딩 중...');
+  await Promise.all([loadRawLotsFromSheet(), loadFGLotsFromSheet(), loadItemMasterFromSheet()]);
+  renderRawLotInventory();
+  renderFGLotInventory();
+  showToast('✅ 구글 시트 연동 완료 · 데이터 최신 상태');
+}
+
+async function loadRawLotsFromSheet() {
+  const rows = await sheetsRead(SHEETS.RAW_LOTS, 'A2:K');
+  if (!rows.length) return;
+  RAW_LOTS = rows.filter(r => r[0]).map(r => ({
+    lotId: r[0]||'', matId: r[1]||'', suppLot: r[3]||'', arrivalDate: r[4]||'',
+    expiry: r[5]||'', totalKg: parseFloat(r[6])||0,
+    units: Array.from({length: parseInt(r[8])||0}, (_, i) => ({
+      seq: String(i+1).padStart(3,'0'), id: r[0]+'-'+String(i+1).padStart(3,'0'),
+      status: i < (parseInt(r[7])||0) ? 'available' : 'used',
+    })),
+  }));
+}
+
+async function loadFGLotsFromSheet() {
+  const rows = await sheetsRead(SHEETS.FG_LOTS, 'A2:K');
+  if (!rows.length) return;
+  FG_LOTS = rows.filter(r => r[0]).map(r => ({
+    lotId: r[0]||'', matId: r[1]||'', prodDate: r[3]||'',
+    expiry: r[4]||'', totalKg: parseFloat(r[5])||0, status: r[8]||'available',
+    units: Array.from({length: parseInt(r[7])||0}, (_, i) => ({
+      seq: String(i+1).padStart(3,'0'), id: r[0]+'-U'+String(i+1).padStart(3,'0'),
+      status: i < (parseInt(r[6])||0) ? 'available' : 'shipped',
+    })),
+  }));
+}
+
+async function loadItemMasterFromSheet() {
+  const rows = await sheetsRead(SHEETS.ITEM_RAW, 'A2:J');
+  if (!rows.length) return;
+  rows.filter(r => r[0]).forEach(r => {
+    ITEM_DB[r[0]] = { name:r[1]||'', icon:r[2]||'', supplier:r[3]||'', pkg:r[4]||'', storage:r[5]||'', shelfDays:parseInt(r[6])||0, unitLabel:r[7]||'' };
+  });
+}
+
+// ─── 로그 기록 함수 ───
+function nowStr() { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
+function timeStr() { const n=new Date(); return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`; }
+function userName() { return currentUser ? currentUser.name : '-'; }
+
+async function logReceivingToSheet(lot, item, qty, expiry, rcvDate, supplier, suppLot, note) {
+  if (!sheetsReady) return;
+  const kg = qty * (parseFloat((item.pkg||'').replace(/[^0-9.]/g,'')) || 1);
+  await sheetsAppend(SHEETS.RECEIVING, [[rcvDate||nowStr(), timeStr(), lot, item.matId||'', item.name||'', supplier||'', suppLot||'', qty, item.unitLabel||'EA', kg, expiry||'', userName(), note||'']]);
+  // 원재료LOT 시트에도 신규 행 추가
+  const m = ITEM_DB[item.matId||item.id||''] || item;
+  await sheetsAppend(SHEETS.RAW_LOTS, [[lot, item.matId||'', m.name||item.name||'', suppLot||'', rcvDate||nowStr(), expiry||'', kg, qty, qty, 'available', note||'']]);
+}
+
+async function logWOToSheet(woData) {
+  if (!sheetsReady) return;
+  await sheetsAppend(SHEETS.WO, [[nowStr(), woData.lotNum||'', woData.productName||'', woData.qty||'', woData.totalKg||'', '완료', userName(), timeStr()]]);
+  // 완제품LOT 시트에 신규 행 추가
+  if (woData.lotNum) {
+    const qty = woData.qty || 0;
+    const kg = woData.totalKg || qty * 5;
+    await sheetsAppend(SHEETS.FG_LOTS, [[woData.lotNum, woData.matId||'', woData.productName||'', nowStr(), woData.expiry||'2026-12-27', kg, qty, qty, 'available', woData.frozenAt||'', woData.readyAt||'']]);
+  }
+}
+
+async function logShipmentToSheet(lotId, productName, customer, units, kg) {
+  if (!sheetsReady) return;
+  await sheetsAppend(SHEETS.SHIPPING, [[nowStr(), timeStr(), lotId||'', productName||'', customer||'', units||'', kg||'', userName(), '']]);
+  // 완제품LOT 상태 업데이트는 append row로 표시
+}
+
+async function logInvActionToSheet(action, lotId, itemName, qty, note) {
+  if (!sheetsReady) return;
+  const actionMap = {in:'입고', out:'불출', ship:'출하', dispose:'폐기'};
+  if (action === 'in') {
+    await sheetsAppend(SHEETS.RECEIVING, [[nowStr(), timeStr(), lotId||'', '', itemName||'', '', '', qty||1, 'EA', '', '', userName(), note||actionMap[action]||action]]);
+  } else if (action === 'ship') {
+    await sheetsAppend(SHEETS.SHIPPING, [[nowStr(), timeStr(), lotId||'', itemName||'', '', qty||1, '', userName(), note||'']]);
+  }
+}
+
+// ─── 시트 열기 버튼 ───
+function openSheetsDB() {
+  window.open('https://docs.google.com/spreadsheets/d/' + SHEET_CONFIG.spreadsheetId, '_blank');
 }
 
 // ─── DEV MODE: auto-login for demo ───
@@ -1305,6 +1572,8 @@ function _execInvAction(action, d){
   logList.insertBefore(entry,logList.firstChild);
   while(logList.children.length>10) logList.removeChild(logList.lastChild);
   showToast(`${icons[action]} ${d.master.name} #${d.lotRec.unitSeq} ${labels[action]} 처리 완료 · 수불출이력 기록됨`);
+  // ✅ Sheets 수불 기록
+  logInvActionToSheet(action, d.lotRec.batchLot||d.code, d.master.name, 1, labels[action]);
   document.getElementById('inv-scan-result').style.display='none';
   document.getElementById('inv-scan-input').value='';
 }
@@ -1350,7 +1619,7 @@ function updateRecvQtyDisplay(){
 function checkRecvReady(){
   const v=document.getElementById('recv-chk-visual').checked;
   const t=document.getElementById('recv-chk-temp').checked;
-  document.getElementById('recv-s2-next').disabled=!(v&&t);
+  document.getElementById('recv-st-next').disabled=!(v&&t);
 }
 function confirmReceiving(){
   const it=ITEM_DB[recvState.itemId];
@@ -1360,12 +1629,16 @@ function confirmReceiving(){
   // Generate lot number
   const d=rcvDate.replace(/-/g,'').slice(2); // YYMMDD
   const lotBase=`L-${recvState.itemId.replace('MAT-','')}-${d}`;
-  recvState.lot=lotBase; recvState.qty=qty; recvState.expiry=expiry; recvState.name=it.name; recvState.icon=it.icon;
+  const suppInput = document.getElementById('recv-supplier-input').value || it.supplier;
+  const noteInput = document.getElementById('recv-note').value || '';
+  recvState.lot=lotBase; recvState.qty=qty; recvState.expiry=expiry; recvState.name=it.name; recvState.icon=it.icon; recvState.supplier=suppInput;
   document.getElementById('recv-confirm-summary').textContent=`${it.icon} ${it.name} · ${qty}${it.unitLabel} 입고 · LOT: ${lotBase} · 유통기한: ${expiry}`;
-  // Add new lot to RAW_LOTS
+  // Add new lot to RAW_LOTS (in-memory)
   const newUnits = Array.from({length:qty},(_, i)=>({seq:String(i+1).padStart(3,'0'),status:'available'}));
-  RAW_LOTS.push({lotId:lotBase, matId:recvState.itemId, rcvDate, expiry, supplier:document.getElementById('recv-supplier-input').value||it.supplier, units:newUnits, note:''});
+  RAW_LOTS.push({lotId:lotBase, matId:recvState.itemId, rcvDate, expiry, supplier:suppInput, units:newUnits, note:noteInput});
   renderRawLotInventory();
+  // ✅ Sheets에 입고 기록
+  logReceivingToSheet(lotBase, {...it, matId:recvState.itemId}, qty, expiry, rcvDate, suppInput, '', noteInput);
   // build label grid
   const grid=document.getElementById('recv-label-grid'); grid.innerHTML='';
   for(let i=1;i<=qty;i++){
@@ -1620,7 +1893,7 @@ function renderStep(n){
       <div style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:12px">
         <b style="color:#92400e">⚖️ 오차 기준 — 총량의 ±1%</b><br>
         <span style="color:#78350f">허용 범위: <b>${tolMin}kg ~ ${tolMax}kg</b> (±${tolKg}kg)</span><br>
-        <span style="color:var(--text-sub);font-size:10px">범위 초과 시 재충진 또는 덜어내기 필요</span>
+    0   <span style="color:var(--text-sub);font-size:10px">범위 초과 시 재충진 또는 덜어내기 필요</span>
       </div>
       <div class="form-row"><div class="form-label">실제 생산 봉 수 (5kg/봉)</div>
         <input type="number" class="form-input" id="wo-fill-qty" value="${nb}" min="1" oninput="wo.prodQty=parseInt(this.value)||0;updateFillCalc(this.value)">
@@ -2089,6 +2362,8 @@ function submitFreezing(){
   // FIFO 섹션 업데이트
   refreshFIFOSection();
   showToast(`❄️ 동결공정 등록 완료 · 출하가능 재고 전환 · ${compStr} 이후 출하 가능`);
+  // ✅ Sheets에 WO 완료 기록
+  logWOToSheet({ lotNum: wo.lotNum, productName: wo.productName||'계란전란냉동', matId: wo.matId||'', qty: readyLot.qty, totalKg: readyLot.totalKg, expiry: readyLot.expiry, frozenAt: start, readyAt: readyLot.readyAt });
   renderStep(14);
 }
 
@@ -2117,6 +2392,10 @@ function confirmShipment(){
   const c=document.getElementById('ship-customer');
   if(!c||!c.value||c.value.includes('선택')){showToast('거래처를 선택하세요');return;}
   showToast('🚛 출하 완료 · 재고 반영됨');
+  // ✅ Sheets에 출하 기록
+  const lotEl=document.getElementById('ship-lot-info');
+  const lotId=lotEl?lotEl.textContent.split(' ')[0]:'';
+  logShipmentToSheet(lotId, '', c.value, 3, 15);
   closeShipPanel();
 }
 
