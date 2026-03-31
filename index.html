@@ -2757,6 +2757,78 @@ window.scanIngredientQR=function(idx){
   window.openQRCamera('wo',idx);
 };
 })();
+// _p2h: Sheets DB 연결 버튼 (기기관리 탭)
+(function(){
+function addSheetsConnectBtn(){
+  var sec=document.getElementById('db-init-section');
+  if(!sec||document.getElementById('sheets-connect-row'))return;
+  var row=document.createElement('div');
+  row.id='sheets-connect-row';
+  row.style.cssText='margin-bottom:14px;padding:13px;background:#eff6ff;border-radius:10px;border:1.5px solid #bfdbfe;';
+  var st=document.createElement('div');
+  st.id='sheets-conn-status';
+  st.style.cssText='font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:9px;';
+  st.textContent='\u26a0\ufe0f Google Sheets \ubbf8\uc5f0\uacb0 \u2014 \uc544\ub798 \ubc84\ud2bc\uc73c\ub85c \uc5f0\uacb0\ud558\uc138\uc694';
+  var btn=document.createElement('button');
+  btn.id='sheets-connect-btn';
+  btn.style.cssText='background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:11px 20px;font-size:13px;font-weight:700;cursor:pointer;width:100%;';
+  btn.textContent='\ud83d\udd17 Google Sheets DB \uc5f0\uacb0';
+  btn.onclick=function(){
+    btn.textContent='\u23f3 \uc5f0\uacb0 \uc911...';
+    btn.disabled=true;
+    function doConnect(){
+      if(typeof gTokenClient==='undefined'){
+        if(typeof initTokenClient==='function')initTokenClient();
+        setTimeout(doConnect,800);return;
+      }
+      gTokenClient.requestAccessToken({prompt:'consent'});
+    }
+    doConnect();
+    var poll=setInterval(function(){
+      if(typeof gAccessToken!=='undefined'&&gAccessToken){
+        clearInterval(poll);
+        st.textContent='\u2705 Google Sheets \uc5f0\uacb0\ub428!';
+        st.style.color='#16a34a';
+        row.style.background='#f0fdf4';
+        row.style.borderColor='#86efac';
+        btn.textContent='\u2705 \uc5f0\uacb0 \uc644\ub8cc';
+        btn.style.background='#16a34a';
+        btn.disabled=false;
+      }
+    },800);
+    setTimeout(function(){
+      clearInterval(poll);
+      if(!gAccessToken){
+        btn.disabled=false;
+        btn.textContent='\ud83d\udd17 Google Sheets DB \uc5f0\uacb0';
+        st.textContent='\u26a0\ufe0f \uc5f0\uacb0 \uc2e4\ud328 \u2014 \ub2e4\uc2dc \uc2dc\ub3c4\ud558\uc138\uc694';
+      }
+    },30000);
+  };
+  row.appendChild(st);row.appendChild(btn);
+  sec.insertBefore(row,sec.firstChild);
+  // If already connected, update UI immediately
+  if(typeof gAccessToken!=='undefined'&&gAccessToken){
+    st.textContent='\u2705 Google Sheets \uc5f0\uacb0\ub428!';
+    st.style.color='#16a34a';
+    row.style.background='#f0fdf4';
+    row.style.borderColor='#86efac';
+    btn.textContent='\u2705 \uc5f0\uacb0 \uc644\ub8cc';
+    btn.style.background='#16a34a';
+  }
+}
+window.addSheetsConnectBtn=addSheetsConnectBtn;
+// Hook into showPage override to inject when equipment page opens
+var _oSP2=window.showPage;
+window.showPage=function(pg){
+  if(_oSP2)_oSP2.apply(this,arguments);
+  if(pg==='equipment'){setTimeout(addSheetsConnectBtn,350);}
+};
+// Also inject now if already on equipment page
+if(document.getElementById('page-equipment')&&document.getElementById('page-equipment').classList.contains('active')){
+  setTimeout(addSheetsConnectBtn,400);
+}
+})();
 </script>
 </body>
 </html>
