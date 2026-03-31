@@ -2454,6 +2454,309 @@ window.saveStepPhoto=saveStepPhoto;
 })();
 (function(){var _oSP=window.showPage;window.showPage=function(pg){if(_oSP)_oSP.apply(this,arguments);setTimeout(function(){if(pg==='receiving'&&typeof window.injectSupplierDropdown==='function')window.injectSupplierDropdown();if(pg==='equipment'&&typeof window.addDBInitBtn==='function')window.addDBInitBtn();},300);};
 window.addEventListener('DOMContentLoaded',function(){setTimeout(function(){if(typeof window.injectSupplierDropdown==='function')window.injectSupplierDropdown();if(typeof window.addDBInitBtn==='function')window.addDBInitBtn();},1000);});})();
+
+// _p2f: #10 SOP ë¬¸ì DB ê´ë¦¬
+(function(){
+var SOPS_KEY='mtt_sops';
+function getSOPs(){try{var s=localStorage.getItem(SOPS_KEY);if(s)return JSON.parse(s);}catch(e){}return[{id:'SOP001',name:'\ud558\uc774\ub4dc\ub85c\uacc4 \ub9c1\uac70 \uc81c\uc870 SOP',category:'\uc81c\uc870',version:'v2.1',url:'',content:'1.\uc6d0\uc7ac\ub8cc \ud22c\uc785 2.\ud63c\ud569 3.\uc5ec\uacfc 4.\ucda9\uc804 5.\ub3d9\uacb0 6.\ud3ec\uc7a5',updatedAt:'2026-01-15'},{id:'SOP002',name:'\uc704\uc0dd\uad00\ub9ac \uc810\uac80 SOP',category:'\uc704\uc0dd',version:'v1.3',url:'',content:'1.\uccad\uc18c 2.\uc18c\ub3c5 3.\uae30\ub85d',updatedAt:'2026-02-01'}];}
+function saveSOPs(sops){localStorage.setItem(SOPS_KEY,JSON.stringify(sops));}
+window.getSopList=getSOPs;
+
+window.openSopManager=function(){
+  var overlay=document.getElementById('sop-mgr-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='sop-mgr-overlay';
+    overlay.style.cssText='display:none;position:fixed;inset:0;background:#f3f4f6;z-index:700;overflow-y:auto;flex-direction:column;';
+    var tb=document.createElement('div');
+    tb.style.cssText='background:#fff;border-bottom:1px solid #e5e7eb;padding:12px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10;';
+    var back=document.createElement('span');
+    back.style.cssText='font-size:22px;color:var(--primary);cursor:pointer;font-weight:700;';
+    back.textContent='\u2190';
+    back.onclick=function(){window.closeSopManager();};
+    var ttl=document.createElement('span');
+    ttl.style.cssText='flex:1;font-size:15px;font-weight:800;';
+    ttl.textContent='\ud83d\udccb SOP \ubb38\uc11c \uad00\ub9ac';
+    var addBtn=document.createElement('button');
+    addBtn.style.cssText='background:var(--primary);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;';
+    addBtn.textContent='+ \ucd94\uac00';
+    addBtn.onclick=function(){window.addSopItem();};
+    tb.appendChild(back);tb.appendChild(ttl);tb.appendChild(addBtn);
+    var body=document.createElement('div');
+    body.id='sop-mgr-body';
+    body.style.cssText='padding:16px;';
+    overlay.appendChild(tb);overlay.appendChild(body);
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display='flex';
+  window.renderSopList();
+};
+
+window.closeSopManager=function(){
+  var o=document.getElementById('sop-mgr-overlay');
+  if(o)o.style.display='none';
+};
+
+window.renderSopList=function(){
+  var body=document.getElementById('sop-mgr-body');
+  if(!body)return;
+  var sops=getSOPs();
+  body.innerHTML='';
+  if(!sops.length){
+    var e=document.createElement('div');
+    e.style.cssText='text-align:center;color:#9ca3af;padding:40px;';
+    e.textContent='\ub4f1\ub85d\ub41c SOP\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.';
+    body.appendChild(e);
+  } else {
+    sops.forEach(function(sop,i){
+      var card=document.createElement('div');
+      card.style.cssText='background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);';
+      var head=document.createElement('div');
+      head.style.cssText='display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;';
+      var icon=document.createElement('div');
+      icon.style.cssText='width:40px;height:40px;border-radius:10px;background:#eff6ff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;';
+      icon.textContent='\ud83d\udcc4';
+      var info=document.createElement('div');
+      info.style.cssText='flex:1;';
+      var nm=document.createElement('div');
+      nm.style.cssText='font-size:14px;font-weight:800;';
+      nm.textContent=sop.name;
+      var meta=document.createElement('div');
+      meta.style.cssText='font-size:11px;color:#6b7280;margin-top:3px;';
+      meta.textContent=sop.category+' \u00b7 '+sop.version+' \u00b7 \ucd5c\uc885\uc218\uc815: '+sop.updatedAt;
+      info.appendChild(nm);info.appendChild(meta);
+      head.appendChild(icon);head.appendChild(info);
+      card.appendChild(head);
+      if(sop.content){
+        var cont=document.createElement('div');
+        cont.style.cssText='font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px;margin-bottom:10px;line-height:1.6;white-space:pre-wrap;';
+        cont.textContent=sop.content;
+        card.appendChild(cont);
+      }
+      var btns=document.createElement('div');
+      btns.style.cssText='display:flex;gap:8px;';
+      var eb=document.createElement('button');
+      eb.style.cssText='flex:1;border:1px solid var(--primary);color:var(--primary);background:#fff;border-radius:8px;padding:7px;font-size:12px;font-weight:700;cursor:pointer;';
+      eb.textContent='\u270f\ufe0f \uc218\uc815';
+      eb.onclick=(function(idx){return function(){window.editSopItem(idx);};})(i);
+      var db=document.createElement('button');
+      db.style.cssText='flex:1;border:1px solid #ef4444;color:#ef4444;background:#fff;border-radius:8px;padding:7px;font-size:12px;font-weight:700;cursor:pointer;';
+      db.textContent='\ud83d\uddd1\ufe0f \uc0ad\uc81c';
+      db.onclick=(function(idx){return function(){window.deleteSopItem(idx);};})(i);
+      btns.appendChild(eb);btns.appendChild(db);
+      card.appendChild(btns);
+      body.appendChild(card);
+    });
+  }
+  var syncCard=document.createElement('div');
+  syncCard.style.cssText='background:#fff;border-radius:12px;padding:16px;margin-top:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);';
+  var stitle=document.createElement('div');
+  stitle.style.cssText='font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;';
+  stitle.textContent='\ud83d\udd04 DB \ub3d9\uae30\ud654';
+  var sbtn=document.createElement('button');
+  sbtn.style.cssText='width:100%;background:var(--success,#22c55e);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;';
+  sbtn.textContent='Google Sheets\uc5d0 \ub3d9\uae30\ud654';
+  sbtn.onclick=function(){window.syncSopsToSheet();};
+  syncCard.appendChild(stitle);syncCard.appendChild(sbtn);
+  body.appendChild(syncCard);
+};
+
+window.addSopItem=function(){sopEditDialog(null,null);};
+window.editSopItem=function(idx){var sops=getSOPs();sopEditDialog(idx,sops[idx]);};
+window.deleteSopItem=function(idx){
+  if(!confirm('\uc774 SOP\ub97c \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?'))return;
+  var sops=getSOPs();sops.splice(idx,1);saveSOPs(sops);
+  window.renderSopList();
+  if(typeof showToast==='function')showToast('\ud83d\uddd1\ufe0f SOP \uc0ad\uc81c \uc644\ub8cc');
+};
+
+function sopEditDialog(idx,sop){
+  var ex=document.getElementById('sop-edit-dialog');if(ex)ex.remove();
+  var dlg=document.createElement('div');
+  dlg.id='sop-edit-dialog';
+  dlg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:800;display:flex;align-items:flex-end;';
+  var box=document.createElement('div');
+  box.style.cssText='background:#fff;width:100%;border-radius:16px 16px 0 0;padding:20px 16px 32px;max-height:85vh;overflow-y:auto;';
+  var ttl=document.createElement('div');
+  ttl.style.cssText='font-size:15px;font-weight:800;margin-bottom:16px;';
+  ttl.textContent=sop?'SOP \uc218\uc815':'\uc0c8 SOP \ucd94\uac00';
+  box.appendChild(ttl);
+  var fields=[
+    {key:'name',label:'SOP \uba85',ph:'\uc608: \ud558\uc774\ub4dc\ub85c\uacc4 \ub9c1\uac70 \uc81c\uc870 SOP',multi:false},
+    {key:'category',label:'\ubd84\ub958',ph:'\uc608: \uc81c\uc870, \uc704\uc0dd, \ud488\uc9c8',multi:false},
+    {key:'version',label:'\ubc84\uc804',ph:'\uc608: v1.0',multi:false},
+    {key:'url',label:'\ubb38\uc11c URL',ph:'https://...',multi:false},
+    {key:'content',label:'\ub0b4\uc6a9/\ub2e8\uacc4',ph:'\ub2e8\uacc4\ub97c \uac04\ub2e8\ud788 \uc785\ub825',multi:true}
+  ];
+  fields.forEach(function(f){
+    var row=document.createElement('div');row.style.cssText='margin-bottom:12px;';
+    var lbl=document.createElement('div');lbl.style.cssText='font-size:12px;font-weight:700;color:#374151;margin-bottom:4px;';
+    lbl.textContent=f.label;
+    var inp;
+    if(f.multi){inp=document.createElement('textarea');inp.rows=3;inp.style.cssText='width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:13px;resize:none;box-sizing:border-box;';}
+    else{inp=document.createElement('input');inp.type='text';inp.style.cssText='width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box;';}
+    inp.id='sop-field-'+f.key;inp.placeholder=f.ph;
+    if(sop&&sop[f.key])inp.value=sop[f.key];
+    row.appendChild(lbl);row.appendChild(inp);box.appendChild(row);
+  });
+  var br=document.createElement('div');br.style.cssText='display:flex;gap:10px;margin-top:16px;';
+  var cb=document.createElement('button');
+  cb.style.cssText='flex:1;border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;';
+  cb.textContent='\ucde8\uc18c';cb.onclick=function(){dlg.remove();};
+  var sb=document.createElement('button');
+  sb.style.cssText='flex:2;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;';
+  sb.textContent='\uc800\uc7a5';
+  sb.onclick=function(){
+    var sops=getSOPs();
+    var now=new Date().toISOString().slice(0,10);
+    var ns={
+      id:sop?sop.id:'SOP'+String(Date.now()).slice(-4),
+      name:document.getElementById('sop-field-name').value||'(\ubbf8\uc785\ub825)',
+      category:document.getElementById('sop-field-category').value||'\uc77c\ubc18',
+      version:document.getElementById('sop-field-version').value||'v1.0',
+      url:document.getElementById('sop-field-url').value||'',
+      content:document.getElementById('sop-field-content').value||'',
+      updatedAt:now
+    };
+    if(idx!==null)sops[idx]=ns;else sops.push(ns);
+    saveSOPs(sops);dlg.remove();window.renderSopList();
+    if(typeof showToast==='function')showToast(idx!==null?'\u2705 SOP \uc218\uc815 \uc644\ub8cc':'\u2705 SOP \ucd94\uac00 \uc644\ub8cc');
+  };
+  br.appendChild(cb);br.appendChild(sb);box.appendChild(br);
+  dlg.appendChild(box);document.body.appendChild(dlg);
+}
+
+window.syncSopsToSheet=function(){
+  var sops=getSOPs();
+  if(!window.gAccessToken){if(typeof showToast==='function')showToast('\u26a0\ufe0f Google \ub85c\uadf8\uc778 \ud544\uc694');return;}
+  var promises=sops.map(function(s){
+    return typeof window.appendSheetRow==='function'?window.appendSheetRow('SOPs',[s.id,s.name,s.category,s.version,s.url,s.content,s.updatedAt]):Promise.resolve();
+  });
+  Promise.all(promises).then(function(){if(typeof showToast==='function')showToast('\u2705 '+sops.length+'\uac1c SOP Sheets \ub3d9\uae30\ud654 \uc644\ub8cc');}).catch(function(){if(typeof showToast==='function')showToast('\u274c \ub3d9\uae30\ud654 \uc2e4\ud328');});
+};
+})();
+
+// _p2g: #11 QR 실제 인식 (jsQR CDN) + #12 다중 단위 QR 개별 스캔
+(function(){
+// 1) Load jsQR from CDN
+if(typeof jsQR==='undefined'){
+  var sc=document.createElement('script');
+  sc.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+  sc.onload=function(){console.log('[MTT] jsQR \ub85c\ub4dc \uc644\ub8cc');};
+  sc.onerror=function(){console.warn('[MTT] jsQR \ub85c\ub4dc \uc2e4\ud328, fallback \uc0ac\uc6a9');};
+  document.head.appendChild(sc);
+}
+
+// 2) Multi-scan state tracker: {ingIdx: {required, scanned, codes}}
+window._multiScanState={};
+
+// 3) simulateWoScanWithCode: update ingredient row UI after scan
+window.simulateWoScanWithCode=function(idx,data,allCodes){
+  var codes=allCodes||[data];
+  var rows=document.querySelectorAll('.wo-ing-row');
+  if(rows[idx]){
+    var st=rows[idx].querySelector('.wo-ing-status');
+    if(st){
+      st.textContent='\u2705 '+codes.length+'\uac1c \uc2a4\uce94\uc644\ub8cc';
+      st.style.color='var(--success,#22c55e)';
+      st.style.fontWeight='700';
+    }
+    rows[idx].dataset.scanned='true';
+    rows[idx].dataset.scannedCode=codes.join(',');
+  }
+  if(window._currentWOData){
+    if(!window._currentWOData.ingredients)window._currentWOData.ingredients={};
+    window._currentWOData.ingredients[idx]={codes:codes,scannedAt:new Date().toISOString()};
+    window._woDirty=true;
+    if(typeof window.updateTempSaveBtn==='function')window.updateTempSaveBtn(true);
+  }
+  checkAllIngredientsScanned();
+};
+
+function checkAllIngredientsScanned(){
+  var rows=document.querySelectorAll('.wo-ing-row');
+  if(!rows.length)return;
+  var all=Array.from(rows).every(function(r){return r.dataset.scanned==='true';});
+  if(all){
+    var btn=document.querySelector('.wo-step-next-btn,.btn-primary[disabled]');
+    if(btn){btn.disabled=false;btn.style.opacity='1';}
+    if(typeof showToast==='function')showToast('\u2705 \ubaa8\ub4e0 \uc6d0\ub8cc\ub4dc \uc2a4\uce94 \uc644\ub8cc');
+  }
+}
+window.checkAllIngredientsScanned=checkAllIngredientsScanned;
+
+// 4) Override handleQRResult for multi-unit support
+var _oHQR=window.handleQRResult;
+window.handleQRResult=function(data){
+  if(window.qrScanTarget==='wo'){
+    var modal=document.getElementById('qr-camera-modal');
+    var idx=parseInt(modal?modal.dataset.woIdx||'0':'0');
+    var state=window._multiScanState[idx];
+    if(state&&state.required>1){
+      // Check for duplicate scan
+      if(state.codes.indexOf(data)>=0){
+        if(typeof showToast==='function')showToast('\u26a0\ufe0f \uc774\ubbf8 \uc2a4\uce94\ub41c QR\uc785\ub2c8\ub2e4');
+        return;
+      }
+      state.scanned++;
+      state.codes.push(data);
+      // Update progress display
+      var prog=document.getElementById('qr-multi-progress');
+      if(prog){
+        prog.textContent=state.scanned+'/'+state.required+' \uc2a4\uce94 \uc644\ub8cc';
+        prog.style.color=state.scanned>=state.required?'var(--success,#22c55e)':'var(--primary)';
+      }
+      if(state.scanned>=state.required){
+        // All units done
+        setTimeout(function(){
+          if(typeof window.closeQRCamera==='function')window.closeQRCamera();
+          window.simulateWoScanWithCode(idx,data,state.codes);
+        },400);
+      } else {
+        if(typeof showToast==='function')showToast('\ud83d\udcf7 '+state.scanned+'/'+state.required+' \uc2a4\uce94 \uc644\ub8cc \u2014 \ub2e4\uc74c \ud56d\ubaa9 \uc2a4\uce94\ud558\uc138\uc694');
+      }
+      return;
+    }
+  }
+  if(_oHQR)_oHQR.apply(this,arguments);
+};
+
+// 5) Override openQRCamera to set woIdx on modal and init multi-scan state
+var _oOQC=window.openQRCamera;
+window.openQRCamera=function(target,woIdx){
+  if(target==='wo'&&woIdx!==undefined){
+    var modal=document.getElementById('qr-camera-modal');
+    if(modal)modal.dataset.woIdx=String(woIdx);
+    // Detect ingredient quantity from .wo-ing-row data-qty
+    var rows=document.querySelectorAll('.wo-ing-row');
+    var row=rows[parseInt(woIdx)];
+    var qty=row?parseInt(row.dataset.qty||'1'):1;
+    if(qty>1){
+      window._multiScanState[woIdx]={required:qty,scanned:0,codes:[]};
+      // Inject progress indicator after camera opens
+      setTimeout(function(){
+        var resultEl=document.getElementById('qr-cam-result');
+        if(resultEl&&!document.getElementById('qr-multi-progress')){
+          var pg=document.createElement('div');
+          pg.id='qr-multi-progress';
+          pg.style.cssText='margin-top:8px;font-size:14px;font-weight:700;color:var(--primary);text-align:center;padding:8px;background:#eff6ff;border-radius:8px;';
+          pg.textContent='0/'+qty+' \uc2a4\uce94 \uc644\ub8cc (\uc0c1\uc790 \uac1c\uc218: '+qty+'\uac1c)';
+          resultEl.parentNode.insertBefore(pg,resultEl.nextSibling);
+        }
+      },400);
+    } else {
+      // Single unit: reset multi state
+      delete window._multiScanState[woIdx];
+    }
+  }
+  if(_oOQC)_oOQC.apply(this,arguments);
+};
+
+// 6) Expose helper to open QR for ingredient by index (for use in WO step buttons)
+window.scanIngredientQR=function(idx){
+  window.openQRCamera('wo',idx);
+};
+})();
 </script>
 </body>
 </html>
