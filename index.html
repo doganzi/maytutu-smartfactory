@@ -9,7 +9,7 @@
 <style>
 :root{--primary:#1e40af;--primary-light:#3b82f6;--primary-bg:#eff6ff;--success:#16a34a;--success-bg:#f0fdf4;--warning:#d97706;--warning-bg:#fffbeb;--danger:#dc2626;--danger-bg:#fef2f2;--gray:#6b7280;--border:#e5e7eb;--text:#111827;--text-sub:#6b7280;--radius:12px;--radius-sm:8px;--shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);--shadow-md:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06);}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#f3f4f6;color:var(--text);min-height:100vh;}
+body{overscroll-behavior-y:contain;font-family:'Noto Sans KR',-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#f3f4f6;color:var(--text);min-height:100vh;}
 .topbar{background:var(--primary);color:#fff;height:56px;display:flex;align-items:center;padding:0 16px;position:sticky;top:0;z-index:200;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.2);}
 .topbar-logo{font-size:15px;font-weight:800;letter-spacing:-.5px;flex:1;}
 .topbar-logo span{color:#93c5fd;}
@@ -245,6 +245,8 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 /* ─── LOT Inventory Cards ─── */
 .lot-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:8px;overflow:hidden;border-left:4px solid var(--success);cursor:pointer;}
 .lot-card-head{display:flex;align-items:center;gap:12px;padding:12px 14px;}
+.lot-print-btn{background:none;border:1px solid var(--primary-light);color:var(--primary);border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;}
+.lot-print-btn:hover{background:var(--primary);color:#fff;}
 .lot-card-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
 .lot-card-info{flex:1;min-width:0;}
 .lot-card-name{font-size:13px;font-weight:700;}
@@ -262,6 +264,9 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 #inv-log-list>div{animation:fadeIn .3s;}
 .tbl-input{border:1.5px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;text-align:right;}
 </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 <div id="toast"></div>
@@ -356,11 +361,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
       <div style="display:flex;gap:8px;margin-bottom:10px">
         <input id="inv-scan-input" class="form-input" placeholder="QR 스캔 또는 코드 입력..." style="flex:1;font-family:monospace;font-size:12px">
         <button onclick="openQRCamera('inv')" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">📷</button>
-      </div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap">
-        <button onclick="invSample('MTT|RM|MAT-H03|L-H03-20260320-003|20270320')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">샘플:프리믹스1 #003</button>
-        <button onclick="invSample('MTT|RM|MAT-H02|L-H02-20260325-001|20260415')" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#475569">샘플:계란 #001</button>
-        <button onclick="invSample('MTT|FG|FG-HDR|FP-20260327-HDR-001|20261227')" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer;color:#0369a1">샘플:완제품 #001</button>
       </div>
       <div id="inv-scan-result" style="margin-top:10px;display:none"></div>
     </div>
@@ -468,23 +468,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     <div class="wo-progress">
       <div class="wo-steps"><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step done"></div><div class="wo-step active"></div><div class="wo-step"></div><div class="wo-step"></div><div class="wo-step"></div></div>
       <span style="font-size:11px;color:var(--primary-light);font-weight:700">5/14 공정</span>
-    </div>
-  </div>
-
-  <!-- 출하 가능 섹션 -->
-  <div class="section-header"><span class="section-title">🚛 출하 준비 현황</span></div>
-  <div class="card">
-    <div class="card-head"><span class="card-title">❄️ 냉동완료 · 출하가능 배치</span><span class="pill pill-approve">3봉 대기중</span></div>
-    <div class="card-body">
-      <div style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:12px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:6px">WL-20260327-HDR-001 · 호두과자 전용반죽 3봉</div>
-        <div style="font-size:11px;color:var(--text-sub);margin-bottom:8px">5kg × 3봉 = 15kg · 냉동완료 07:30 → 출하가능 19:30 ✅ (이미 경과)</div>
-        <div style="background:#dcfce7;border-radius:6px;padding:8px 10px;font-size:11px;color:#166534;margin-bottom:10px">
-          📦 박스 포장: 5kg × 4봉 = 1박스 (20kg/박스)<br>
-          현재 3봉 → <b>0박스 완성 · 낱봉 3개 (1박스 추가 시 출하 가능)</b>
-        </div>
-        <button onclick="openShipPanel('WL-20260327-HDR-001')" style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">🚛 출하 처리 시작</button>
-      </div>
     </div>
   </div>
 </div>
@@ -649,7 +632,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
       <div class="form-row"><div class="form-label">특이사항 (선택)</div><textarea class="form-input" id="recv-note" rows="2" placeholder="이상 없을 시 생략 가능"></textarea></div>
       <div style="display:flex;gap:8px">
         <button class="btn-secondary" style="flex:1" onclick="recvGoStep(1)">← 이전</button>
-        <button class="btn-primary" id="recv-s2-next" style="flex:2" disabled onclick="confirmReceiving()">✅ 입고 확정 → QR 라벨 생성</button>
+        <button class="btn-primary" id="recv-s2-next" style="flex:2" onclick="confirmReceiving()">✅ 입고 확정 → QR 라벨 생성</button>
       </div>
     </div>
 
@@ -1431,7 +1414,7 @@ const ITEM_DB = {
 const RECIPE_HDR = {
   batches_per_lot: 1,
   perBatch5kg: [
-    {itemId:'MAT-H01',name:'정제수',icon:'💧',amount:1250,unit:'mL',unitsNeeded:1,note:'계량 후 배합기 투입'},
+    {itemId:'MAT-H01',name:'정제수',icon:'💧',amount:1.25,unit:'kg',unitsNeeded:1,note:'계량 후 배합기 투입'},
     {itemId:'MAT-H02',name:'계란 전란',icon:'🥚',amount:600,unit:'g',unitsNeeded:1,note:'실온 30분 전처리 후 사용'},
     {itemId:'MAT-H03',name:'프리믹스1',icon:'🌾',amount:2400,unit:'g',unitsNeeded:1,note:'포대 일부 사용 가능'},
     {itemId:'MAT-H04',name:'프리믹스2',icon:'🧪',amount:500,unit:'g',unitsNeeded:1,note:'소분 봉 일부 사용 가능'},
@@ -1683,7 +1666,7 @@ let wo={step:0,plannedBatches:3,photosDone:{},mixPhotos:{},ingrStatus:{},current
 const WO_STEPS=[
   {id:0,icon:'📊',title:'계획 수량 설정',type:'qty'},
   {id:1,icon:'🔍',title:'원료 상태 확인',type:'ingr'},
-  {id:2,icon:'💧',title:'정제수 계량',type:'measure',itemId:'MAT-H01',unit:'mL',perBatch:1250,photo:true},
+  {id:2,icon:'💧',title:'정제수 계량',type:'measure',itemId:'MAT-H01',unit:'kg',perBatch:1.25,photo:true},
   {id:3,icon:'🥚',title:'계란 계량',type:'measure',itemId:'MAT-H02',unit:'g',perBatch:600,photo:true},
   {id:4,icon:'⚙️',title:'1차 배합 (저속)',type:'mix',speed:2,time:3,desc:'정제수+계란 균일 혼합',photo:true},
   {id:5,icon:'🌾',title:'프리믹스1 계량 및 투입',type:'measure',itemId:'MAT-H03',unit:'g',perBatch:2400,photo:true,add:true},
@@ -1694,8 +1677,7 @@ const WO_STEPS=[
   {id:10,icon:'✅',title:'품질 확인',type:'quality'},
   {id:11,icon:'🏷️',title:'관리자 승인 · QR 생성',type:'approval'},
   {id:12,icon:'🔍',title:'[CCP-2P] 금속검출',type:'ccp_metal'},
-  {id:13,icon:'❄️',title:'[CCP-1B] 동결공정 등록',type:'ccp_freeze'},
-  {id:14,icon:'🚛',title:'출하 준비 · 박스 포장',type:'ship_prep'}
+  {id:13,icon:'❄️',title:'[CCP-1B] 동결공정 등록',type:'ccp_freeze'}
 ];
 
 function openWOPanel(sopId){
@@ -2414,6 +2396,264 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFGLotInventory();
   }
 });
+</script>
+
+<script id="patch2-injected">
+
+// #7 거래처 드롭다운
+(function(){
+function getSuppliers(){try{var s=localStorage.getItem('mtt_suppliers');if(s)return JSON.parse(s);}catch(e){}return[{code:'SUP001',name:'(주)한국원료'},{code:'SUP002',name:'대한화학'},{code:'SUP003',name:'미래바이오'},{code:'SUP004',name:'서울케미칼'}];}
+window.getSupplierList=getSuppliers;
+function injectSupplierDropdown(){
+  var s1=document.getElementById('recv-s1');if(!s1)return;
+  if(document.getElementById('recv-supplier-row'))return;
+  var row=document.createElement('div');
+  row.className='form-row';row.id='recv-supplier-row';
+  row.innerHTML='<div class="form-label">거래체 선택</div><select class="form-select" id="recv-supplier-select" onchange="var b=document.getElementById('recv-supplier');if(b)b.textContent=this.options[this.selectedIndex].text||'\u2014'"><option value="">─ 거래체 선택 ─</option></select>';
+  var supplierB=document.getElementById('recv-supplier');
+  if(supplierB){var p=supplierB.closest('.lot-info-grid,.form-row')||supplierB.parentElement;if(p&&p.parentElement)p.parentElement.insertBefore(row,p);}
+  else s1.insertBefore(row,s1.firstChild);
+  var sel=document.getElementById('recv-supplier-select');
+  if(sel)getSuppliers().forEach(function(s){var o=document.createElement('option');o.value=s.code;o.textContent=s.name;sel.appendChild(o);});
+}
+window.injectSupplierDropdown=injectSupplierDropdown;
+if(document.readyState==='complete')injectSupplierDropdown();
+else window.addEventListener('load',injectSupplierDropdown);
+})();
+
+// #8 재고 품목별 요약→LOT 드릴다운
+(function(){
+function mkSummary(groups,container,type){
+  container.innerHTML='';
+  Object.keys(groups).forEach(function(itemId){
+    var g=groups[itemId];
+    var totalQty=g.lots.reduce(function(s,l){return s+parseFloat(l.lot[4]||0);},0);
+    var sum=document.createElement('div');
+    sum.style.cssText='background:var(--bg-card);border-radius:12px;padding:16px;margin-bottom:10px;cursor:pointer;border:1px solid var(--border)';
+    var col=type==='raw'?'var(--primary)':'var(--success,#38a169)';
+    sum.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:15px">'+g.name+'</b><span style="color:var(--text-sub);font-size:12px;margin-left:8px">'+itemId+'</span></div><div style="text-align:right"><b style="font-size:18px;color:'+col+'">'+totalQty.toFixed(1)+'</b><span style="color:var(--text-sub);font-size:12px"> '+g.unit+'</span></div></div><div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--text-sub)"><span>LOT: <b>'+g.lots.length+'</b></span></div><div class="drill-hint" style="font-size:11px;color:var(--primary);margin-top:6px">▼ 클릭하여 LOT 상세 보기</div>';
+    var detail=document.createElement('div');
+    detail.style.cssText='display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:8px';
+    g.lots.forEach(function(item){
+      var lot=item.lot;
+      var d=document.createElement('div');
+      d.id=(type==='raw'?'raw':'fg')+'-lot-'+item.idx;
+      d.dataset.lotId=lot[0]||'';
+      d.className='lot-card';
+      d.style.cssText='background:var(--bg);border-radius:8px;padding:10px;margin-bottom:6px;font-size:13px';
+      d.innerHTML='<div style="display:flex;justify-content:space-between"><span style="font-weight:600">'+(lot[0]||'—')+'</span><span style="color:var(--text-sub)">'+(lot[1]||'')+'</span></div><div style="display:flex;gap:10px;margin-top:4px;font-size:12px;color:var(--text-sub)"><span>수량:<b style="color:var(--text)">'+(lot[4]||0)+' '+(lot[5]||'')+'</b></span><span>상태:<b>'+(lot[7]||'정상')+'</b></span></div><button class="lot-print-btn" onclick="event.stopPropagation();showToast('\ud30c효 '+''+(lot[0]||'')+'')">\ud30c효 라벨</button>';
+      detail.appendChild(d);
+    });
+    sum.onclick=function(){var open=detail.style.display!=='none';detail.style.display=open?'none':'block';sum.querySelector('.drill-hint').textContent=open?'▼ 클릭하여 LOT 상세 보기':'▲ 닫기';};
+    container.appendChild(sum);container.appendChild(detail);
+  });
+}
+var _oRR=window.renderRawLotInventory;
+window.renderRawLotInventory=function(lots){
+  var c=document.getElementById('raw-lot-list');if(!c){if(_oRR)_oRR(lots);return;}
+  if(!lots||lots.length===0){c.innerHTML='<div class="empty-state">📦 원재료 재고 없음</div>';return;}
+  window.rawLots=lots;
+  var g={};lots.forEach(function(l,i){var id=l[2]||'?';var n=l[3]||id;if(!g[id])g[id]={name:n,unit:l[5]||'',lots:[]};g[id].lots.push({lot:l,idx:i});});
+  mkSummary(g,c,'raw');
+};
+var _oRF=window.renderFGLotInventory;
+window.renderFGLotInventory=function(lots){
+  var c=document.getElementById('fg-lot-list');if(!c){if(_oRF)_oRF(lots);return;}
+  if(!lots||lots.length===0){c.innerHTML='<div class="empty-state">📦 완제품 재고 없음</div>';return;}
+  window.fgLots=lots;
+  var g={};lots.forEach(function(l,i){var id=l[2]||'?';var n=l[3]||id;if(!g[id])g[id]={name:n,unit:l[5]||'',lots:[]};g[id].lots.push({lot:l,idx:i});});
+  mkSummary(g,c,'fg');
+};
+})();
+
+// #14 #15 임시저장 버튼 활성화 + 실제 저장
+(function(){
+window._woDirty=false;window._currentWOData={};
+function updateTempSaveBtn(on){
+  var btn=document.querySelector('.wo-panel-save');if(!btn)return;
+  btn.style.background=on?'var(--primary)':'#f3f4f6';
+  btn.style.color=on?'#fff':'var(--gray,#9ca3af)';
+  btn.onclick=on?saveTempWO:function(){showToast('입력 후 저장 가능');};
+}
+window.updateTempSaveBtn=updateTempSaveBtn;
+function saveTempWO(){
+  var t=document.querySelector('.wo-panel-title');
+  var title=t?t.textContent:'작업지시서';
+  var today=new Date().toISOString().split('T')[0];
+  var woId='WO-'+today.replace(/-/g,'')+'-'+Date.now().toString().slice(-4);
+  var wos=[];try{wos=JSON.parse(localStorage.getItem('mtt_work_orders')||'[]');}catch(e){}
+  var wo={id:woId,title:title,date:today,status:'임시저장',savedAt:new Date().toISOString(),steps:window._currentWOData.steps||{}};
+  var ei=wos.findIndex(function(w){return w.date===today&&w.status==='임시저장';});
+  if(ei>=0)wos[ei]=wo;else wos.push(wo);
+  localStorage.setItem('mtt_work_orders',JSON.stringify(wos));
+  showToast('💾 임시저장 완료 ('+woId+')');
+  window._woDirty=false;updateTempSaveBtn(false);
+}
+window.saveTempWO=saveTempWO;
+var _oOpen=window.openWOPanel;
+window.openWOPanel=function(a,b){window._woDirty=false;window._currentWOData={itemId:a,qty:b,steps:{}};if(_oOpen)_oOpen.apply(this,arguments);setTimeout(function(){updateTempSaveBtn(false);},150);};
+var _oRS=window.renderStep;
+window.renderStep=function(sid,data){if(_oRS)_oRS.apply(this,arguments);setTimeout(function(){var p=document.getElementById('wo-step-'+sid);if(!p)return;p.querySelectorAll('input,select,textarea').forEach(function(el){el.addEventListener('change',function(){if(!window._currentWOData.steps)window._currentWOData.steps={};if(!window._currentWOData.steps[sid])window._currentWOData.steps[sid]={};window._currentWOData.steps[sid][el.name||el.id||'v']=el.value;window._woDirty=true;updateTempSaveBtn(true);});});},200);};
+})();
+// #3 LOT 프린트 버튼 MutationObserver
+(function(){
+var obs=new MutationObserver(function(muts){
+  muts.forEach(function(m){m.addedNodes.forEach(function(n){
+    if(n.nodeType!==1)return;
+    [n].concat(Array.from(n.querySelectorAll?n.querySelectorAll('.lot-card'):[])).forEach(function(c){
+      if(!c.classList||!c.classList.contains('lot-card'))return;
+      if(c.querySelector('.lot-print-btn'))return;
+      var lid=c.dataset&&c.dataset.lotId||'';
+      var btn=document.createElement('button');
+      btn.className='lot-print-btn';btn.textContent='파효 라벨';
+      btn.onclick=function(e){e.stopPropagation();showToast('파효 '+lid);};
+      c.appendChild(btn);
+    });
+  });});
+});
+if(document.body)obs.observe(document.body,{childList:true,subtree:true});
+})();
+
+// #18 관리자 승인 시스템
+(function(){
+function getApprovals(){try{return JSON.parse(localStorage.getItem('mtt_approvals')||'[]');}catch(e){return[];}}
+function saveApprovals(a){localStorage.setItem('mtt_approvals',JSON.stringify(a));}
+function ensurePanel(){
+  if(document.getElementById('apr-overlay'))return;
+  var o=document.createElement('div');o.id='apr-overlay';
+  o.style.cssText='display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9000;overflow-y:auto;padding:20px;box-sizing:border-box';
+  o.innerHTML='<div style="background:var(--bg-card);border-radius:16px;max-width:480px;margin:0 auto;padding:20px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="margin:0">📋 승인 관리</h3><button onclick="closeApprovalPanel()" style="border:none;background:none;font-size:24px;cursor:pointer">×</button></div><div id="apr-list"></div></div>';
+  document.body.appendChild(o);
+}
+window.requestAdminApproval=function(type,data,cb){
+  var a=getApprovals();var id='APR-'+Date.now();
+  a.push({id:id,type:type,data:data,status:'대기',requestedAt:new Date().toISOString()});
+  saveApprovals(a);
+  if(!window._aprCb)window._aprCb={};if(cb)window._aprCb[id]=cb;
+  showToast('📨 승인 요청 등록 ('+id+')');return id;
+};
+window.openApprovalPanel=function(){
+  ensurePanel();var o=document.getElementById('apr-overlay');var l=document.getElementById('apr-list');if(!o||!l)return;
+  var a=getApprovals();
+  if(!a.length){l.innerHTML='<div style="text-align:center;color:var(--text-sub);padding:20px">승인 요청 없음</div>';}
+  else{l.innerHTML='';a.slice().reverse().forEach(function(r){
+    var lbl={shipping:'출하 승인',freeze_complete:'동결공정 완료',fg_register:'완제품 등록'}[r.type]||r.type;
+    var sc=r.status==='승인'?'var(--success,#38a169)':r.status==='거절'?'#e53e3e':'var(--warning,#f6ad55)';
+    var d=document.createElement('div');
+    d.style.cssText='background:var(--bg);border-radius:10px;padding:12px;margin-bottom:10px';
+    d.innerHTML='<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>'+lbl+'</b><span style="color:'+sc+';font-weight:600">'+r.status+'</span></div><div style="font-size:12px;color:var(--text-sub);margin-bottom:6px">'+r.id+' · '+new Date(r.requestedAt).toLocaleString('ko-KR')+'</div>'+(r.data?'<div style="font-size:13px;margin-bottom:8px">'+(typeof r.data==='string'?r.data:JSON.stringify(r.data).slice(0,80))+'</div>':'')+(r.status==='대기'?'<div style="display:flex;gap:8px"><button onclick="approveRequest(''+r.id+'')" style="flex:1;padding:8px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer">✅ 승인</button><button onclick="rejectRequest(''+r.id+'')" style="flex:1;padding:8px;background:#f3f4f6;color:var(--gray);border:none;border-radius:8px;cursor:pointer">❌ 거절</button></div>':'');
+    l.appendChild(d);
+  });}
+  o.style.display='block';
+};
+window.closeApprovalPanel=function(){var o=document.getElementById('apr-overlay');if(o)o.style.display='none';};
+window.approveRequest=function(id){
+  var a=getApprovals();var r=a.find(function(x){return x.id===id;});if(!r)return;
+  r.status='승인';r.approvedAt=new Date().toISOString();saveApprovals(a);
+  showToast('✅ '+id+' 승인 완료');
+  if(window._aprCb&&window._aprCb[id]){window._aprCb[id]('approved',r);delete window._aprCb[id];}
+  if(r.type==='fg_register'&&r.data){
+    var d=r.data;var row=Array.isArray(d)?d:[d.lotId,d.date,d.itemId,d.itemName,d.qty,d.unit,d.woId,'정상'];
+    if(window.gAccessToken&&typeof window.appendSheetRow==='function')window.appendSheetRow(window.SHEETS&&window.SHEETS.FG_LOTS||'완제품LOT',row).then(function(){showToast('📦 완제품 재고 등록 완료');}).catch(function(){});
+    else{var fl=[];try{fl=JSON.parse(localStorage.getItem('mtt_fg_lots')||'[]');}catch(e){}fl.push(row);localStorage.setItem('mtt_fg_lots',JSON.stringify(fl));showToast('📦 완제품 등록 (로컈)');}}
+  window.openApprovalPanel();
+};
+window.rejectRequest=function(id){
+  var a=getApprovals();var r=a.find(function(x){return x.id===id;});if(!r)return;
+  r.status='거절';r.rejectedAt=new Date().toISOString();saveApprovals(a);
+  showToast('❌ 거절');if(window._aprCb&&window._aprCb[id]){window._aprCb[id]('rejected',r);delete window._aprCb[id];}
+  window.openApprovalPanel();
+};
+// Add floating approval button
+window.addEventListener('load',function(){
+  setTimeout(function(){
+    if(document.getElementById('apr-fab'))return;
+    var b=document.createElement('button');b.id='apr-fab';
+    b.innerHTML='📋';b.title='승인 관리';
+    b.style.cssText='position:fixed;bottom:80px;right:16px;z-index:8000;background:var(--primary);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:20px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.3)';
+    b.onclick=window.openApprovalPanel;document.body.appendChild(b);
+  },1000);
+});
+})();
+// #20 STEP13 동결완료→승인요청→완제품등록
+(function(){
+var _oSF=window.submitFreezing;
+window.submitFreezing=function(sd){
+  var wd=window._currentWOData||{};var today=new Date().toISOString().split('T')[0];
+  var lotId='FG-'+today.replace(/-/g,'')+'-'+Date.now().toString().slice(-4);
+  var fgd={lotId:lotId,date:today,itemId:wd.itemId||'FG-001',itemName:'완제품',qty:wd.qty||(sd&&sd.qty)||0,unit:'kg',woId:wd.id||('WO-'+Date.now())};
+  if(!confirm('동결공정을 완료합니다.
+LOT: '+lotId+'
+수량: '+fgd.qty+' kg
+
+관리자 상품화 승인 요청을 보내시겠습니까?'))return;
+  if(_oSF){try{_oSF.apply(this,arguments);}catch(e){}}
+  window.requestAdminApproval('fg_register',fgd,function(st){if(st==='approved')showToast('🎉 완제품 등록 승인! LOT: '+lotId);});
+  var wos=[];try{wos=JSON.parse(localStorage.getItem('mtt_work_orders')||'[]');}catch(e){}
+  var ei=wos.findIndex(function(w){return w.id===fgd.woId;});
+  if(ei>=0)wos[ei].status='동결완료_승인대기';else wos.push({id:fgd.woId,date:today,status:'동결완료_승인대기',fgLotId:lotId});
+  localStorage.setItem('mtt_work_orders',JSON.stringify(wos));
+  showToast('❄️ 동결공정 완료. 관리자 승인 요청 완료');
+};
+})();
+
+// #4 DB 초기화 버튼
+(function(){
+function addDBInitBtn(){
+  var ep=document.getElementById('page-equipment');if(!ep)return;
+  if(ep.querySelector('#db-init-section'))return;
+  var sec=document.createElement('div');sec.id='db-init-section';
+  sec.style.cssText='background:var(--bg-card);border-radius:12px;padding:16px;margin:16px 0';
+  sec.innerHTML='<h4 style="margin:0 0 12px">🗄️ 데이터베이스 관리</h4><p style="font-size:13px;color:var(--text-sub);margin-bottom:12px">Google Sheets DB 구조를 초기화하고 기본 마스터 데이터를 입력합니다.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="runDBInit()" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">🗄️ DB 초기화</button><button onclick="runSeedData()" style="background:var(--success,#38a169);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">🌱 기본 데이터 입력</button><button onclick="runLoadData()" style="background:#f3f4f6;color:var(--text);border:none;border-radius:8px;padding:10px 16px;cursor:pointer">🔄 데이터 새로고침</button></div><div id="db-init-status" style="margin-top:10px;font-size:13px;color:var(--text-sub)"></div>';
+  ep.insertBefore(sec,ep.firstChild);
+}
+window.addDBInitBtn=addDBInitBtn;
+window.runDBInit=function(){
+  var st=document.getElementById('db-init-status');if(st)st.textContent='⏳ DB 초기화 중...';
+  if(typeof window.initSheetsStructure==='function')window.initSheetsStructure().then(function(){if(st)st.textContent='✅ DB 초기화 완료';showToast('✅ DB 완료');}).catch(function(e){if(st)st.textContent='❌ 오류: '+e.message;});
+  else{if(st)st.textContent='⚠️ 로기인 후 이용';showToast('⚠️ 로기인 후 이용 가능');}
+};
+window.runSeedData=function(){
+  var st=document.getElementById('db-init-status');
+  if(typeof window.seedMasterData==='function')window.seedMasterData().then(function(){if(st)st.textContent='✅ 기본 데이터 완료';showToast('✅ 기본 데이터 완료');}).catch(function(e){if(st)st.textContent='❌ '+e.message;});
+  else showToast('⚠️ 로기인 후 이용 가능');
+};
+window.runLoadData=function(){
+  if(typeof window.loadAllSheetsData==='function')window.loadAllSheetsData().then(function(){showToast('✅ 데이터 로딩 완료');}).catch(function(e){showToast('❌ 로딩 실패: '+e.message);});
+  else showToast('⚠️ 로기인 후 이용 가능');
+};
+if(document.readyState==='complete')setTimeout(addDBInitBtn,500);
+else window.addEventListener('load',function(){setTimeout(addDBInitBtn,500);});
+})();
+// #17 카메라 실제 열기
+(function(){
+var _oAP=window.attachPhoto;
+window.attachPhoto=function(sid,ctx){
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){openPhotoCamera(sid);}
+  else{var inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';inp.onchange=function(e){if(e.target.files[0])procPhotoFile(e.target.files[0],sid);};inp.click();}
+};
+function openPhotoCamera(sid){
+  var ov=document.getElementById('cam-photo-ov');if(ov)ov.remove();
+  ov=document.createElement('div');ov.id='cam-photo-ov';
+  ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center';
+  ov.innerHTML='<video id="cam-pv" autoplay playsinline style="width:100%;max-height:70vh;object-fit:cover"></video><canvas id="cam-pc" style="display:none"></canvas><div style="padding:16px;display:flex;gap:16px"><button id="cam-snap" style="background:var(--primary);color:#fff;border:none;border-radius:50%;width:64px;height:64px;font-size:28px;cursor:pointer">📷</button><button id="cam-cancel" style="background:#666;color:#fff;border:none;border-radius:50%;width:64px;height:64px;font-size:24px;cursor:pointer">✕</button></div>';
+  document.body.appendChild(ov);
+  var vid=document.getElementById('cam-pv'),cnv=document.getElementById('cam-pc'),stream=null;
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(function(s){stream=s;vid.srcObject=s;}).catch(function(e){ov.remove();showToast('카메라 오류: '+e.message);var inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';inp.onchange=function(ev){if(ev.target.files[0])procPhotoFile(ev.target.files[0],sid);};inp.click();});
+  document.getElementById('cam-snap').onclick=function(){cnv.width=vid.videoWidth;cnv.height=vid.videoHeight;cnv.getContext('2d').drawImage(vid,0,0);var du=cnv.toDataURL('image/jpeg',0.8);if(stream)stream.getTracks().forEach(function(t){t.stop();});ov.remove();saveStepPhoto(sid,du);showToast('📸 사진 저장 완료');};
+  document.getElementById('cam-cancel').onclick=function(){if(stream)stream.getTracks().forEach(function(t){t.stop();});ov.remove();};
+}
+function procPhotoFile(f,sid){var r=new FileReader();r.onload=function(e){saveStepPhoto(sid,e.target.result);showToast('📸 사진 저장 완료');};r.readAsDataURL(f);}
+function saveStepPhoto(sid,du){if(!window._currentWOData)window._currentWOData={};if(!window._currentWOData.steps)window._currentWOData.steps={};if(!window._currentWOData.steps[sid])window._currentWOData.steps[sid]={};window._currentWOData.steps[sid].photo=du;window._currentWOData.steps[sid].photoAt=new Date().toISOString();window._woDirty=true;if(typeof window.updateTempSaveBtn==='function')window.updateTempSaveBtn(true);try{localStorage.setItem('mtt_photo_'+(window._currentWOData.id||'cur')+'_'+sid,du);}catch(e){}}
+window.saveStepPhoto=saveStepPhoto;
+})();
+// showPage 오버라이드
+(function(){
+var _oSP=window.showPage;
+window.showPage=function(pg){if(_oSP)_oSP.apply(this,arguments);setTimeout(function(){if(pg==='receiving'){if(typeof window.injectSupplierDropdown==='function')window.injectSupplierDropdown();}if(pg==='equipment'){if(typeof window.addDBInitBtn==='function')window.addDBInitBtn();}},300);};
+// Init on load
+window.addEventListener('DOMContentLoaded',function(){setTimeout(function(){if(typeof window.injectSupplierDropdown==='function')window.injectSupplierDropdown();if(typeof window.addDBInitBtn==='function')window.addDBInitBtn();},1000);});
+})();
 </script>
 </body>
 </html>
