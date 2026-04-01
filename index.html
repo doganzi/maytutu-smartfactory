@@ -3004,6 +3004,240 @@ if(window.currentUser)setTimeout(autoConnect,1500);
 window.autoConnect=autoConnect;
 window.initDB=initDB;
 })();
+
+// _p2l: Single OAuth login (login + Sheets in one consent, no extra popups)
+(function(){
+var CID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
+var SCOPES='openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+var SID='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';
+var _tc=null;
+var _origFinishLogin=null;
+var _origHandleGoogleLogin=null;
+
+// Sheets tab names
+var TABS=['\uc6d0\uc7ac\ub8ccLOT','\uc644\uc81c\ud488LOT','\uc791\uc5c5\uae30\ub85d','\uc785\uace0\uae30\ub85d','\ucd9c\ud558\uae30\ub85d','\uc6d0\uc7ac\ub8cc\ud488\ubaa9','\uc644\uc81c\ud488\ud488\ubaa9','\uac70\ub798\ucc98','\uc0ac\uc6a9\uc790','SOP','\uae30\uae30\uad00\ub9ac'];
+
+function getTC(cb){
+  if(_tc) return _tc;
+  if(typeof google==='undefined'||!google.accounts||!google.accounts.oauth2) return null;
+  _tc=google.accounts.oauth2.initTokenClient({
+    client_id:CID, scope:SCOPES,
+    callback:function(resp){
+      if(resp&&resp.access_token){
+        window.gAccessToken=resp.access_token;
+        if(cb) cb(resp.access_token);
+      }
+    }
+  });
+  return _tc;
+}
+
+// Fetch user info from access token
+async function getUserInfo(token){
+  var r=await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{
+    headers:{'Authorization':'Bearer '+token}
+  });
+  if(!r.ok) return null;
+  return await r.json();
+}
+
+// Sheets API helper
+async function sApi(path,opts){
+  opts=opts||{};
+  var h={'Authorization':'Bearer '+window.gAccessToken};
+  if(opts.body){h['Content-Type']='application/json';}
+  var r=await fetch('https://sheets.googleapis.com/v4/spreadsheets'+path,{
+    method:opts.method||'GET',headers:h,body:opts.body?JSON.stringify(opts.body):undefined
+  });
+  return {status:r.status,data:await r.json()};
+}
+
+// Check if spreadsheet has proper tabs
+async function checkSheet(sid){
+  try{
+    var r=await sApi('/'+sid+'?fields=sheets.properties');
+    if(r.status===200&&r.data&&r.data.sheets&&r.data.sheets.length>=10) return true;
+  }catch(e){}
+  return false;
+}
+
+// Create spreadsheet with all 11 tabs + headers
+async function createSheet(){
+  var sheets=TABS.map(function(t){return {properties:{title:t}};});
+  var body={properties:{title:'\uba54\uc774\ud22c\ud22c \uc2a4\ub9c8\ud2b8\ud329\ud1a0\ub9ac DB'},sheets:sheets};
+  var r=await sApi('',{method:'POST',body:body});
+  if(r.status===200&&r.data&&r.data.spreadsheetId){
+    var newId=r.data.spreadsheetId;
+    try{localStorage.setItem('maytutu_sheetId',newId);}catch(e){}
+    window._SHEET_ID=newId;
+    await seedHeaders(newId);
+    return newId;
+  }
+  return null;
+}
+
+async function seedHeaders(sid){
+  var hd={};
+  hd[TABS[0]]=['lotId','itemName','supplier','qty','unit','rcvDate','expDate','status','notes'];
+  hd[TABS[1]]=['lotId','itemName','qty','unit','prodDate','expDate','woId','status','notes'];
+  hd[TABS[2]]=['woId','product','qty','line','worker','startTime','endTime','status','notes'];
+  hd[TABS[3]]=['rcvId','supplier','itemName','lotId','qty','unit','date','inspector','status'];
+  hd[TABS[4]]=['shipId','customer','itemName','lotId','qty','unit','date','status','notes'];
+  hd[TABS[5]]=['code','name','spec','unit','category','minStock','supplier','notes'];
+  hd[TABS[6]]=['code','name','spec','unit','category','shelfLife','notes'];
+  hd[TABS[7]]=['code','name','type','contact','phone','email','address','notes'];
+  hd[TABS[8]]=['email','name','role','department','phone','status'];
+  hd[TABS[9]]=['docId','title','category','version','content','updatedBy','updatedAt'];
+  hd[TABS[10]]=['eqId','name','model','location','status','lastCheck','nextCheck','manager','notes'];
+  var reqs=[];
+  TABS.forEach(function(t,i){
+    if(hd[t]){
+      reqs.push({appendCells:{sheetId:i,fields:'userEnteredValue',
+        rows:[{values:hd[t].map(function(h){return {userEnteredValue:{stringValue:h}};})}]
+      }});
+    }
+  });
+  if(reqs.length) await sApi('/'+sid+':batchUpdate',{method:'POST',body:{requests:reqs}});
+}
+
+// Init DB: check existing or create new
+async function initDB2(){
+  // Try stored ID first
+  var sid=window._SHEET_ID;
+  if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+  if(!sid) sid=SID;
+  
+  if(sid){
+    var ok=await checkSheet(sid);
+    if(ok){window._SHEET_ID=sid;return sid;}
+  }
+  // Create new
+  var newId=await createSheet();
+  return newId;
+}
+
+// Combined login+sheets flow
+function doLogin(){
+  var tc=getTC(async function(token){
+    // Got access token - now get user info
+    try{
+      var ui=await getUserInfo(token);
+      if(ui&&ui.email){
+        // Set user
+        window.currentUser={name:ui.name||ui.email.split('@')[0],email:ui.email};
+        // Init DB silently
+        try{await initDB2();}catch(e){console.log('DB init err:',e);}
+        // Call original finishLogin if exists
+        if(_origFinishLogin){
+          try{_origFinishLogin();}catch(e){}
+        }else{
+          // Manual finish: show main page
+          var lp=document.getElementById('page-login');
+          if(lp) lp.style.display='none';
+          var main=document.getElementById('main-content')||document.getElementById('app-main');
+          if(main) main.style.display='';
+          if(typeof showPage==='function') showPage('dashboard');
+        }
+        // Also try to load sheet data
+        try{
+          if(typeof initSheetsStructure==='function') await initSheetsStructure();
+          if(typeof loadAllSheetsData==='function') await loadAllSheetsData();
+        }catch(e){}
+      }
+    }catch(e){console.log('Login flow err:',e);}
+  });
+  if(!tc) return;
+  tc.requestAccessToken({prompt:'consent'});
+}
+
+// Override the Google Sign-In button
+function replaceLoginButton(){
+  var wrapper=document.getElementById('google-btn-wrapper');
+  if(!wrapper) return;
+  // Clear existing Google button
+  wrapper.innerHTML='';
+  var btn=document.createElement('button');
+  btn.style.cssText='display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:320px;margin:0 auto;padding:12px 24px;background:#fff;border:1px solid #dadce0;border-radius:8px;cursor:pointer;font-size:15px;font-weight:500;color:#3c4043;box-shadow:0 1px 3px rgba(0,0,0,0.08);transition:box-shadow 0.2s;';
+  btn.innerHTML='<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:20px;height:20px;"> <span>Google \uacc4\uc815\uc73c\ub85c \ub85c\uadf8\uc778</span>';
+  btn.onmouseover=function(){this.style.boxShadow='0 2px 8px rgba(0,0,0,0.15)';};
+  btn.onmouseout=function(){this.style.boxShadow='0 1px 3px rgba(0,0,0,0.08)';};
+  btn.onclick=doLogin;
+  wrapper.appendChild(btn);
+}
+
+// Override openSheetsDB - no extra auth needed
+window.openSheetsDB=function(){
+  var sid=window._SHEET_ID;
+  if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+  if(!sid) sid=SID;
+  
+  if(window.gAccessToken&&sid){
+    window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
+    return;
+  }
+  // If no token yet (shouldn't happen after login), trigger login
+  doLogin();
+};
+
+// Disable the old autoConnect / _p2k behavior
+window.autoConnect=function(){};
+
+// Save original finishLogin before any override
+_origFinishLogin=window.finishLogin;
+
+// Override handleGoogleLogin to prevent old ID-token flow from interfering
+_origHandleGoogleLogin=window.handleGoogleLogin;
+window.handleGoogleLogin=function(response){
+  // If this is called from old Google ID button, ignore it
+  // Our new flow handles everything
+  console.log('_p2l: old handleGoogleLogin intercepted, ignoring');
+};
+
+// Remove old sheets connect cards/banners
+function cleanOldUI(){
+  var els=['p2k-sheets-card','sheets-connect-banner'];
+  els.forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+}
+
+// Hook into page display
+var _oSP_p2l=window.showPage;
+window.showPage=function(){
+  if(_oSP_p2l) _oSP_p2l.apply(this,arguments);
+  setTimeout(cleanOldUI,200);
+};
+
+// Init: replace button on load
+function init_p2l(){
+  replaceLoginButton();
+  cleanOldUI();
+  // If already logged in and no token, try silent refresh
+  if(window.currentUser&&!window.gAccessToken){
+    var tc=getTC(async function(token){
+      try{await initDB2();}catch(e){}
+      try{
+        if(typeof initSheetsStructure==='function') await initSheetsStructure();
+        if(typeof loadAllSheetsData==='function') await loadAllSheetsData();
+      }catch(e){}
+    });
+    if(tc) tc.requestAccessToken({prompt:''});
+  }
+}
+
+// Run after DOM ready and GIS library loaded
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',function(){setTimeout(init_p2l,500);});
+}else{
+  setTimeout(init_p2l,500);
+}
+// Also run after finishLogin (in case page reloads with cached user)
+var _fl_p2l=window.finishLogin;
+window.finishLogin=function(){
+  if(_fl_p2l) _fl_p2l.apply(this,arguments);
+  setTimeout(cleanOldUI,500);
+};
+})();
+
+
 </script>
 </body>
 </html>
