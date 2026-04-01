@@ -2829,6 +2829,47 @@ if(document.getElementById('page-equipment')&&document.getElementById('page-equi
   setTimeout(addSheetsConnectBtn,400);
 }
 })();
+// _p2i
+(function(){
+var bannerId='global-sheets-banner';
+function showSheetsBanner(){
+  if(typeof gAccessToken!=='undefined'&&gAccessToken){hideSheetsBanner();return;}
+  if(document.getElementById(bannerId))return;
+  if(!window.currentUser)return;
+  var ban=document.createElement('div');
+  ban.id=bannerId;
+  ban.style.cssText='position:fixed;top:56px;left:0;right:0;z-index:600;background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,0.15);';
+  var msg=document.createElement('div');
+  msg.style.cssText='font-size:13px;font-weight:600;flex:1;';
+  msg.textContent='\u26a0\ufe0f Google Sheets DB\uac00 \uc5f0\uacb0\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc5f0\uacb0\ud574\uc57c \ub370\uc774\ud130\uac00 \uc800\uc7a5\ub429\ub2c8\ub2e4.';
+  var btn=document.createElement('button');
+  btn.style.cssText='background:#fff;color:#1e40af;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;min-width:120px;';
+  btn.textContent='\ud83d\udd17 Sheets \uc5f0\uacb0';
+  btn.onclick=function(){
+    btn.textContent='\u23f3 \uc5f0\uacb0 \uc911...';
+    btn.disabled=true;
+    function doConnect(){
+      if(typeof gTokenClient==='undefined'){if(typeof initTokenClient==='function')initTokenClient();setTimeout(doConnect,800);return;}
+      gTokenClient.requestAccessToken({prompt:'consent'});
+    }
+    doConnect();
+    var poll=setInterval(function(){
+      if(typeof gAccessToken!=='undefined'&&gAccessToken){clearInterval(poll);hideSheetsBanner();if(typeof addSheetsConnectBtn==='function')addSheetsConnectBtn();}
+    },800);
+    setTimeout(function(){clearInterval(poll);if(typeof gAccessToken==='undefined'||!gAccessToken){btn.disabled=false;btn.textContent='\ud83d\udd17 Sheets \uc5f0\uacb0';msg.textContent='\u26a0\ufe0f \uc5f0\uacb0 \uc2e4\ud328 \u2014 \ubc84\ud2bc\uc744 \ub2e4\uc2dc \ub20c\ub7ec\uc8fc\uc138\uc694';}},30000);
+  };
+  ban.appendChild(msg);ban.appendChild(btn);
+  document.body.appendChild(ban);
+}
+function hideSheetsBanner(){var ban=document.getElementById(bannerId);if(ban){ban.remove();}}
+var _origFinish=window.finishLogin;
+window.finishLogin=function(){if(_origFinish)_origFinish.apply(this,arguments);setTimeout(function(){if(typeof gAccessToken==='undefined'||!gAccessToken){showSheetsBanner();}},3000);};
+var _oSP3=window.showPage;
+window.showPage=function(pg){if(_oSP3)_oSP3.apply(this,arguments);setTimeout(function(){if(window.currentUser&&(typeof gAccessToken==='undefined'||!gAccessToken)){showSheetsBanner();}},500);};
+if(window.currentUser){setTimeout(function(){if(typeof gAccessToken==='undefined'||!gAccessToken){showSheetsBanner();}},2000);}
+window.showSheetsBanner=showSheetsBanner;
+window.hideSheetsBanner=hideSheetsBanner;
+})();
 </script>
 </body>
 </html>
