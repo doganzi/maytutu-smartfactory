@@ -2903,29 +2903,52 @@ window.applyRoleUI=applyRoleUI;
 
 
 
-// _p2k: Standalone Sheets OAuth + auto-create spreadsheet
+// _p2k: Auto Sheets connect on Google login + openSheetsDB
 (function(){
-var CLIENT_ID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
-var SCOPE='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
-var myTokenClient=null;
-function ensureTokenClient(){
-if(myTokenClient)return myTokenClient;
-if(typeof google==='undefined'||!google.accounts||!google.accounts.oauth2)return null;
-myTokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPE,
-callback:function(resp){if(resp&&resp.access_token){window.gAccessToken=resp.access_token;onSheetsConnected();}}
-});return myTokenClient;}
-function setStatus(msg){var card=document.getElementById('p2k-sheets-card');if(card&&card.querySelector('.p2k-status'))card.querySelector('.p2k-status').textContent=msg;}
-async function sheetsApi(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts.headers['Authorization']='Bearer '+window.gAccessToken;opts.headers['Content-Type']='application/json';var r=await fetch(url,opts);return{status:r.status,data:await r.json()};}
-async function checkOrCreateSpreadsheet(){
-var sid=window._SHEET_ID;
-if(sid){var ck=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'?fields=sheets.properties');if(ck.status===200&&ck.data&&ck.data.sheets&&ck.data.sheets.length>1)return sid;}
-setStatus('🔄 새 스프레드시트 생성 중...');
-var sn=['원재료LOT','완제품LOT','작업기록','입고기록','출하기록','원재료품목','완제품품목','거래처','사용자','SOP','기기관리'];
-var sheets=sn.map(function(n,i){return{properties:{sheetId:i+1,title:n}};});
-var res=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',body:JSON.stringify({properties:{title:'메이투투 스마트팩토리 DB'},sheets:sheets})});
-if(res.status===200&&res.data.spreadsheetId){var nid=res.data.spreadsheetId;window._SHEET_ID=nid;try{localStorage.setItem('maytutu_sheetId',nid);}catch(e){}
-setStatus('✅ 새 스프레드시트 생성 완료!');return nid;}
-throw new Error('스프레드시트 생성 실패');}
+var CID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
+var SC='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+var tc=null;
+function getTC(cb){
+  if(tc)return tc;
+  if(typeof google==='undefined'||!google.accounts||!google.accounts.oauth2)return null;
+  tc=google.accounts.oauth2.initTokenClient({client_id:CID,scope:SC,
+    callback:function(r){
+      if(r&&r.access_token){
+        window.gAccessToken=r.access_token;
+        initDB();
+      }
+    }
+  });
+  return tc;
+}
+async function sheetsApi(url,opts){
+  opts=opts||{};opts.headers=opts.headers||{};
+  opts.headers['Authorization']='Bearer '+window.gAccessToken;
+  opts.headers['Content-Type']='application/json';
+  var r=await fetch(url,opts);return{status:r.status,data:await r.json()};}
+function autoConnect(){
+  if(window.gAccessToken)return;
+  var t=getTC();
+  if(!t)return;
+  t.requestAccessToken({prompt:''});
+}
+async function initDB(){
+  var sid;try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}
+  if(sid){
+    var ck=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'?fields=sheets.properties');
+    if(ck.status===200&&ck.data&&ck.data.sheets&&ck.data.sheets.length>1){
+      window._SHEET_ID=sid;return;
+    }
+  }
+  var sn=['원재료LOT','완제품LOT','작업기록','입고기록','출하기록','원재료품목','완제품품목','거래처','사용자','SOP','기기관리'];
+  var sheets=sn.map(function(n,i){return{properties:{sheetId:i+1,title:n}};});
+  var res=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',body:JSON.stringify({properties:{title:'메이투투 스마트팩토리 DB'},sheets:sheets})});
+  if(res.status===200&&res.data.spreadsheetId){
+    var nid=res.data.spreadsheetId;window._SHEET_ID=nid;
+    try{localStorage.setItem('maytutu_sheetId',nid);}catch(e){}
+    await seedHeaders(nid);await seedSampleData(nid);
+  }
+}
 async function seedHeaders(sid){
 var hm={'원재료LOT':['LOT번호','품목코드','품목명','공급사LOT','입고일','유통기한','총량(kg)','가용수량','총수량','상태','비고'],'완제품LOT':['LOT번호','품목코드','제품명','생산일','유통기한','수량','상태','비고'],'작업기록':['WO번호','제품명','담당자','시작시간','종료시간','상태','수량','비고'],'입고기록':['LOT번호','품목명','수량','입고일','공급사','담당자','비고'],'출하기록':['LOT번호','제품명','수량','출하일','거래처','담당자','비고'],'원재료품목':['품목코드','품목명','아이콘','공급사','포장단위','보관방법','비고'],'완제품품목':['품목코드','제품명','단위','비고'],'거래처':['거래처코드','거래처명','담당자','연락처','비고'],'사용자':['이메일','이름','역할','비고'],'SOP':['SOP코드','제목','내용','버전','비고'],'기기관리':['기기ID','기기명','위치','상태','최근점검일','비고']};
 var req=[];var kk=Object.keys(hm);
@@ -2949,78 +2972,37 @@ var d=[
 ['SUP002','삼립식품','박민수','02-666-5678','부재료 공급']]}
 ];
 await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data:d})});}
-async function onSheetsConnected(){
-var card=document.getElementById('p2k-sheets-card');
-if(card){card.style.background='linear-gradient(135deg,#065f46,#059669)';setStatus('✅ Sheets 연결 성공! DB 확인 중...');card.querySelector('.p2k-btn').style.display='none';}
-var banner=document.getElementById('sheets-connect-banner');if(banner)banner.style.display='none';
-try{
-var sid=await checkOrCreateSpreadsheet();
-setStatus('🔄 헤더 기록 중...');await seedHeaders(sid);
-setStatus('🔄 기본 데이터 입력 중...');await seedSampleData(sid);
-setStatus('✅ DB 초기화 완료! 탭을 이동하면 데이터가 표시됩니다.');
-try{if(typeof loadAllSheetsData==='function')await loadAllSheetsData();}catch(e){}
-if(card){var lnk=document.createElement('a');lnk.href='https://docs.google.com/spreadsheets/d/'+sid;lnk.target='_blank';lnk.style.cssText='display:block;margin-top:10px;color:#bbf7d0;text-decoration:underline;font-size:13px;';lnk.textContent='📄 Google Sheets 열기';card.appendChild(lnk);}
-}catch(e){setStatus('⚠️ DB 초기화 오류: '+e.message);}}
-function injectSheetsCard(){
-if(!window.currentUser)return;if(window.gAccessToken){var o=document.getElementById('p2k-sheets-card');if(o)o.remove();return;}
-var o=document.getElementById('p2k-sheets-card');if(o)return;
-var pgs=['page-dashboard','page-inventory','page-production','page-equipment'];
-var ap=null;for(var i=0;i<pgs.length;i++){var pg=document.getElementById(pgs[i]);if(pg&&pg.offsetParent!==null){ap=pg;break;}}
-if(!ap){for(var i=0;i<pgs.length;i++){var pg=document.getElementById(pgs[i]);if(pg&&pg.style.display!=='none'){ap=pg;break;}}}
-if(!ap)return;
-var c=document.createElement('div');c.id='p2k-sheets-card';
-c.style.cssText='margin:12px;padding:20px;background:linear-gradient(135deg,#1e3a8a,#2563eb);border-radius:16px;color:#fff;box-shadow:0 4px 15px rgba(37,99,235,0.4);';
-c.innerHTML='<div style="font-size:18px;font-weight:700;margin-bottom:8px;">📊 Google Sheets DB 연결</div><div class="p2k-status" style="font-size:14px;margin-bottom:14px;opacity:0.95;">⚠️ 데이터베이스가 연결되지 않았습니다.<br>아래 버튼을 눌러 Google Sheets에 데이터를 저장하세요.</div><button class="p2k-btn" style="width:100%;padding:14px;background:#fff;color:#1e3a8a;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);">🔗 Sheets DB 연결하기</button>';
-c.querySelector('.p2k-btn').onclick=function(){var tc=ensureTokenClient();if(!tc){setStatus('❌ Google OAuth 로드 실패. 새로고침 후 다시 시도.');return;}
-setStatus('🔄 Google 인증 팝업이 열립니다. 허용해주세요...');tc.requestAccessToken({prompt:'consent'});};
-if(ap.firstChild){ap.insertBefore(c,ap.firstChild);}else{ap.appendChild(c);}}
-try{var saved=localStorage.getItem('maytutu_sheetId');if(saved)window._SHEET_ID=saved;}catch(e){}
-// no hardcoded fallback - always create new if no saved ID
-var _oSP5=window.showPage;window.showPage=function(pg){if(_oSP5)_oSP5.apply(this,arguments);setTimeout(injectSheetsCard,300);};
-var _oFL3=window.finishLogin;window.finishLogin=function(){if(_oFL3)_oFL3.apply(this,arguments);setTimeout(injectSheetsCard,1000);};
-if(window.currentUser)setTimeout(injectSheetsCard,500);
-window.injectSheetsCard=injectSheetsCard;
-window.onSheetsConnected=onSheetsConnected;
-window.checkOrCreateSpreadsheet=checkOrCreateSpreadsheet;
-window.seedHeaders=seedHeaders;
-window.seedSampleData=seedSampleData;
-})();
-
-// _p2l: Fix openSheetsDB - auto-trigger OAuth if not connected
-(function(){
-var DB_CLIENT_ID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
-var DB_SCOPE='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
-var dbTokenClient=null;
 window.openSheetsDB=function(){
   var sid=window._SHEET_ID;
   if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
-  // sid may be null - will be created on connect
-  if(window.gAccessToken){
-    window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
-    return;
+  if(window.gAccessToken&&sid){
+    window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');return;
   }
-  if(!dbTokenClient&&typeof google!=='undefined'&&google.accounts&&google.accounts.oauth2){
-    dbTokenClient=google.accounts.oauth2.initTokenClient({client_id:DB_CLIENT_ID,scope:DB_SCOPE,
-      callback:function(resp){
-        if(resp&&resp.access_token){
-          window.gAccessToken=resp.access_token;
-          var card=document.getElementById('p2k-sheets-card');if(card)card.remove();
-          if(typeof window.onSheetsConnected==='function'){
-            window.onSheetsConnected().then(function(){
-              var s2=window._SHEET_ID;if(!s2){try{s2=localStorage.getItem('maytutu_sheetId');}catch(e){}}
-              if(s2)window.open('https://docs.google.com/spreadsheets/d/'+s2,'_blank');
-            });
-          }
-        }
+  var t=getTC();
+  if(!t){alert('⚠️ 페이지를 새로고침 후 다시 시도해주세요.');return;}
+  tc=google.accounts.oauth2.initTokenClient({client_id:CID,scope:SC,
+    callback:function(r){
+      if(r&&r.access_token){
+        window.gAccessToken=r.access_token;
+        initDB().then(function(){
+          var s=window._SHEET_ID;
+          if(!s){try{s=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+          if(s)window.open('https://docs.google.com/spreadsheets/d/'+s,'_blank');
+        });
       }
-    });
-  }
-  if(dbTokenClient){
-    dbTokenClient.requestAccessToken({prompt:'consent'});
-  }else{
-    alert('⚠️ Google 인증 라이브러리가 로드되지 않았습니다. 페이지를 새로고침해주세요.');
-  }
+    }
+  });
+  tc.requestAccessToken({prompt:'consent'});
 };
+// Hook finishLogin to auto-connect Sheets
+var _origFL=window.finishLogin;
+window.finishLogin=function(){
+  if(_origFL)_origFL.apply(this,arguments);
+  setTimeout(autoConnect,2000);
+};
+if(window.currentUser)setTimeout(autoConnect,1500);
+window.autoConnect=autoConnect;
+window.initDB=initDB;
 })();
 </script>
 </body>
