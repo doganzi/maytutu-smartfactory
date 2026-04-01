@@ -2918,7 +2918,7 @@ function setStatus(msg){var card=document.getElementById('p2k-sheets-card');if(c
 async function sheetsApi(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts.headers['Authorization']='Bearer '+window.gAccessToken;opts.headers['Content-Type']='application/json';var r=await fetch(url,opts);return{status:r.status,data:await r.json()};}
 async function checkOrCreateSpreadsheet(){
 var sid=window._SHEET_ID;
-if(sid){var ck=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'?fields=sheets.properties');if(ck.status===200)return sid;}
+if(sid){var ck=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'?fields=sheets.properties');if(ck.status===200&&ck.data&&ck.data.sheets&&ck.data.sheets.length>1)return sid;}
 setStatus('🔄 새 스프레드시트 생성 중...');
 var sn=['원재료LOT','완제품LOT','작업기록','입고기록','출하기록','원재료품목','완제품품목','거래처','사용자','SOP','기기관리'];
 var sheets=sn.map(function(n,i){return{properties:{sheetId:i+1,title:n}};});
@@ -2975,11 +2975,15 @@ c.querySelector('.p2k-btn').onclick=function(){var tc=ensureTokenClient();if(!tc
 setStatus('🔄 Google 인증 팝업이 열립니다. 허용해주세요...');tc.requestAccessToken({prompt:'consent'});};
 if(ap.firstChild){ap.insertBefore(c,ap.firstChild);}else{ap.appendChild(c);}}
 try{var saved=localStorage.getItem('maytutu_sheetId');if(saved)window._SHEET_ID=saved;}catch(e){}
-if(!window._SHEET_ID)window._SHEET_ID='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';
+// no hardcoded fallback - always create new if no saved ID
 var _oSP5=window.showPage;window.showPage=function(pg){if(_oSP5)_oSP5.apply(this,arguments);setTimeout(injectSheetsCard,300);};
 var _oFL3=window.finishLogin;window.finishLogin=function(){if(_oFL3)_oFL3.apply(this,arguments);setTimeout(injectSheetsCard,1000);};
 if(window.currentUser)setTimeout(injectSheetsCard,500);
 window.injectSheetsCard=injectSheetsCard;
+window.onSheetsConnected=onSheetsConnected;
+window.checkOrCreateSpreadsheet=checkOrCreateSpreadsheet;
+window.seedHeaders=seedHeaders;
+window.seedSampleData=seedSampleData;
 })();
 
 // _p2l: Fix openSheetsDB - auto-trigger OAuth if not connected
@@ -2990,7 +2994,7 @@ var dbTokenClient=null;
 window.openSheetsDB=function(){
   var sid=window._SHEET_ID;
   if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
-  if(!sid)sid='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';
+  // sid may be null - will be created on connect
   if(window.gAccessToken){
     window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
     return;
@@ -3001,9 +3005,12 @@ window.openSheetsDB=function(){
         if(resp&&resp.access_token){
           window.gAccessToken=resp.access_token;
           var card=document.getElementById('p2k-sheets-card');if(card)card.remove();
-          if(typeof onSheetsConnected==='function')onSheetsConnected();
-          var s2=window._SHEET_ID;if(!s2){try{s2=localStorage.getItem('maytutu_sheetId');}catch(e){}}
-          if(s2)setTimeout(function(){window.open('https://docs.google.com/spreadsheets/d/'+s2,'_blank');},3000);
+          if(typeof window.onSheetsConnected==='function'){
+            window.onSheetsConnected().then(function(){
+              var s2=window._SHEET_ID;if(!s2){try{s2=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+              if(s2)window.open('https://docs.google.com/spreadsheets/d/'+s2,'_blank');
+            });
+          }
         }
       }
     });
