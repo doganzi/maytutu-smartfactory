@@ -2980,6 +2980,20 @@ var _oFL3=window.finishLogin;window.finishLogin=function(){if(_oFL3)_oFL3.apply(
 if(window.currentUser)setTimeout(injectSheetsCard,500);
 window.injectSheetsCard=injectSheetsCard;
 })();
+
+// _p2l: Fix openSheetsDB to use dynamic spreadsheet ID
+(function(){
+window.openSheetsDB=function(){
+  var sid=window._SHEET_ID;
+  if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+  if(!sid){sid='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';}
+  if(!window.gAccessToken){
+    alert('â ï¸ ë¨¼ì  Sheets DB ì°ê²°ì í´ì£¼ì¸ì. ëìë³´ëì Sheets DB ì°ê²°íê¸° ë²í¼ì ëë¬ì£¼ì¸ì.');
+    return;
+  }
+  window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
+};
+})();
 </script>
 </body>
 </html>
