@@ -2901,86 +2901,83 @@ if(window.currentUser){setTimeout(applyRoleUI,600);}
 window.applyRoleUI=applyRoleUI;
 })();
 
-// _p2k: Standalone Sheets OAuth connect (fixes gTokenClient scope issue)
+
+// _p2k: Standalone Sheets OAuth + auto-create spreadsheet
 (function(){
 var CLIENT_ID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
-var SCOPE='https://www.googleapis.com/auth/spreadsheets';
+var SCOPE='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 var myTokenClient=null;
 function ensureTokenClient(){
-  if(myTokenClient) return myTokenClient;
-  if(typeof google==='undefined'||!google.accounts||!google.accounts.oauth2) return null;
-  myTokenClient=google.accounts.oauth2.initTokenClient({
-    client_id:CLIENT_ID,scope:SCOPE,
-    callback:function(resp){
-      if(resp&&resp.access_token){
-        window.gAccessToken=resp.access_token;
-        onSheetsConnected();
-      }
-    }
-  });
-  return myTokenClient;
-}
+if(myTokenClient)return myTokenClient;
+if(typeof google==='undefined'||!google.accounts||!google.accounts.oauth2)return null;
+myTokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPE,
+callback:function(resp){if(resp&&resp.access_token){window.gAccessToken=resp.access_token;onSheetsConnected();}}
+});return myTokenClient;}
+function setStatus(msg){var card=document.getElementById('p2k-sheets-card');if(card&&card.querySelector('.p2k-status'))card.querySelector('.p2k-status').textContent=msg;}
+async function sheetsApi(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts.headers['Authorization']='Bearer '+window.gAccessToken;opts.headers['Content-Type']='application/json';var r=await fetch(url,opts);return{status:r.status,data:await r.json()};}
+async function checkOrCreateSpreadsheet(){
+var sid=window._SHEET_ID;
+if(sid){var check=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'?fields=sheets.properties');if(check.status===200)return sid;}
+setStatus('ð ì ì¤íë ëìí¸ ìì± ì¤...');
+var sn=['ìì¬ë£LOT','ìì íLOT','ììê¸°ë¡','ìê³ ê¸°ë¡','ì¶íê¸°ë¡','ìì¬ë£íëª©','ìì ííëª©','ê±°ëì²','ì¬ì©ì','SOP','ê¸°ê¸°ê´ë¦¬'];
+var sheets=sn.map(function(n,i){return{properties:{sheetId:i+1,title:n}};});
+var res=await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',body:JSON.stringify({properties:{title:'ë©ì´í¬í¬ ì¤ë§í¸í©í ë¦¬ DB'},sheets:sheets})});
+if(res.status===200&&res.data.spreadsheetId){var newId=res.data.spreadsheetId;window._SHEET_ID=newId;try{localStorage.setItem('maytutu_sheetId',newId);}catch(e){}
+setStatus('â ì ì¤íë ëìí¸ ìì± ìë£!');return newId;}
+throw new Error('ì¤íë ëìí¸ ìì± ì¤í¨');}
+async function seedHeaders(sid){
+var hm={'ìì¬ë£LOT':['LOTë²í¸','íëª©ì½ë','íëª©ëª','ê³µê¸ì¬LOT','ìê³ ì¼','ì íµê¸°í','ì´ë(kg)','ê°ì©ìë','ì´ìë','ìí','ë¹ê³ '],'ìì íLOT':['LOTë²í¸','íëª©ì½ë','ì íëª','ìì°ì¼','ì íµê¸°í','ìë','ìí','ë¹ê³ '],'ììê¸°ë¡':['WOë²í¸','ì íëª','ë´ë¹ì','ìììê°','ì¢ë£ìê°','ìí','ìë','ë¹ê³ '],'ìê³ ê¸°ë¡':['LOTë²í¸','íëª©ëª','ìë','ìê³ ì¼','ê³µê¸ì¬','ë´ë¹ì','ë¹ê³ '],'ì¶íê¸°ë¡':['LOTë²í¸','ì íëª','ìë','ì¶íì¼','ê±°ëì²','ë´ë¹ì','ë¹ê³ '],'ìì¬ë£íëª©':['íëª©ì½ë','íëª©ëª','ìì´ì½','ê³µê¸ì¬','í¬ì¥ë¨ì','ë³´ê´ë°©ë²','ë¹ê³ '],'ìì ííëª©':['íëª©ì½ë','ì íëª','ë¨ì','ë¹ê³ '],'ê±°ëì²':['ê±°ëì²ì½ë','ê±°ëì²ëª','ë´ë¹ì','ì°ë½ì²','ë¹ê³ '],'ì¬ì©ì':['ì´ë©ì¼','ì´ë¦','ì­í ','ë¹ê³ '],'SOP':['SOPì½ë','ì ëª©','ë´ì©','ë²ì ','ë¹ê³ '],'ê¸°ê¸°ê´ë¦¬':['ê¸°ê¸°ID','ê¸°ê¸°ëª','ìì¹','ìí','ìµê·¼ì ê²ì¼','ë¹ê³ ']};
+var req=[];var kk=Object.keys(hm);
+for(var i=0;i<kk.length;i++){var nm=kk[i];var hd=hm[nm];req.push({range:nm+'!A1:'+String.fromCharCode(64+hd.length)+'1',values:[hd]});}
+await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data:req})});}
+async function seedSampleData(sid){
+var d=[
+{range:'ìì¬ë£íëª©!A2:G4',values:[
+['RM001','í¸ëê³¼ì ì ì©ë°ì£','\ud83e\udd5c','ëíì ë¶','í¬(5kg)','ëë','ì£¼ìë£'],
+['RM002','íë¦¬ë¯¹ì¤ 1í¸','\ud83c\udf5e','ì¼ë¦½ìí','í¬(10kg)','ìì¨','ë°°í©ë¶'],
+['RM003','ë²í°í¬ë¦¼','\ud83e\uddc0','ìì¸ì ì','íµ(2kg)','ëì¥','í íì©']]},
+{range:'ìì¬ë£LOT!A2:K4',values:[
+['RL-20260327-001','RM001','í¸ëê³¼ì ì ì©ë°ì£','B2026-0312','2026-03-27','2026-12-27','50','45','50','available',''],
+['RL-20260327-002','RM002','íë¦¬ë¯¹ì¤ 1í¸','P2026-0310','2026-03-27','2027-03-27','100','95','100','available',''],
+['RL-20260328-001','RM003','ë²í°í¬ë¦¼','BC2026-0320','2026-03-28','2026-06-28','20','18','20','available','']]},
+{range:'ìì ííëª©!A2:D3',values:[
+['FG001','í¸ëê³¼ì ëëë°ì£ 5kg','ë´','ì£¼ë ¥ ì í'],
+['FG002','ë¯¸ë í¸ëê³¼ì ì¸í¸','ì¸í¸','ì ë¬¼ì©']]},
+{range:'ê±°ëì²!A2:E3',values:[
+['SUP001','ëíì ë¶','ê¹ìì','02-555-1234','ì£¼ìë£ ê³µê¸'],
+['SUP002','ì¼ë¦½ìí','ë°ë¯¼ì','02-666-5678','ë¶ì¬ë£ ê³µê¸']]}
+];
+await sheetsApi('https://sheets.googleapis.com/v4/spreadsheets/'+sid+'/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data:d})});}
 async function onSheetsConnected(){
-  var card=document.getElementById('p2k-sheets-card');
-  if(card){
-    card.style.background='linear-gradient(135deg,#065f46,#059669)';
-    card.querySelector('.p2k-status').textContent='â Sheets ì°ê²° ìë£! DB ì´ê¸°í ì¤...';
-    card.querySelector('.p2k-btn').style.display='none';
-  }
-  var banner=document.getElementById('sheets-connect-banner');
-  if(banner) banner.style.display='none';
-  try{
-    if(typeof initSheetsStructure==='function') await initSheetsStructure();
-    if(typeof loadAllSheetsData==='function') await loadAllSheetsData();
-    if(card) card.querySelector('.p2k-status').textContent='â DB ì´ê¸°í ìë£! ë°ì´í°ê° ìí¸ì ì ì¥ëììµëë¤.';
-  }catch(e){
-    if(card) card.querySelector('.p2k-status').textContent='â ï¸ DB ì´ê¸°í ì¤ë¥: '+e.message;
-  }
-}
+var card=document.getElementById('p2k-sheets-card');
+if(card){card.style.background='linear-gradient(135deg,#065f46,#059669)';setStatus('â Sheets ì°ê²° ì±ê³µ! DB íì¸ ì¤...');card.querySelector('.p2k-btn').style.display='none';}
+var banner=document.getElementById('sheets-connect-banner');if(banner)banner.style.display='none';
+try{
+var sid=await checkOrCreateSpreadsheet();
+setStatus('ð í¤ë ê¸°ë¡ ì¤...');await seedHeaders(sid);
+setStatus('ð ê¸°ë³¸ ë°ì´í° ìë ¥ ì¤...');await seedSampleData(sid);
+setStatus('â DB ì´ê¸°í ìë£! í­ì ì´ëíë©´ ë°ì´í°ê° íìë©ëë¤.');
+try{if(typeof loadAllSheetsData==='function')await loadAllSheetsData();}catch(e){}
+if(card){var lnk=document.createElement('a');lnk.href='https://docs.google.com/spreadsheets/d/'+sid;lnk.target='_blank';lnk.style.cssText='display:block;margin-top:10px;color:#bbf7d0;text-decoration:underline;font-size:13px;';lnk.textContent='ð Google Sheets ì´ê¸°';card.appendChild(lnk);}
+}catch(e){setStatus('â ï¸ DB ì´ê¸°í ì¤ë¥: '+e.message);}}
 function injectSheetsCard(){
-  if(!window.currentUser) return;
-  if(window.gAccessToken) return;
-  var old=document.getElementById('p2k-sheets-card');
-  if(old) old.remove();
-  var pages=['page-dashboard','page-inventory','page-production','page-equipment'];
-  var activePage=null;
-  for(var i=0;i<pages.length;i++){
-    var p=document.getElementById(pages[i]);
-    if(p&&p.offsetParent!==null){activePage=p;break;}
-  }
-  if(!activePage){
-    for(var i=0;i<pages.length;i++){
-      var p=document.getElementById(pages[i]);
-      if(p&&p.style.display!=='none'){activePage=p;break;}
-    }
-  }
-  if(!activePage) return;
-  var card=document.createElement('div');
-  card.id='p2k-sheets-card';
-  card.style.cssText='margin:12px;padding:20px;background:linear-gradient(135deg,#1e3a8a,#2563eb);border-radius:16px;color:#fff;box-shadow:0 4px 15px rgba(37,99,235,0.4);';
-  card.innerHTML='<div style="font-size:18px;font-weight:700;margin-bottom:8px;">ð Google Sheets DB ì°ê²°</div>'
-    +'<div class="p2k-status" style="font-size:14px;margin-bottom:14px;opacity:0.95;">â ï¸ ë°ì´í°ë² ì´ì¤ê° ì°ê²°ëì§ ìììµëë¤.<br>ìë ë²í¼ì ëë¬ Google Sheetsì ë°ì´í°ë¥¼ ì ì¥íì¸ì.</div>'
-    +'<button class="p2k-btn" style="width:100%;padding:14px;background:#fff;color:#1e3a8a;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);">ð Sheets DB ì°ê²°íê¸°</button>';
-  card.querySelector('.p2k-btn').onclick=function(){
-    var tc=ensureTokenClient();
-    if(!tc){
-      card.querySelector('.p2k-status').textContent='â Google OAuth ë¼ì´ë¸ë¬ë¦¬ ë¡ë ì¤í¨. ìë¡ê³ ì¹¨ í ë¤ì ìëí´ì£¼ì¸ì.';
-      return;
-    }
-    card.querySelector('.p2k-status').textContent='ð Google ì¸ì¦ íìì´ ì´ë¦½ëë¤. íì©í´ì£¼ì¸ì...';
-    tc.requestAccessToken({prompt:'consent'});
-  };
-  if(activePage.firstChild){
-    activePage.insertBefore(card,activePage.firstChild);
-  }else{
-    activePage.appendChild(card);
-  }
-}
-var _oSP5=window.showPage;
-window.showPage=function(pg){if(_oSP5)_oSP5.apply(this,arguments);setTimeout(injectSheetsCard,300);};
-var _oFL3=window.finishLogin;
-window.finishLogin=function(){if(_oFL3)_oFL3.apply(this,arguments);setTimeout(injectSheetsCard,1000);};
-if(window.currentUser) setTimeout(injectSheetsCard,500);
+if(!window.currentUser)return;if(window.gAccessToken){var o=document.getElementById('p2k-sheets-card');if(o)o.remove();return;}
+var o=document.getElementById('p2k-sheets-card');if(o)return;
+var pgs=['page-dashboard','page-inventory','page-production','page-equipment'];
+var ap=null;for(var i=0;i<pgs.length;i++){var pg=document.getElementById(pgs[i]);if(pg&&pg.offsetParent!==null){ap=pg;break;}}
+if(!ap){for(var i=0;i<pgs.length;i++){var pg=document.getElementById(pgs[i]);if(pg&&pg.style.display!=='none'){ap=pg;break;}}}
+if(!ap)return;
+var c=document.createElement('div');c.id='p2k-sheets-card';
+c.style.cssText='margin:12px;padding:20px;background:linear-gradient(135deg,#1e3a8a,#2563eb);border-radius:16px;color:#fff;box-shadow:0 4px 15px rgba(37,99,235,0.4);';
+c.innerHTML='<div style="font-size:18px;font-weight:700;margin-bottom:8px;">ð Google Sheets DB ì°ê²°</div><div class="p2k-status" style="font-size:14px;margin-bottom:14px;opacity:0.95;">â ï¸ ë°ì´í°ë² ì´ì¤ê° ì°ê²°ëì§ ìììµëë¤.<br>ìë ë²í¼ì ëë¬ Google Sheetsì ë°ì´í°ë¥¼ ì ì¥íì¸ì.</div><button class="p2k-btn" style="width:100%;padding:14px;background:#fff;color:#1e3a8a;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);">ð Sheets DB ì°ê²°íê¸°</button>';
+c.querySelector('.p2k-btn').onclick=function(){var tc=ensureTokenClient();if(!tc){setStatus('â Google OAuth ë¡ë ì¤í¨. ìë¡ê³ ì¹¨ í ë¤ì ìë.');return;}
+setStatus('ð Google ì¸ì¦ íìì´ ì´ë¦½ëë¤. íì©í´ì£¼ì¸ì...');tc.requestAccessToken({prompt:'consent'});};
+if(ap.firstChild){ap.insertBefore(c,ap.firstChild);}else{ap.appendChild(c);}}
+try{var saved=localStorage.getItem('maytutu_sheetId');if(saved)window._SHEET_ID=saved;}catch(e){}
+if(!window._SHEET_ID)window._SHEET_ID='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';
+var _oSP5=window.showPage;window.showPage=function(pg){if(_oSP5)_oSP5.apply(this,arguments);setTimeout(injectSheetsCard,300);};
+var _oFL3=window.finishLogin;window.finishLogin=function(){if(_oFL3)_oFL3.apply(this,arguments);setTimeout(injectSheetsCard,1000);};
+if(window.currentUser)setTimeout(injectSheetsCard,500);
 window.injectSheetsCard=injectSheetsCard;
 })();
 </script>
