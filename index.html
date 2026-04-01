@@ -2982,17 +2982,37 @@ if(window.currentUser)setTimeout(injectSheetsCard,500);
 window.injectSheetsCard=injectSheetsCard;
 })();
 
-// _p2l: Fix openSheetsDB to use dynamic spreadsheet ID
+// _p2l: Fix openSheetsDB - auto-trigger OAuth if not connected
 (function(){
+var DB_CLIENT_ID='905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com';
+var DB_SCOPE='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+var dbTokenClient=null;
 window.openSheetsDB=function(){
   var sid=window._SHEET_ID;
   if(!sid){try{sid=localStorage.getItem('maytutu_sheetId');}catch(e){}}
-  if(!sid){sid='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';}
-  if(!window.gAccessToken){
-    alert('⚠️ 먼저 Sheets DB 연결을 해주세요. 대시보드의 Sheets DB 연결하기 버튼을 눌러주세요.');
+  if(!sid)sid='1waj2pvmBntg7QArH1pBrVJzT4vLNRKuUoMY_3A2Ith4';
+  if(window.gAccessToken){
+    window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
     return;
   }
-  window.open('https://docs.google.com/spreadsheets/d/'+sid,'_blank');
+  if(!dbTokenClient&&typeof google!=='undefined'&&google.accounts&&google.accounts.oauth2){
+    dbTokenClient=google.accounts.oauth2.initTokenClient({client_id:DB_CLIENT_ID,scope:DB_SCOPE,
+      callback:function(resp){
+        if(resp&&resp.access_token){
+          window.gAccessToken=resp.access_token;
+          var card=document.getElementById('p2k-sheets-card');if(card)card.remove();
+          if(typeof onSheetsConnected==='function')onSheetsConnected();
+          var s2=window._SHEET_ID;if(!s2){try{s2=localStorage.getItem('maytutu_sheetId');}catch(e){}}
+          if(s2)setTimeout(function(){window.open('https://docs.google.com/spreadsheets/d/'+s2,'_blank');},3000);
+        }
+      }
+    });
+  }
+  if(dbTokenClient){
+    dbTokenClient.requestAccessToken({prompt:'consent'});
+  }else{
+    alert('⚠️ Google 인증 라이브러리가 로드되지 않았습니다. 페이지를 새로고침해주세요.');
+  }
 };
 })();
 </script>
