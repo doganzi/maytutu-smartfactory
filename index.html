@@ -746,7 +746,7 @@ body{overscroll-behavior-y:contain;font-family:'Noto Sans KR',-apple-system,'App
 const GWS_CONFIG = {
   clientId: '905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com',
   allowedDomain: 'anghodu.biz',  // 사내 Workspace 도메인
-  adminEmails: [], // 관리자 이메일 목록 (비어있으면 도메인 전체 작업자로 처리)
+  adminEmails: ['my_ro@anghodu.biz'], // 관리자 이메일 목록 (비어있으면 도메인 전체 작업자로 처리)
 };
 
 // ═══════════════════════════════════
@@ -2869,6 +2869,36 @@ window.showPage=function(pg){if(_oSP3)_oSP3.apply(this,arguments);setTimeout(fun
 if(window.currentUser){setTimeout(function(){if(typeof gAccessToken==='undefined'||!gAccessToken){showSheetsBanner();}},2000);}
 window.showSheetsBanner=showSheetsBanner;
 window.hideSheetsBanner=hideSheetsBanner;
+})();
+// _p2j
+(function(){
+if(window.GWS_CONFIG){GWS_CONFIG.adminEmails=['my_ro@anghodu.biz'];}
+function applyRoleUI(){
+  var isAdmin=(window.currentRole==='admin');
+  var dbSec=document.getElementById('db-init-section');
+  if(dbSec){var btns=dbSec.querySelectorAll('button');btns.forEach(function(b){var t=b.textContent.trim();if(t==='DB \ucd08\uae30\ud654'||t==='\uae30\ubcf8 \ub370\uc774\ud130'){b.style.display=isAdmin?'':'none';}});}
+  document.querySelectorAll('[data-admin-only]').forEach(function(el){el.style.display=isAdmin?'':'none';});
+  document.querySelectorAll('button').forEach(function(b){var t=b.textContent.trim();if(t==='\u2699\ufe0f SOP \uad00\ub9ac'){b.style.display=isAdmin?'':'none';}});
+  var dashboard=document.getElementById('page-dashboard');
+  if(dashboard){
+    if(!isAdmin&&!document.getElementById('worker-qr-shortcut')){
+      var qrDiv=document.createElement('div');qrDiv.id='worker-qr-shortcut';qrDiv.style.cssText='margin:16px;padding:0;';
+      qrDiv.innerHTML='<button onclick="if(typeof openQRCamera===\'function\')openQRCamera(\'general\');else alert(\'QR \uc2a4\uce94 \uc900\ube44\uc911...\');" style="width:100%;padding:16px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 2px 8px rgba(30,64,175,0.3);"><span style="font-size:24px;">\ud83d\udcf7</span> QR \uc2a4\uce94 \ubc14\ub85c\uac00\uae30</button>';
+      var firstChild=dashboard.children[1]||dashboard.children[0];
+      if(firstChild){dashboard.insertBefore(qrDiv,firstChild);}else{dashboard.appendChild(qrDiv);}
+    }
+    var qrShort=document.getElementById('worker-qr-shortcut');if(qrShort){qrShort.style.display=isAdmin?'none':'';}
+  }
+  var topName=document.getElementById('topbar-name');
+  if(topName){topName.style.color=isAdmin?'#fbbf24':'#fff';}
+  console.log('[MTT] Role UI: '+(isAdmin?'ADMIN':'WORKER'));
+}
+var _origFL2=window.finishLogin;
+window.finishLogin=function(){if(_origFL2)_origFL2.apply(this,arguments);setTimeout(applyRoleUI,500);};
+var _oSP4=window.showPage;
+window.showPage=function(pg){if(_oSP4)_oSP4.apply(this,arguments);setTimeout(applyRoleUI,400);};
+if(window.currentUser){setTimeout(applyRoleUI,600);}
+window.applyRoleUI=applyRoleUI;
 })();
 </script>
 </body>
