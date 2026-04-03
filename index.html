@@ -542,15 +542,34 @@ const DriveAPI = {
    ROUTER
    ═══════════════════════════════════════════════ */
 const Router = {
+  _historyStack: [],   // screen history for back navigation
+  _isPopping: false,   // flag to prevent double push on popstate
+
   go(screen, params = {}) {
+    // Push current screen to history stack before navigating
+    if (State.currentScreen && State.currentScreen !== screen) {
+      this._historyStack.push(State.currentScreen);
+    }
     State.prevScreen = State.currentScreen;
     State.currentScreen = screen;
+
+    // Push browser history state so Android back button triggers popstate
+    if (!this._isPopping) {
+      history.pushState({ screen, params }, '', '#' + screen);
+    }
+
     this.render(params);
   },
 
   back() {
-    if (State.prevScreen) {
-      this.go(State.prevScreen);
+    if (this._historyStack.length > 0) {
+      const prev = this._historyStack.pop();
+      this._isPopping = true;
+      State.prevScreen = State.currentScreen;
+      State.currentScreen = prev;
+      history.replaceState({ screen: prev }, '', '#' + prev);
+      this.render();
+      this._isPopping = false;
     }
   },
 
@@ -590,6 +609,24 @@ const Router = {
     }
   },
 };
+
+// Android back button / browser back — navigate to previous screen instead of leaving app
+window.addEventListener('popstate', (e) => {
+  if (Router._historyStack.length > 0) {
+    Router.back();
+  } else {
+    // At root (dashboard) — push state again to prevent exit
+    if (State.currentScreen === 'dashboard') {
+      history.pushState({ screen: 'dashboard' }, '', '#dashboard');
+    } else {
+      // Go to dashboard as final fallback
+      Router._isPopping = true;
+      Router.go('dashboard');
+      Router._isPopping = false;
+      history.pushState({ screen: 'dashboard' }, '', '#dashboard');
+    }
+  }
+});
 
 /* ═══════════════════════════════════════════════
    BOTTOM NAV RENDERER
@@ -2638,6 +2675,9 @@ async function initApp() {
   // Load settings
   CONFIG.SHEET_ID = localStorage.getItem('mt_sheet_id') || CONFIG.SHEET_ID;
   CONFIG.DRIVE_FOLDER_ID = localStorage.getItem('mt_drive_folder') || CONFIG.DRIVE_FOLDER_ID;
+
+  // Set initial browser history state (prevents immediate exit on first back press)
+  history.replaceState({ screen: 'init' }, '', window.location.href.split('#')[0] + '#init');
 
   // Check auth
   const hasToken = Auth.init();
