@@ -362,7 +362,9 @@ const Auth = {
   },
 
   login() {
-    const redirect = window.location.origin + window.location.pathname;
+    // Always use clean base URL (without index.html or query params)
+    let redirect = window.location.origin + window.location.pathname;
+    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
     const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=select_account`;
     window.location.href = url;
   },
