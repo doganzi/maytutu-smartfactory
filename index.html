@@ -2140,25 +2140,22 @@ function renderStepContent(step, stepType) {
       });
     }
 
-    // ③ QR 스캔 (카메라 + 수동)
+    // ③ QR 스캔 (카메라 직접 실행)
     if (!isWater) {
       html += `
         <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">원재료 LOT 확인</div>
-        <button class="btn btn-info btn-full mb-8" onclick="scanForInput(${stepNo}, '${rmCode}')">📷 QR 스캔하여 LOT 확인</button>
-        <div id="scan-result-${stepNo}"></div>
+        <div id="qr-camera-area-${stepNo}" style="width:100%;border-radius:8px;overflow:hidden;margin-bottom:8px"></div>
+        <button class="btn btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">📷 QR 스캔 시작</button>
+        <div id="scanned-list-${stepNo}"></div>
 
         <div class="row mb-12" style="gap:8px" id="use-type-row-${stepNo}">
-          <button class="btn btn-sm btn-outline btn-info flex-1" id="btn-full-${stepNo}"
+          <button class="btn btn-sm flex-1" id="btn-full-${stepNo}" style="border:2px solid var(--info);background:transparent;color:var(--info)"
                   onclick="setUseType(${stepNo},'full')">전량 사용 (소진)</button>
-          <button class="btn btn-sm btn-outline btn-warn flex-1" id="btn-partial-${stepNo}"
+          <button class="btn btn-sm flex-1" id="btn-partial-${stepNo}" style="border:2px solid var(--warn);background:transparent;color:var(--warn)"
                   onclick="setUseType(${stepNo},'partial')">잔여분 있음</button>
         </div>
         <div style="display:none" id="multi-lot-${stepNo}">
-          <div class="info-box warn mb-8">
-            <div class="fs-12 c-warn fw-6 mb-4">복수 LOT 투입</div>
-            <div class="fs-11 c-txt-l mb-8">잔량이 부족하면 추가 LOT을 스캔합니다</div>
-            <button class="btn btn-sm btn-outline btn-warn btn-full" onclick="scanForInput(${stepNo}, '${rmCode}')">+ 추가 QR 스캔</button>
-          </div>
+          <button class="btn btn-sm btn-outline btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">+ 추가 LOT 스캔</button>
         </div>
       `;
     } else {
@@ -2182,15 +2179,18 @@ function renderStepContent(step, stepType) {
       </div>
     `;
 
-    // ⑤ 사진 촬영
+    // ⑤ 사진 촬영 (카메라 / 갤러리 분리)
     html += `
-      <div class="photo-upload mt-8" onclick="this.querySelector('input').click()">
-        <input type="file" accept="image/*" capture="environment" multiple
-               onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
-        <div class="photo-label">📷 저울 사진 촬영 <span class="c-err">*필수</span></div>
-        <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
-        <div class="photo-preview" id="photo-preview-${stepNo}"></div>
+      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 사진 촬영 <span class="c-err">*필수</span></div>
+      <div class="row mb-8" style="gap:8px">
+        <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="document.getElementById('photo-camera-${stepNo}').click()">📷 카메라 촬영</button>
+        <button class="btn btn-sm btn-outline btn-gray flex-1" onclick="document.getElementById('photo-gallery-${stepNo}').click()">🖼️ 갤러리 선택</button>
       </div>
+      <input type="file" accept="image/*" capture="environment" id="photo-camera-${stepNo}" style="display:none"
+             onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
+      <input type="file" accept="image/*" multiple id="photo-gallery-${stepNo}" style="display:none"
+             onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
+      <div class="photo-preview" id="photo-preview-${stepNo}" style="min-height:20px"></div>
     `;
   }
 
@@ -2490,55 +2490,51 @@ async function submitForApproval() {
 // QR scan for material input during WO execution
 let _qrScannerInstance = null;
 
-function scanForInput(stepNo, rmCode) {
-  const resultEl = $id(`scan-result-${stepNo}`);
-  if (!resultEl) return;
+function startQRCamera(stepNo, rmCode) {
+  const cameraArea = $id(`qr-camera-area-${stepNo}`);
+  if (!cameraArea) return;
 
-  // Try camera QR scan first (html5-qrcode), fall back to manual input
-  resultEl.innerHTML = `
-    <div class="card mb-12" style="padding:10px">
-      <div id="qr-reader-${stepNo}" style="width:100%;border-radius:8px;overflow:hidden"></div>
-      <div class="input-group mt-8">
-        <label class="fs-11 c-txt-l">QR 스캔 또는 수동 입력</label>
-        <input type="text" id="manual-qr-${stepNo}" placeholder="QR ID 수동 입력 (예: RM-20260403-001-01)">
-      </div>
-      <button class="btn btn-sm btn-info btn-full mt-4" onclick="lookupQR(${stepNo}, '${rmCode}')">조회</button>
-    </div>
-  `;
+  // Stop previous instance
+  if (_qrScannerInstance) { try { _qrScannerInstance.stop(); } catch(e){} _qrScannerInstance = null; }
 
-  // Start camera scanner
+  cameraArea.innerHTML = '';
+  cameraArea.style.minHeight = '250px';
+  cameraArea.style.background = '#000';
+  cameraArea.id = `qr-camera-area-${stepNo}`;
+
+  if (typeof Html5Qrcode === 'undefined') {
+    cameraArea.innerHTML = '<div class="fs-12 c-err" style="text-align:center;padding:20px">QR 스캐너를 불러올 수 없습니다</div>';
+    return;
+  }
+
   try {
-    if (_qrScannerInstance) { try { _qrScannerInstance.stop(); } catch(e){} }
-    const readerId = `qr-reader-${stepNo}`;
-    if (typeof Html5Qrcode !== 'undefined') {
-      _qrScannerInstance = new Html5Qrcode(readerId);
-      _qrScannerInstance.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 200, height: 200 } },
-        (decodedText) => {
-          // QR scanned successfully
-          try { _qrScannerInstance.stop(); } catch(e){}
-          $id(`manual-qr-${stepNo}`).value = decodedText;
-          lookupQR(stepNo, rmCode);
-        },
-        () => {} // ignore scan errors
-      ).catch(() => {
-        $id(readerId).innerHTML = '<div class="fs-11 c-txt-l" style="text-align:center;padding:8px">카메라 접근 불가 — 수동 입력을 이용하세요</div>';
-      });
-    } else {
-      $id(readerId).innerHTML = '<div class="fs-11 c-txt-l" style="text-align:center;padding:8px">카메라 접근 불가 — 수동 입력을 이용하세요</div>';
-    }
+    _qrScannerInstance = new Html5Qrcode(`qr-camera-area-${stepNo}`);
+    _qrScannerInstance.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
+      (decodedText) => {
+        // QR 인식 성공 → 카메라 멈추고 조회
+        try { _qrScannerInstance.stop(); } catch(e){}
+        cameraArea.innerHTML = '<div class="fs-12 c-suc" style="text-align:center;padding:12px">✅ QR 인식 완료</div>';
+        cameraArea.style.minHeight = '';
+        cameraArea.style.background = '';
+        processScannedQR(stepNo, rmCode, decodedText);
+      },
+      () => {} // scan miss — ignore
+    ).catch((err) => {
+      cameraArea.style.minHeight = '';
+      cameraArea.style.background = '';
+      cameraArea.innerHTML = '<div class="fs-12 c-err" style="text-align:center;padding:12px">카메라 접근이 거부되었습니다.<br>브라우저 설정에서 카메라 권한을 허용해주세요.</div>';
+    });
   } catch(e) {
-    console.warn('QR scanner init failed:', e);
+    cameraArea.innerHTML = '<div class="fs-12 c-err" style="text-align:center;padding:12px">카메라 초기화 실패</div>';
   }
 }
 
-async function lookupQR(stepNo, rmCode) {
-  const qrId = $id(`manual-qr-${stepNo}`)?.value?.trim();
-  if (!qrId) { toast('QR ID를 입력하세요', 'err'); return; }
+async function processScannedQR(stepNo, rmCode, qrId) {
+  if (!qrId) return;
 
   try {
-    if (_qrScannerInstance) { try { _qrScannerInstance.stop(); } catch(e){} }
     showLoading();
     const indivs = await SheetsAPI.getAll('원재료개별');
     const indiv = indivs.find(r => r[0] === qrId);
@@ -2547,26 +2543,60 @@ async function lookupQR(stepNo, rmCode) {
     const lots = await SheetsAPI.getAll('원재료LOT');
     const lot = lots.find(l => l[0] === indiv[1]);
 
-    const resultEl = $id(`scan-result-${stepNo}`);
-    resultEl.innerHTML = `
-      <div class="info-box info mb-8">
-        <div class="fs-12 c-info fw-6">스캔 결과</div>
-        <div class="fs-13 fw-6 mt-4">${qrId} · ${lot?.[2] || ''}</div>
-        <div class="fs-11 c-txt-l">잔량: ${indiv[4] || '0'}kg · 소비기한: ${(lot?.[7]||'').substring(0,10)}</div>
-        <div class="fs-11 c-suc mt-4">상태: ${indiv[3] || ''} ✅</div>
-      </div>
-    `;
-
-    // Mark QR as scanned for validation
+    // Save scanned item
     if (!State.woExec._scannedLots) State.woExec._scannedLots = {};
     if (!State.woExec._scannedLots[stepNo]) State.woExec._scannedLots[stepNo] = [];
-    State.woExec._scannedLots[stepNo].push(qrId);
+
+    // Prevent duplicate
+    if (State.woExec._scannedLots[stepNo].find(s => s.qrId === qrId)) {
+      toast('이미 스캔된 QR입니다', 'warn');
+      hideLoading();
+      return;
+    }
+
+    State.woExec._scannedLots[stepNo].push({
+      qrId, lotId: indiv[1], name: lot?.[2] || '', remain: indiv[4] || '0',
+      expiry: (lot?.[7]||'').substring(0,10), status: indiv[3] || ''
+    });
 
     hideLoading();
+    renderScannedList(stepNo);
     validateStepInputs(stepNo);
+    toast(`${qrId} 스캔 완료`, 'suc');
   } catch (e) {
     hideLoading();
     toast('조회 실패: ' + e.message, 'err');
+  }
+}
+
+function renderScannedList(stepNo) {
+  const listEl = $id(`scanned-list-${stepNo}`);
+  if (!listEl) return;
+  const items = State.woExec._scannedLots?.[stepNo] || [];
+
+  if (items.length === 0) { listEl.innerHTML = ''; return; }
+
+  listEl.innerHTML = `
+    <div class="fs-12 fw-6 c-txt-l mb-4">투입 제품 목록 (${items.length}건)</div>
+    ${items.map((item, i) => `
+      <div class="card" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div class="fs-12 fw-6">${item.name} <span class="c-txt-l">${item.qrId}</span></div>
+          <div class="fs-11 c-txt-l">잔량 ${item.remain}kg · ${item.expiry}</div>
+        </div>
+        <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--err);background:none;border:1px solid var(--err)"
+                onclick="removeScannedItem(${stepNo},${i})">삭제</button>
+      </div>
+    `).join('')}
+  `;
+}
+
+function removeScannedItem(stepNo, index) {
+  if (State.woExec._scannedLots?.[stepNo]) {
+    State.woExec._scannedLots[stepNo].splice(index, 1);
+    renderScannedList(stepNo);
+    validateStepInputs(stepNo);
   }
 }
 
@@ -2575,22 +2605,21 @@ function setUseType(stepNo, type) {
   const btnPartial = $id(`btn-partial-${stepNo}`);
   const multiLot = $id(`multi-lot-${stepNo}`);
 
-  // Store selection
   if (!State.woExec._useType) State.woExec._useType = {};
   State.woExec._useType[stepNo] = type;
 
-  // Reset styles
-  if (btnFull) { btnFull.style.background = ''; btnFull.style.color = ''; }
-  if (btnPartial) { btnPartial.style.background = ''; btnPartial.style.color = ''; }
+  // Reset both buttons
+  if (btnFull) { btnFull.style.background = 'transparent'; btnFull.style.color = 'var(--info)'; }
+  if (btnPartial) { btnPartial.style.background = 'transparent'; btnPartial.style.color = 'var(--warn)'; }
 
   if (type === 'full') {
+    // Fill blue
     if (btnFull) { btnFull.style.background = 'var(--info)'; btnFull.style.color = '#fff'; }
-    if (multiLot) multiLot.style.display = '';  // Show add more LOT button
-    toast('전량 사용 — 추가 LOT 투입 가능', 'info');
+    if (multiLot) multiLot.style.display = '';
   } else {
+    // Fill orange
     if (btnPartial) { btnPartial.style.background = 'var(--warn)'; btnPartial.style.color = '#fff'; }
     if (multiLot) multiLot.style.display = 'none';
-    toast('잔여분 있음 — 추가 투입 없음', 'info');
   }
   validateStepInputs(stepNo);
 }
