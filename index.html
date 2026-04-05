@@ -277,11 +277,12 @@ const $id = (id) => document.getElementById(id);
 function showLoading() { $id('loading').classList.remove('hidden'); }
 function hideLoading() { $id('loading').classList.add('hidden'); }
 
-function toast(msg, type = 'info') {
+function toast(msg, type = 'info', duration = 2500) {
   const el = $id('toast');
+  el.style.whiteSpace = 'pre-line';
   el.textContent = msg;
   el.className = `toast ${type} show`;
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), duration);
 }
 
 function confirm(title, msg, onOk, onCancel) {
@@ -2082,10 +2083,10 @@ function renderWOExecute() {
               onclick="tempSaveWO()">임시저장</button>
       ${currentStep < total - 1 ? `
         <button class="btn btn-sm btn-pri flex-1" style="white-space:nowrap"
-                onclick="completeStep()">공정 완료 · 다음 →</button>
+                onclick="handleCompleteStep()">공정 완료 · 다음 →</button>
       ` : `
         <button class="btn btn-sm btn-suc flex-1" style="white-space:nowrap"
-                onclick="submitForApproval()">전체 완료 · 승인요청</button>
+                onclick="handleCompleteStep(true)">전체 완료 · 승인요청</button>
       `}
     </div>
   `;
@@ -2433,6 +2434,48 @@ async function tempSaveWO() {
   }
 }
 
+function handleCompleteStep(isFinal = false) {
+  const step = State.woExec?.steps?.[State.woExec?.currentStep];
+  if (!step) return;
+  const stepNo = parseInt(step[1]);
+  const stepType = step[3] || 'input';
+  const isWater = (step[4] || '') === 'RM002';
+
+  const missing = [];
+
+  if (stepType === 'input') {
+    const qtyVal = parseFloat($id(`input-qty-${stepNo}`)?.value);
+    if (!qtyVal || qtyVal <= 0) missing.push('실제 투입량');
+
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) missing.push('저울 사진');
+
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    let unchecked = 0;
+    checks.forEach((_, i) => {
+      const cb = $id(`check-${stepNo}-${i}`);
+      if (cb && cb.textContent !== '✓') unchecked++;
+    });
+    if (unchecked > 0) missing.push(`체크항목 (${unchecked}건 미체크)`);
+
+    if (!isWater) {
+      const scanned = State.woExec._scannedLots?.[stepNo]?.length || 0;
+      if (scanned === 0) missing.push('QR 스캔 (원재료 LOT)');
+    }
+  }
+
+  if (missing.length > 0) {
+    toast('미입력 항목:\n• ' + missing.join('\n• '), 'err', 4000);
+    return;
+  }
+
+  if (isFinal) {
+    submitForApproval();
+  } else {
+    completeStep();
+  }
+}
+
 async function completeStep() {
   const { woId, steps, currentStep } = State.woExec;
   const step = steps[currentStep];
@@ -2576,14 +2619,20 @@ function renderScannedList(stepNo) {
 
   if (items.length === 0) { listEl.innerHTML = ''; return; }
 
+  const useType = State.woExec._useType?.[stepNo];
   listEl.innerHTML = `
     <div class="fs-12 fw-6 c-txt-l mb-4">투입 제품 목록 (${items.length}건)</div>
     ${items.map((item, i) => `
       <div class="card" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
         <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
-          <div class="fs-12 fw-6">${item.name} <span class="c-txt-l">${item.qrId}</span></div>
-          <div class="fs-11 c-txt-l">잔량 ${item.remain}kg · ${item.expiry}</div>
+          ${useType === 'full' ? `
+            <div class="fs-12 fw-6" style="font-family:monospace;letter-spacing:0.5px">${item.qrId}</div>
+            <div class="fs-11 c-txt-l">전량 소진</div>
+          ` : `
+            <div class="fs-12 fw-6">${item.name} <span class="c-txt-l">${item.qrId}</span></div>
+            <div class="fs-11 c-txt-l">잔량 ${item.remain}kg · ${item.expiry}</div>
+          `}
         </div>
         <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--err);background:none;border:1px solid var(--err)"
                 onclick="removeScannedItem(${stepNo},${i})">삭제</button>
@@ -2621,6 +2670,7 @@ function setUseType(stepNo, type) {
     if (btnPartial) { btnPartial.style.background = 'var(--warn)'; btnPartial.style.color = '#fff'; }
     if (multiLot) multiLot.style.display = 'none';
   }
+  renderScannedList(stepNo);
   validateStepInputs(stepNo);
 }
 
