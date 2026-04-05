@@ -2711,7 +2711,7 @@ function validateStepInputs(stepNo) {
   const bottomBtns = document.querySelectorAll('#content > div:last-child button');
   bottomBtns.forEach(btn => {
     if (btn.textContent.includes('공정 완료') || btn.textContent.includes('전체 완료')) {
-      btn.disabled = !allValid;
+      btn.dataset.valid = allValid ? 'true' : 'false';
       btn.style.opacity = allValid ? '1' : '0.4';
     }
   });
