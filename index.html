@@ -1864,7 +1864,7 @@ Screens['wo-create'] = async () => {
 
       <div class="mt-16">
         <div class="input-group">
-          <label>생산 목표 수량 (총 중량)</label>
+          <label>생산 목표 수량 (총 수량)</label>
           <input type="number" id="wo-qty" placeholder="수량 입력" oninput="updateWOCalc()">
         </div>
         <div class="input-group">
@@ -1874,6 +1874,7 @@ Screens['wo-create'] = async () => {
             <option value="5">5kg</option>
           </select>
         </div>
+        <div id="wo-total-production" style="display:none"></div>
         <div class="input-group">
           <label>연결 생산요청 (선택)</label>
           <select id="wo-req">
@@ -1922,19 +1923,36 @@ function updateWOCalc() {
   const qty = parseFloat($id('wo-qty')?.value) || 0;
   const unitSize = parseInt($id('wo-unit')?.value) || 1;
   const calcEl = $id('wo-calc');
+  const totalEl = $id('wo-total-production');
 
-  if (qty <= 0 || !_selectedSopId) { calcEl.style.display = 'none'; return; }
+  if (qty <= 0 || !_selectedSopId) {
+    calcEl.style.display = 'none';
+    if (totalEl) totalEl.style.display = 'none';
+    return;
+  }
 
+  const totalKg = qty * unitSize;
   const recipes = State.sopRecipes.filter(r => r[0] === _selectedSopId);
-  const packCount = Math.ceil(qty / unitSize);
+
+  // 총 생산량 표시
+  if (totalEl) {
+    totalEl.style.display = '';
+    totalEl.innerHTML = `
+      <div class="info-box suc" style="margin-bottom:12px">
+        <div class="fs-12 fw-6 c-suc">총 생산량</div>
+        <div class="fs-20 fw-8 c-suc mt-4">${totalKg} kg</div>
+        <div class="fs-11 c-txt-l mt-2">${qty}개 × ${unitSize}kg = ${totalKg}kg</div>
+      </div>
+    `;
+  }
 
   calcEl.style.display = '';
   calcEl.innerHTML = `
     <div class="card info-box suc">
-      <div class="fs-13 fw-7 c-suc mb-8">원재료 투입 목표 (배합비 × ${qty}kg × 1.01)</div>
+      <div class="fs-13 fw-7 c-suc mb-8">원재료 투입 목표 (배합비 × ${totalKg}kg × 1.01)</div>
       <div class="fs-12 c-txt-l mb-4">+1% 여유분 자동 반영</div>
       ${recipes.map(r => {
-        const target = (parseFloat(r[3]) || 0) * qty * 1.01;
+        const target = (parseFloat(r[3]) || 0) * totalKg * 1.01;
         return `
           <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--gray-l)">
             <span class="fs-13">${r[2]||''} (${r[1]||''})</span>
@@ -1942,7 +1960,7 @@ function updateWOCalc() {
           </div>
         `;
       }).join('')}
-      <div class="fs-11 c-txt-l mt-8">예상 포장 수: ${qty}kg ÷ ${unitSize}kg = ${packCount}개</div>
+      <div class="fs-11 c-txt-l mt-8">예상 포장 수: ${qty}개</div>
     </div>
   `;
 }
@@ -1951,6 +1969,7 @@ async function startWorkOrder() {
   const qty = parseFloat($id('wo-qty')?.value) || 0;
   const unitSize = parseInt($id('wo-unit')?.value) || 1;
   const reqId = $id('wo-req')?.value || '';
+  const totalKg = qty * unitSize;
 
   if (!_selectedSopId) { toast('SOP를 선택하세요', 'err'); return; }
   if (qty <= 0) { toast('생산 수량을 입력하세요', 'err'); return; }
@@ -1959,11 +1978,10 @@ async function startWorkOrder() {
     showLoading();
     const woId = await generateId('WO', '작업지시서');
     const sop = State.sops.find(s => s[0] === _selectedSopId);
-    const packCount = Math.ceil(qty / unitSize);
 
     await SheetsAPI.append('작업지시서', [
       woId, _selectedSopId, reqId, sop?.[2] || 'FG001', sop?.[1]?.replace('제조','').trim() || '호두과자 반죽',
-      qty, `${unitSize}kg`, packCount, State.user?.email,
+      totalKg, `${unitSize}kg`, qty, State.user?.email,
       formatDateTime(), '', '', '진행중', '0', '', '', '', '', ''
     ]);
 
@@ -2074,6 +2092,9 @@ function renderWOExecute() {
 
   // Render step-specific content
   renderStepContent(step, stepType);
+
+  // Validate inputs on initial render (disable next button until all filled)
+  setTimeout(() => validateStepInputs(State.woExec.currentStep + 1), 100);
 }
 
 function renderStepContent(step, stepType) {
@@ -2096,8 +2117,9 @@ function renderStepContent(step, stepType) {
     const recipe = recipes.find(r => r[1] === rmCode);
     const target = recipe ? (parseFloat(recipe[3]) * targetQty * 1.01).toFixed(2) : '0';
     const isWater = rmCode === 'RM002';
-    const isEgg = rmCode === 'RM001';
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
 
+    // ① 투입 목표량
     html += `
       <div class="info-box suc">
         <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetQty}kg × 1.01)</div>
@@ -2105,50 +2127,69 @@ function renderStepContent(step, stepType) {
       </div>
     `;
 
-    if (!isWater) {
-      if (isEgg) {
+    // ② 체크항목
+    if (checks.length > 0) {
+      html += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      checks.forEach((c, i) => {
         html += `
-          <div class="info-box info">
-            <div class="fs-12 fw-6 c-info">계란 입고 단위: 30알/판 (판당 QR)</div>
-            <div class="fs-11 c-txt-l">투입 기준: 중량(kg) — 저울 계량 필수</div>
+          <div class="check-item">
+            <div class="check-box" id="check-${stepNo}-${i}" onclick="toggleCheck(this);validateStepInputs(${stepNo})">${''}</div>
+            <span>${c.trim()}</span>
           </div>
         `;
-      }
+      });
+    }
+
+    // ③ QR 스캔 (카메라 + 수동)
+    if (!isWater) {
       html += `
-        <button class="btn btn-info btn-full mb-12" onclick="scanForInput(${stepNo}, '${rmCode}')">📷 QR 스캔하여 LOT 확인</button>
+        <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">원재료 LOT 확인</div>
+        <button class="btn btn-info btn-full mb-8" onclick="scanForInput(${stepNo}, '${rmCode}')">📷 QR 스캔하여 LOT 확인</button>
         <div id="scan-result-${stepNo}"></div>
-        <div class="row mb-12" style="gap:8px">
-          <button class="btn btn-sm btn-outline btn-info flex-1" onclick="setUseType(${stepNo},'full')">전량 사용 (소진)</button>
-          <button class="btn btn-sm btn-outline btn-warn flex-1" onclick="setUseType(${stepNo},'partial')">잔여분 있음</button>
+
+        <div class="row mb-12" style="gap:8px" id="use-type-row-${stepNo}">
+          <button class="btn btn-sm btn-outline btn-info flex-1" id="btn-full-${stepNo}"
+                  onclick="setUseType(${stepNo},'full')">전량 사용 (소진)</button>
+          <button class="btn btn-sm btn-outline btn-warn flex-1" id="btn-partial-${stepNo}"
+                  onclick="setUseType(${stepNo},'partial')">잔여분 있음</button>
         </div>
-        <div class="info-box warn" style="display:none" id="multi-lot-${stepNo}">
-          <div class="fs-12 c-warn fw-6 mb-4">복수 LOT 투입</div>
-          <div class="fs-11 c-txt-l mb-8">잔량이 부족하면 추가 LOT을 스캔합니다</div>
-          <button class="btn btn-sm btn-outline btn-warn btn-full" onclick="scanForInput(${stepNo}, '${rmCode}')">+ 추가 QR 스캔</button>
+        <div style="display:none" id="multi-lot-${stepNo}">
+          <div class="info-box warn mb-8">
+            <div class="fs-12 c-warn fw-6 mb-4">복수 LOT 투입</div>
+            <div class="fs-11 c-txt-l mb-8">잔량이 부족하면 추가 LOT을 스캔합니다</div>
+            <button class="btn btn-sm btn-outline btn-warn btn-full" onclick="scanForInput(${stepNo}, '${rmCode}')">+ 추가 QR 스캔</button>
+          </div>
         </div>
       `;
     } else {
       html += `
-        <div class="info-box neutral">
+        <div class="info-box neutral mt-8">
           <div class="fs-12 fw-6" style="color:var(--gray-d)">QR 스캔 없음 — 바로 계량</div>
           <div class="fs-11 c-txt-l">물은 QR 관리 대상이 아닙니다</div>
         </div>
       `;
     }
 
+    // ④ 실제 투입량
     html += `
-      <div class="photo-upload" onclick="this.querySelector('input').click()">
-        <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo})">
+      <div class="input-group mt-12">
+        <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
+        <div class="input-suffix">
+          <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01"
+                 oninput="validateStepInputs(${stepNo})">
+          <span>kg</span>
+        </div>
+      </div>
+    `;
+
+    // ⑤ 사진 촬영
+    html += `
+      <div class="photo-upload mt-8" onclick="this.querySelector('input').click()">
+        <input type="file" accept="image/*" capture="environment" multiple
+               onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
         <div class="photo-label">📷 저울 사진 촬영 <span class="c-err">*필수</span></div>
         <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
-      </div>
-      <div class="input-group mt-12">
-        <label>실제 투입량 (kg)</label>
-        <div class="input-suffix">
-          <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01">
-          <span>kg</span>
-        </div>
       </div>
     `;
   }
@@ -2339,8 +2380,8 @@ function renderStepContent(step, stepType) {
     `;
   }
 
-  // Check items for non-process types (process has its own)
-  if (stepType !== 'process' && stepType !== 'inspect') {
+  // Check items for non-input, non-process, non-inspect types (input has its own above)
+  if (stepType !== 'input' && stepType !== 'process' && stepType !== 'inspect') {
     const checks = (step[6] || '').split(',').filter(c => c.trim());
     if (checks.length > 0) {
       html += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8" style="border-top:1px solid var(--gray-l);padding-top:10px">체크항목</div>`;
@@ -2447,21 +2488,48 @@ async function submitForApproval() {
 }
 
 // QR scan for material input during WO execution
+let _qrScannerInstance = null;
+
 function scanForInput(stepNo, rmCode) {
-  toast('QR 스캔은 모바일 카메라에서 사용 가능합니다', 'info');
-  // In production this would open the camera scanner
-  // For now, show a manual input option
   const resultEl = $id(`scan-result-${stepNo}`);
-  if (resultEl) {
-    resultEl.innerHTML = `
-      <div class="info-box info mb-12">
-        <div class="fs-12 c-info fw-6">QR 스캔 또는 수동 입력</div>
-        <div class="input-group mt-8">
-          <input type="text" id="manual-qr-${stepNo}" placeholder="QR ID 수동 입력 (예: RM-20260403-001-01)">
-        </div>
-        <button class="btn btn-sm btn-info btn-full" onclick="lookupQR(${stepNo}, '${rmCode}')">조회</button>
+  if (!resultEl) return;
+
+  // Try camera QR scan first (html5-qrcode), fall back to manual input
+  resultEl.innerHTML = `
+    <div class="card mb-12" style="padding:10px">
+      <div id="qr-reader-${stepNo}" style="width:100%;border-radius:8px;overflow:hidden"></div>
+      <div class="input-group mt-8">
+        <label class="fs-11 c-txt-l">QR 스캔 또는 수동 입력</label>
+        <input type="text" id="manual-qr-${stepNo}" placeholder="QR ID 수동 입력 (예: RM-20260403-001-01)">
       </div>
-    `;
+      <button class="btn btn-sm btn-info btn-full mt-4" onclick="lookupQR(${stepNo}, '${rmCode}')">조회</button>
+    </div>
+  `;
+
+  // Start camera scanner
+  try {
+    if (_qrScannerInstance) { try { _qrScannerInstance.stop(); } catch(e){} }
+    const readerId = `qr-reader-${stepNo}`;
+    if (typeof Html5Qrcode !== 'undefined') {
+      _qrScannerInstance = new Html5Qrcode(readerId);
+      _qrScannerInstance.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 200, height: 200 } },
+        (decodedText) => {
+          // QR scanned successfully
+          try { _qrScannerInstance.stop(); } catch(e){}
+          $id(`manual-qr-${stepNo}`).value = decodedText;
+          lookupQR(stepNo, rmCode);
+        },
+        () => {} // ignore scan errors
+      ).catch(() => {
+        $id(readerId).innerHTML = '<div class="fs-11 c-txt-l" style="text-align:center;padding:8px">카메라 접근 불가 — 수동 입력을 이용하세요</div>';
+      });
+    } else {
+      $id(readerId).innerHTML = '<div class="fs-11 c-txt-l" style="text-align:center;padding:8px">카메라 접근 불가 — 수동 입력을 이용하세요</div>';
+    }
+  } catch(e) {
+    console.warn('QR scanner init failed:', e);
   }
 }
 
@@ -2470,6 +2538,7 @@ async function lookupQR(stepNo, rmCode) {
   if (!qrId) { toast('QR ID를 입력하세요', 'err'); return; }
 
   try {
+    if (_qrScannerInstance) { try { _qrScannerInstance.stop(); } catch(e){} }
     showLoading();
     const indivs = await SheetsAPI.getAll('원재료개별');
     const indiv = indivs.find(r => r[0] === qrId);
@@ -2480,7 +2549,7 @@ async function lookupQR(stepNo, rmCode) {
 
     const resultEl = $id(`scan-result-${stepNo}`);
     resultEl.innerHTML = `
-      <div class="info-box info mb-12">
+      <div class="info-box info mb-8">
         <div class="fs-12 c-info fw-6">스캔 결과</div>
         <div class="fs-13 fw-6 mt-4">${qrId} · ${lot?.[2] || ''}</div>
         <div class="fs-11 c-txt-l">잔량: ${indiv[4] || '0'}kg · 소비기한: ${(lot?.[7]||'').substring(0,10)}</div>
@@ -2488,7 +2557,13 @@ async function lookupQR(stepNo, rmCode) {
       </div>
     `;
 
+    // Mark QR as scanned for validation
+    if (!State.woExec._scannedLots) State.woExec._scannedLots = {};
+    if (!State.woExec._scannedLots[stepNo]) State.woExec._scannedLots[stepNo] = [];
+    State.woExec._scannedLots[stepNo].push(qrId);
+
     hideLoading();
+    validateStepInputs(stepNo);
   } catch (e) {
     hideLoading();
     toast('조회 실패: ' + e.message, 'err');
@@ -2496,7 +2571,71 @@ async function lookupQR(stepNo, rmCode) {
 }
 
 function setUseType(stepNo, type) {
-  toast(type === 'full' ? '전량 사용 선택됨' : '잔여분 있음 선택됨', 'info');
+  const btnFull = $id(`btn-full-${stepNo}`);
+  const btnPartial = $id(`btn-partial-${stepNo}`);
+  const multiLot = $id(`multi-lot-${stepNo}`);
+
+  // Store selection
+  if (!State.woExec._useType) State.woExec._useType = {};
+  State.woExec._useType[stepNo] = type;
+
+  // Reset styles
+  if (btnFull) { btnFull.style.background = ''; btnFull.style.color = ''; }
+  if (btnPartial) { btnPartial.style.background = ''; btnPartial.style.color = ''; }
+
+  if (type === 'full') {
+    if (btnFull) { btnFull.style.background = 'var(--info)'; btnFull.style.color = '#fff'; }
+    if (multiLot) multiLot.style.display = '';  // Show add more LOT button
+    toast('전량 사용 — 추가 LOT 투입 가능', 'info');
+  } else {
+    if (btnPartial) { btnPartial.style.background = 'var(--warn)'; btnPartial.style.color = '#fff'; }
+    if (multiLot) multiLot.style.display = 'none';
+    toast('잔여분 있음 — 추가 투입 없음', 'info');
+  }
+  validateStepInputs(stepNo);
+}
+
+function validateStepInputs(stepNo) {
+  const step = State.woExec?.steps?.[State.woExec?.currentStep];
+  if (!step) return;
+  const stepType = step[3] || 'input';
+  const isWater = (step[4] || '') === 'RM002';
+
+  let allValid = true;
+
+  if (stepType === 'input') {
+    // Check: 투입량 입력됨?
+    const qtyVal = parseFloat($id(`input-qty-${stepNo}`)?.value);
+    if (!qtyVal || qtyVal <= 0) allValid = false;
+
+    // Check: 사진 첨부됨?
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) allValid = false;
+
+    // Check: 체크항목 전부 체크됨?
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    checks.forEach((_, i) => {
+      const cb = $id(`check-${stepNo}-${i}`);
+      if (cb && cb.textContent !== '✓') allValid = false;
+    });
+
+    // Check: QR 스캔됨? (물 제외)
+    if (!isWater) {
+      const scanned = State.woExec._scannedLots?.[stepNo]?.length || 0;
+      if (scanned === 0) allValid = false;
+    }
+  }
+
+  // Enable/disable next button
+  const nextBtn = document.querySelector('#step-content ~ div .btn-pri, #step-content ~ div .btn-suc');
+  // Find the bottom buttons container
+  const bottomBtns = document.querySelectorAll('#content > div:last-child button');
+  bottomBtns.forEach(btn => {
+    if (btn.textContent.includes('공정 완료') || btn.textContent.includes('전체 완료')) {
+      btn.disabled = !allValid;
+      btn.style.opacity = allValid ? '1' : '0.4';
+    }
+  });
 }
 
 /* ═══════════════════════════════════════════════
