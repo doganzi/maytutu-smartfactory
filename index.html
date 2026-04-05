@@ -436,9 +436,21 @@ const SheetsAPI = {
     return { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/json' };
   },
 
+  // 401 handler — token expired → re-login
+  async _fetch(url, opts = {}) {
+    const res = await fetch(url, { ...opts, headers: { ...this.headers(), ...(opts.headers || {}) } });
+    if (res.status === 401) {
+      toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+      localStorage.removeItem('mt_token');
+      setTimeout(() => Auth.login(), 1500);
+      throw new Error('토큰 만료 — 재로그인 필요');
+    }
+    return res;
+  },
+
   // Get all rows from a tab (returns 2D array, first row = header)
   async getAll(tab) {
-    const res = await fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}`, { headers: this.headers() });
+    const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}`);
     if (!res.ok) throw new Error(`Sheets GET ${tab}: ${res.status}`);
     const data = await res.json();
     return data.values ? data.values.slice(1) : []; // Skip header row
@@ -446,7 +458,7 @@ const SheetsAPI = {
 
   // Get specific range
   async getRange(range) {
-    const res = await fetch(`${this.baseUrl()}/values/${encodeURIComponent(range)}`, { headers: this.headers() });
+    const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(range)}`);
     if (!res.ok) throw new Error(`Sheets GET ${range}: ${res.status}`);
     const data = await res.json();
     return data.values || [];
@@ -455,9 +467,9 @@ const SheetsAPI = {
   // Append rows to a tab
   async append(tab, rows) {
     const body = { values: Array.isArray(rows[0]) ? rows : [rows] };
-    const res = await fetch(
+    const res = await this._fetch(
       `${this.baseUrl()}/values/${encodeURIComponent(tab)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-      { method: 'POST', headers: this.headers(), body: JSON.stringify(body) }
+      { method: 'POST', body: JSON.stringify(body) }
     );
     if (!res.ok) throw new Error(`Sheets APPEND ${tab}: ${res.status}`);
     return res.json();
@@ -466,9 +478,9 @@ const SheetsAPI = {
   // Update specific cell(s)
   async update(range, values) {
     const body = { values: Array.isArray(values[0]) ? values : [values] };
-    const res = await fetch(
+    const res = await this._fetch(
       `${this.baseUrl()}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
-      { method: 'PUT', headers: this.headers(), body: JSON.stringify(body) }
+      { method: 'PUT', body: JSON.stringify(body) }
     );
     if (!res.ok) throw new Error(`Sheets UPDATE ${range}: ${res.status}`);
     return res.json();
@@ -477,7 +489,7 @@ const SheetsAPI = {
   // Batch get multiple ranges
   async batchGet(ranges) {
     const params = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
-    const res = await fetch(`${this.baseUrl()}/values:batchGet?${params}`, { headers: this.headers() });
+    const res = await this._fetch(`${this.baseUrl()}/values:batchGet?${params}`);
     if (!res.ok) throw new Error(`Sheets BATCHGET: ${res.status}`);
     const data = await res.json();
     return data.valueRanges || [];
@@ -533,6 +545,12 @@ const DriveAPI = {
       headers: { Authorization: `Bearer ${State.token}` },
       body: form,
     });
+    if (res.status === 401) {
+      toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+      localStorage.removeItem('mt_token');
+      setTimeout(() => Auth.login(), 1500);
+      throw new Error('토큰 만료 — 재로그인 필요');
+    }
     if (!res.ok) throw new Error(`Drive upload: ${res.status}`);
     const data = await res.json();
     return `https://drive.google.com/file/d/${data.id}/view`;
