@@ -2676,11 +2676,11 @@ async function initApp() {
   CONFIG.SHEET_ID = localStorage.getItem('mt_sheet_id') || CONFIG.SHEET_ID;
   CONFIG.DRIVE_FOLDER_ID = localStorage.getItem('mt_drive_folder') || CONFIG.DRIVE_FOLDER_ID;
 
-  // Set initial browser history state (prevents immediate exit on first back press)
-  history.replaceState({ screen: 'init' }, '', window.location.href.split('#')[0] + '#init');
-
-  // Check auth
+  // Check auth FIRST (before replaceState, to preserve OAuth callback hash)
   const hasToken = Auth.init();
+
+  // Set initial browser history state AFTER auth (prevents immediate exit on first back press)
+  history.replaceState({ screen: 'init' }, '', window.location.href.split('#')[0] + '#init');
 
   if (hasToken) {
     showLoading();
