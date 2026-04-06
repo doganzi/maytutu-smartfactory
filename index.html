@@ -167,10 +167,12 @@ a { text-decoration:none; color:inherit; }
 @media print {
   body * { visibility:hidden; }
   #print-area, #print-area * { visibility:visible; }
-  #print-area { position:absolute; top:0; left:0; }
-  .label { width:var(--label-w); height:var(--label-h); page-break-after:always; display:flex; align-items:center; gap:4mm; padding:2mm; border:0.5px solid #ccc; }
-  .label .qr-img { width:20mm; height:20mm; }
-  .label .label-info { font-size:7pt; line-height:1.4; }
+  #print-area { position:absolute; top:0; left:0; width:50mm; }
+  .label { width:50mm; height:30mm; page-break-after:always; display:flex; align-items:center; gap:2mm; padding:1.5mm 2mm; border:0.5px solid #ccc; box-sizing:border-box; overflow:hidden; }
+  .label .qr-img { width:18mm; height:18mm; flex-shrink:0; }
+  .label .qr-img canvas, .label .qr-img img { width:18mm !important; height:18mm !important; }
+  .label .label-info { font-size:6pt; line-height:1.3; overflow:hidden; }
+  .label .label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:27mm; }
 }
 </style>
 </head>
@@ -320,8 +322,20 @@ function dayOfWeek(d) {
   return ['일','월','화','수','목','금','토'][d.getDay()];
 }
 
-// Generate sequential ID: PREFIX-YYYYMMDD-NNN
-async function generateId(prefix, tab, idCol = 0) {
+// YYMMDD 포맷 유틸
+function toYYMMDD(dateStr) {
+  if (!dateStr) return '000000';
+  const d = dateStr.replace(/-/g, '');  // "2026-04-06" → "20260406"
+  return d.length >= 8 ? d.substring(2) : d; // → "260406"
+}
+
+// 품목코드에서 숫자부분 추출: "RM001" → "001", "FG001" → "001"
+function extractItemNum(itemCode) {
+  return (itemCode || '').replace(/[A-Za-z]/g, '').padStart(3, '0');
+}
+
+// 기존 순번 ID (생산요청 REQ, 입고기록 RCV, 작업지시 WO 등)
+async function generateSeqId(prefix, tab, idCol = 0) {
   const today = formatDate().replace(/-/g, '');
   const pattern = `${prefix}-${today}-`;
   try {
@@ -337,6 +351,40 @@ async function generateId(prefix, tab, idCol = 0) {
   } catch (e) {
     return `${pattern}001`;
   }
+}
+
+// 새 LOT ID 포맷: [대분류]-[품목번호]-[입고일YYMMDD]-[사용기한YYMMDD]-[입고순번NNN]
+// 예: RM-001-260406-260706-001
+async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0) {
+  const todayYM = toYYMMDD(formatDate());
+  const expYM = toYYMMDD(expDate);
+  const itemNum = extractItemNum(itemCode);
+  const searchPrefix = `${prefix}-${itemNum}-${todayYM}-`;
+
+  try {
+    const rows = await SheetsAPI.getAll(tab);
+    let max = 0;
+    rows.forEach(r => {
+      if (r[idCol] && r[idCol].startsWith(searchPrefix)) {
+        const parts = r[idCol].split('-');
+        const seq = parseInt(parts[4]) || 0;
+        if (seq > max) max = seq;
+      }
+    });
+    return `${prefix}-${itemNum}-${todayYM}-${expYM}-${String(max + 1).padStart(3, '0')}`;
+  } catch (e) {
+    return `${prefix}-${itemNum}-${todayYM}-${expYM}-001`;
+  }
+}
+
+// QR 이미지 URL 생성 (quickchart.io)
+function qrImageUrl(text, size = 200) {
+  return `https://quickchart.io/qr?text=${encodeURIComponent(text)}&size=${size}&margin=1`;
+}
+
+// Google Sheets IMAGE 수식 생성
+function qrImageFormula(cellRef) {
+  return `=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(${cellRef})&"&size=200&margin=1")`;
 }
 
 /* ═══════════════════════════════════════════════
@@ -1050,7 +1098,7 @@ async function submitProductionRequest() {
 
   try {
     showLoading();
-    const reqId = await generateId('REQ', '생산요청');
+    const reqId = await generateSeqId('REQ', '생산요청');
     const productName = product?.includes(' ') ? product.split(' ').slice(1).join(' ') : '호두과자 반죽';
     const productCode = product?.split(' ')[0] || 'FG001';
 
@@ -1404,10 +1452,10 @@ async function submitReceiving() {
       console.warn('Photo upload failed:', e);
     }
 
-    // Generate IDs
+    // Generate IDs — 새 포맷: [대분류]-[품목번호]-[입고일]-[사용기한]-[입고순번]
     const prefix = type === '원재료' ? 'RM' : 'SP';
-    const rcvId = await generateId('RCV', '입고기록');
-    const lotId = await generateId(prefix, type === '원재료' ? '원재료LOT' : '소모품LOT');
+    const rcvId = await generateSeqId('RCV', '입고기록');
+    const lotId = await generateLotId(prefix, itemCode, exp, type === '원재료' ? '원재료LOT' : '소모품LOT');
 
     // 1. Append to 입고기록
     await SheetsAPI.append('입고기록', [
@@ -1426,13 +1474,15 @@ async function submitReceiving() {
       ]);
     }
 
-    // 3. Generate individual QR records
+    // 3. Generate individual QR records + QR 이미지 수식
     if (type === '원재료') {
       const perUnit = parseFloat(qty) / indivCount;
       const indivRows = [];
       for (let i = 1; i <= indivCount; i++) {
         const indivId = `${lotId}-${String(i).padStart(2, '0')}`;
-        indivRows.push([indivId, lotId, itemCode, '미사용', String(perUnit), '']);
+        // 컬럼: [개별ID, LOT ID, 품목코드, 상태, 수량, 비고, QR이미지]
+        const rowNum = ''; // placeholder — IMAGE 수식은 아래에서 별도 처리
+        indivRows.push([indivId, lotId, itemCode, '미사용', String(perUnit), '', qrImageUrl(indivId)]);
       }
       await SheetsAPI.append('원재료개별', indivRows);
     }
@@ -1662,7 +1712,7 @@ Screens['label-print'] = (params = {}) => {
       <div id="label-mode-lot" style="display:${mode === 'lot' ? 'block' : 'none'}">
         <div class="input-group">
           <label>LOT 번호</label>
-          <input type="text" id="lbl-lot" value="${lotId || ''}" placeholder="예: RM-20260406-101">
+          <input type="text" id="lbl-lot" value="${lotId || ''}" placeholder="예: RM-001-260406-260706-001">
         </div>
         <div class="input-group">
           <label>라벨 수량</label>
@@ -1681,7 +1731,7 @@ Screens['label-print'] = (params = {}) => {
         <div class="card" style="border:1px solid var(--gray-l);padding:12px">
           <div class="fs-12 fw-6 mb-8">직접 입력 / QR 스캔</div>
           <div style="display:flex;gap:8px">
-            <input type="text" id="lbl-indiv-id" placeholder="예: RM-20260406-101-01" style="flex:1;font-size:13px">
+            <input type="text" id="lbl-indiv-id" placeholder="예: RM-001-260406-260706-001-01" style="flex:1;font-size:13px">
             <button class="btn btn-out" onclick="scanForReprint()" style="white-space:nowrap">📷</button>
           </div>
           <div class="fs-11 c-txt-l mt-4">쉼표(,)로 여러 ID 입력 가능</div>
@@ -2088,7 +2138,7 @@ function renderLabelCards(labels) {
     // Generate QR
     setTimeout(() => {
       const el = $id(`qr-preview-${idx}`);
-      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 70, height: 70, correctLevel: QRCode.CorrectLevel.M }); }
+      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 70, height: 70, correctLevel: QRCode.CorrectLevel.L }); }
     }, 50 * idx);
 
     // Print area
@@ -2664,7 +2714,7 @@ async function startWorkOrder() {
 
   try {
     showLoading();
-    const woId = await generateId('WO', '작업지시서');
+    const woId = await generateSeqId('WO', '작업지시서');
     const sop = State.sops.find(s => s[0] === _selectedSopId);
 
     await SheetsAPI.append('작업지시서', [
@@ -3519,9 +3569,11 @@ async function approveWO(woId) {
       const wo = wos.find(w => w[0] === woId);
       if (!wo) throw new Error('WO not found');
 
-      const fgLotId = await generateId('FG', '완제품LOT');
       const packCount = parseInt(wo[7]) || 50;
       const qty = parseFloat(wo[5]) || 50;
+      const fgItemCode = wo[3] || 'FG001';
+      const expDate = formatDate(new Date(Date.now() + 90*86400000)); // +90 days
+      const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
 
       // 1. Update WO
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
@@ -3532,16 +3584,16 @@ async function approveWO(woId) {
       });
 
       // 2. Create FG LOT
-      const expDate = formatDate(new Date(Date.now() + 90*86400000)); // +90 days
       await SheetsAPI.append('완제품LOT', [
-        fgLotId, wo[3] || 'FG001', wo[4] || '호두과자 반죽', qty, wo[6] || '1kg',
+        fgLotId, fgItemCode, wo[4] || '호두과자 반죽', qty, wo[6] || '1kg',
         formatDate(), expDate, woId, qty, '정상', packCount, '냉동 -18°C'
       ]);
 
-      // 3. Create FG individual QR records
+      // 3. Create FG individual QR records + QR 이미지 URL
       const indivRows = [];
       for (let i = 1; i <= packCount; i++) {
-        indivRows.push([`${fgLotId}-${String(i).padStart(2,'0')}`, fgLotId, wo[3] || 'FG001', '미출하', '', '']);
+        const fgIndivId = `${fgLotId}-${String(i).padStart(2,'0')}`;
+        indivRows.push([fgIndivId, fgLotId, fgItemCode, '미출하', '', '', qrImageUrl(fgIndivId)]);
       }
       await SheetsAPI.append('완제품개별', indivRows);
 
