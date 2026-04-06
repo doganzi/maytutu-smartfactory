@@ -1677,28 +1677,33 @@ Screens['label-print'] = (params = {}) => {
 
       <!-- 개별 재프린트 모드 -->
       <div id="label-mode-indiv" style="display:${mode === 'indiv' ? 'block' : 'none'}">
-        <div class="card" style="background:var(--pri-bg);border:1px solid var(--pri-l)">
-          <div class="fs-12 fw-6" style="color:var(--pri)">💡 개별 재프린트 안내</div>
-          <div class="fs-11 c-txt-l mt-4">
-            특정 제품의 QR 라벨이 훼손되거나 분실된 경우, 해당 개별 ID를 입력하여 라벨을 다시 출력합니다.
-            시트에 등록된 실제 제품 정보(품목명, LOT, 유통기한, 보관온도)를 자동으로 불러옵니다.
-          </div>
-        </div>
-        <div class="input-group mt-12">
-          <label>개별 QR ID</label>
+        <!-- 직접 ID 입력 / 스캔 영역 -->
+        <div class="card" style="border:1px solid var(--gray-l);padding:12px">
+          <div class="fs-12 fw-6 mb-8">직접 입력 / QR 스캔</div>
           <div style="display:flex;gap:8px">
-            <input type="text" id="lbl-indiv-id" placeholder="예: RM-20260406-101-01" style="flex:1">
-            <button class="btn btn-out" onclick="scanForReprint()" style="white-space:nowrap">📷 스캔</button>
+            <input type="text" id="lbl-indiv-id" placeholder="예: RM-20260406-101-01" style="flex:1;font-size:13px">
+            <button class="btn btn-out" onclick="scanForReprint()" style="white-space:nowrap">📷</button>
           </div>
-          <div class="fs-11 c-txt-l mt-4">쉼표(,) 또는 줄바꿈으로 여러 ID를 한번에 입력할 수 있습니다</div>
+          <div class="fs-11 c-txt-l mt-4">쉼표(,)로 여러 ID 입력 가능</div>
+          <button class="btn btn-pri btn-full mt-8" onclick="generateLabelsIndiv()">ID로 라벨 생성</button>
         </div>
-        <button class="btn btn-pri btn-full" onclick="generateLabelsIndiv()">제품 조회 및 라벨 생성</button>
+
+        <!-- 재고 기반 드릴다운 영역 -->
+        <div class="mt-12">
+          <div class="fs-13 fw-7 mb-8">📋 재고에서 선택</div>
+          <div id="reprint-stock-area">
+            <button class="btn btn-out btn-full" onclick="loadReprintStock()">현재 재고 불러오기</button>
+          </div>
+        </div>
       </div>
 
       <div id="label-preview" class="mt-16"></div>
       <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none" onclick="printLabels()">🖨️ 라벨 인쇄</button>
     </div>
   `;
+
+  // 개별 모드로 바로 진입한 경우 재고 자동 로드
+  if (mode === 'indiv') setTimeout(() => loadReprintStock(), 100);
 };
 
 function switchLabelMode(mode) {
@@ -1708,6 +1713,241 @@ function switchLabelMode(mode) {
   $id('mode-indiv-btn').className = `btn btn-full ${mode === 'indiv' ? 'btn-pri' : 'btn-out'}`;
   $id('label-preview').innerHTML = '';
   $id('btn-print').style.display = 'none';
+  // 개별 모드 전환 시 재고 로드
+  if (mode === 'indiv') loadReprintStock();
+}
+
+// ── 재고 기반 드릴다운: Step 1 - 품목 리스트 ──
+async function loadReprintStock() {
+  const area = $id('reprint-stock-area');
+  if (!area) return;
+  area.innerHTML = '<div class="loading-inline"><div class="spinner-s"></div> 재고 조회 중...</div>';
+
+  try {
+    // 원재료/완제품/소모품 LOT 시트에서 잔량 > 0 인 품목 집계
+    const [rmLots, fgLots, spLots] = await Promise.all([
+      SheetsAPI.getAll('원재료LOT').catch(() => []),
+      SheetsAPI.getAll('완제품LOT').catch(() => []),
+      SheetsAPI.getAll('소모품LOT').catch(() => []),
+    ]);
+
+    // 캐시에 저장 (LOT 선택 단계에서 재사용)
+    window._reprintCache = { rmLots, fgLots, spLots };
+
+    // 품목별 집계: { code: { name, type, totalStock, lotCount } }
+    const items = {};
+
+    rmLots.forEach(l => {
+      const remain = parseFloat(l[8]) || 0;
+      if (remain <= 0) return;
+      const key = `rm:${l[1]}`;
+      if (!items[key]) items[key] = { code: l[1], name: l[2], type: 'rm', typeLabel: '원재료', totalStock: 0, lotCount: 0, unit: l[5] || 'kg' };
+      items[key].totalStock += remain;
+      items[key].lotCount++;
+    });
+
+    fgLots.forEach(l => {
+      const remain = parseFloat(l[7]) || 0;
+      if (remain <= 0) return;
+      const key = `fg:${l[1]}`;
+      if (!items[key]) items[key] = { code: l[1], name: l[2], type: 'fg', typeLabel: '완제품', totalStock: 0, lotCount: 0, unit: l[4] || 'ea' };
+      items[key].totalStock += remain;
+      items[key].lotCount++;
+    });
+
+    spLots.forEach(l => {
+      const remain = parseFloat(l[6]) || 0;
+      if (remain <= 0) return;
+      const key = `sp:${l[1]}`;
+      if (!items[key]) items[key] = { code: l[1], name: l[2], type: 'sp', typeLabel: '소모품', totalStock: 0, lotCount: 0, unit: l[4] || '' };
+      items[key].totalStock += remain;
+      items[key].lotCount++;
+    });
+
+    const itemList = Object.values(items);
+    if (itemList.length === 0) {
+      area.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">재고 없음</div><div class="es-desc">현재 잔량이 있는 LOT가 없습니다</div></div>';
+      return;
+    }
+
+    // 유형 뱃지 색상
+    const typeBg = { rm: 'var(--pri-bg)', fg: 'var(--suc-bg)', sp: '#fff8e1' };
+    const typeColor = { rm: 'var(--pri)', fg: 'var(--suc)', sp: '#f57f17' };
+
+    area.innerHTML = `
+      <div class="fs-11 c-txt-l mb-8">품목을 선택하면 해당 LOT와 개별 제품을 확인할 수 있습니다</div>
+      ${itemList.map(it => `
+        <div class="card" style="cursor:pointer;border:1px solid var(--gray-l);transition:all .15s"
+             onclick="loadReprintLots('${it.type}','${it.code}','${it.name}')"
+             onmousedown="this.style.transform='scale(.98)'" onmouseup="this.style.transform=''">
+          <div class="row between" style="align-items:center">
+            <div>
+              <span class="badge" style="background:${typeBg[it.type]};color:${typeColor[it.type]};font-size:10px">${it.typeLabel}</span>
+              <span class="fw-6 fs-13 ml-4">${it.name}</span>
+              <span class="fs-11 c-txt-l ml-4">${it.code}</span>
+            </div>
+            <div style="text-align:right">
+              <div class="fw-7 fs-13">${it.totalStock}${it.unit}</div>
+              <div class="fs-10 c-txt-l">LOT ${it.lotCount}건</div>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    `;
+  } catch (e) {
+    area.innerHTML = `<div class="card" style="color:var(--err)">재고 조회 실패: ${e.message}</div>`;
+  }
+}
+
+// ── Step 2 - 선택한 품목의 LOT 리스트 ──
+async function loadReprintLots(type, itemCode, itemName) {
+  const area = $id('reprint-stock-area');
+  area.innerHTML = '<div class="loading-inline"><div class="spinner-s"></div> LOT 조회 중...</div>';
+
+  try {
+    const cache = window._reprintCache || {};
+    let lots = [];
+    if (type === 'rm') lots = (cache.rmLots || await SheetsAPI.getAll('원재료LOT')).filter(l => l[1] === itemCode && (parseFloat(l[8]) || 0) > 0);
+    else if (type === 'fg') lots = (cache.fgLots || await SheetsAPI.getAll('완제품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[7]) || 0) > 0);
+    else if (type === 'sp') lots = (cache.spLots || await SheetsAPI.getAll('소모품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[6]) || 0) > 0);
+
+    area.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <button class="btn btn-out" onclick="loadReprintStock()" style="padding:6px 10px;font-size:12px">← 품목목록</button>
+        <div class="fw-7 fs-13">${itemName}</div>
+        <span class="fs-11 c-txt-l">${itemCode}</span>
+      </div>
+      ${lots.length === 0 ? '<div class="fs-12 c-txt-l">잔량이 있는 LOT가 없습니다</div>' : lots.map(l => {
+        const lotId = l[0];
+        const remain = type === 'rm' ? l[8] : type === 'fg' ? l[7] : l[6];
+        const unit = type === 'rm' ? (l[5]||'kg') : type === 'fg' ? (l[4]||'ea') : (l[4]||'');
+        const exp = type === 'rm' ? (l[7]||'') : type === 'fg' ? (l[6]||'') : '';
+        const indivCnt = type === 'rm' ? (l[10]||'') : '';
+        const date = type === 'rm' ? (l[6]||'') : (l[5]||'');
+        return `
+          <div class="card" style="cursor:pointer;border:1px solid var(--gray-l);transition:all .15s"
+               onclick="loadReprintIndivs('${type}','${lotId}','${itemName}')"
+               onmousedown="this.style.transform='scale(.98)'" onmouseup="this.style.transform=''">
+            <div class="row between" style="align-items:center">
+              <div>
+                <div class="fw-6 fs-13">${lotId}</div>
+                <div class="fs-11 c-txt-l">${date ? '입고: '+date : ''}${exp ? ' · EXP: '+exp : ''}${indivCnt ? ' · 개별 '+indivCnt+'개' : ''}</div>
+              </div>
+              <div class="fw-7 fs-14" style="color:var(--pri)">${remain}${unit}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    `;
+  } catch (e) {
+    area.innerHTML = `<div class="card" style="color:var(--err)">LOT 조회 실패: ${e.message}<br><button class="btn btn-out mt-8" onclick="loadReprintStock()">← 돌아가기</button></div>`;
+  }
+}
+
+// ── Step 3 - 선택한 LOT의 개별 제품 리스트 (체크박스 선택) ──
+async function loadReprintIndivs(type, lotId, itemName) {
+  const area = $id('reprint-stock-area');
+  area.innerHTML = '<div class="loading-inline"><div class="spinner-s"></div> 개별 제품 조회 중...</div>';
+
+  try {
+    const tabMap = { rm: '원재료개별', fg: '완제품개별', sp: '소모품개별' };
+    const lotTabMap = { rm: '원재료LOT', fg: '완제품LOT', sp: '소모품LOT' };
+    const allIndivs = await SheetsAPI.getAll(tabMap[type]).catch(() => []);
+    const indivs = allIndivs.filter(r => r[1] === lotId);
+
+    // LOT 정보도 가져와서 라벨에 활용
+    const cache = window._reprintCache || {};
+    let lotRow = null;
+    if (type === 'rm') lotRow = (cache.rmLots || []).find(l => l[0] === lotId);
+    else if (type === 'fg') lotRow = (cache.fgLots || []).find(l => l[0] === lotId);
+    else if (type === 'sp') lotRow = (cache.spLots || []).find(l => l[0] === lotId);
+    if (!lotRow) {
+      const lotData = await SheetsAPI.getAll(lotTabMap[type]).catch(() => []);
+      lotRow = lotData.find(l => l[0] === lotId);
+    }
+
+    // 캐시에 LOT 정보 저장
+    window._reprintLotRow = lotRow;
+    window._reprintType = type;
+
+    const statusBadge = (s) => {
+      const map = { '미사용': { bg: 'var(--suc-bg)', c: 'var(--suc)' }, '사용중': { bg: 'var(--pri-bg)', c: 'var(--pri)' }, '사용완료': { bg: '#f5f5f5', c: 'var(--gray)' } };
+      const st = map[s] || map['미사용'];
+      return `<span class="badge" style="background:${st.bg};color:${st.c};font-size:10px">${s || '미사용'}</span>`;
+    };
+
+    // 개별제품 컬럼: [0]=개별ID, [1]=LOT ID, [2]=품목코드, [3]=상태, [4]=수량, [5]=비고
+    area.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <button class="btn btn-out" onclick="loadReprintLots('${type}','${lotRow?.[1]||''}','${itemName}')" style="padding:6px 10px;font-size:12px">← LOT목록</button>
+        <div class="fw-7 fs-13">${itemName}</div>
+      </div>
+      <div class="fs-12 c-txt-l mb-8">${lotId} · 개별 ${indivs.length}건</div>
+
+      ${indivs.length === 0 ? '<div class="fs-12 c-txt-l">개별 제품이 없습니다</div>' : `
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn btn-out" onclick="toggleReprintAll(true)" style="flex:1;font-size:12px">전체 선택</button>
+          <button class="btn btn-out" onclick="toggleReprintAll(false)" style="flex:1;font-size:12px">전체 해제</button>
+        </div>
+        <div id="reprint-indiv-list" style="max-height:300px;overflow-y:auto">
+          ${indivs.map((ind, i) => `
+            <label class="card" style="display:flex;align-items:center;gap:10px;cursor:pointer;border:1px solid var(--gray-l);padding:10px 12px;margin-bottom:4px">
+              <input type="checkbox" class="reprint-chk" value="${ind[0]}" data-idx="${i}" style="width:20px;height:20px;accent-color:var(--pri)">
+              <div style="flex:1;min-width:0">
+                <div class="fw-6 fs-12" style="word-break:break-all">${ind[0]}</div>
+                <div class="fs-11 c-txt-l">${ind[4] ? ind[4] + (type==='rm'?(lotRow?.[5]||'kg'):'') : ''} ${statusBadge(ind[3])}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+        <div class="mt-12" style="display:flex;gap:8px">
+          <button class="btn btn-pri btn-full" onclick="generateReprintSelected('${type}','${lotId}','${itemName}')">
+            선택 항목 라벨 생성
+          </button>
+        </div>
+      `}
+    `;
+  } catch (e) {
+    area.innerHTML = `<div class="card" style="color:var(--err)">개별 제품 조회 실패: ${e.message}<br><button class="btn btn-out mt-8" onclick="loadReprintStock()">← 처음으로</button></div>`;
+  }
+}
+
+function toggleReprintAll(checked) {
+  document.querySelectorAll('.reprint-chk').forEach(cb => cb.checked = checked);
+}
+
+// ── Step 4 - 선택된 개별 제품으로 라벨 생성 ──
+function generateReprintSelected(type, lotId, itemName) {
+  const checked = [...document.querySelectorAll('.reprint-chk:checked')];
+  if (checked.length === 0) { toast('라벨을 출력할 제품을 선택하세요', 'warn'); return; }
+
+  const lotRow = window._reprintLotRow;
+  const labels = checked.map(cb => {
+    const indivId = cb.value;
+    let exp = '', storage = '', date = '', qty = '', unit = '';
+
+    if (type === 'rm' && lotRow) {
+      date = lotRow[6] || formatDate();
+      exp = lotRow[7] ? `EXP: ${lotRow[7]}` : '';
+      storage = lotRow[11] ? `보관: ${lotRow[11]}` : '';
+      unit = lotRow[5] || 'kg';
+    } else if (type === 'fg' && lotRow) {
+      date = lotRow[5] || formatDate();
+      exp = lotRow[6] ? `EXP: ${lotRow[6]}` : '';
+    } else if (type === 'sp' && lotRow) {
+      date = lotRow[5] || formatDate();
+      unit = lotRow[4] || '';
+    }
+
+    // 개별 수량은 체크박스 부모에서 가져옴
+    const parentLabel = cb.closest('label');
+    const qtyText = parentLabel?.querySelector('.fs-11')?.textContent?.trim() || '';
+
+    return { indivId, itemName, date, exp, storage, lotId, qty: '' };
+  });
+
+  renderLabelCards(labels);
+  toast(`${labels.length}매 라벨 미리보기가 생성되었습니다`, 'suc');
 }
 
 // ── LOT 일괄 발행 (기존 로직 개선) ──
@@ -1750,12 +1990,11 @@ async function generateLabelsLot() {
   );
 }
 
-// ── 개별 재프린트 ──
+// ── 개별 재프린트 (직접 ID 입력) ──
 async function generateLabelsIndiv() {
   const raw = $id('lbl-indiv-id')?.value?.trim();
   if (!raw) { toast('개별 QR ID를 입력하세요', 'err'); return; }
 
-  // 쉼표 또는 줄바꿈으로 복수 ID 분리
   const ids = raw.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
   if (ids.length === 0) { toast('유효한 ID를 입력하세요', 'err'); return; }
 
@@ -1763,7 +2002,6 @@ async function generateLabelsIndiv() {
   const labels = [];
 
   try {
-    // 필요한 시트 한번만 로드
     const rmIndivs = ids.some(id => id.startsWith('RM-')) ? await SheetsAPI.getAll('원재료개별').catch(() => []) : [];
     const rmLots = ids.some(id => id.startsWith('RM-')) ? await SheetsAPI.getAll('원재료LOT').catch(() => []) : [];
     const fgIndivs = ids.some(id => id.startsWith('FG-')) ? await SheetsAPI.getAll('완제품개별').catch(() => []) : [];
@@ -1777,67 +2015,36 @@ async function generateLabelsIndiv() {
         const indiv = rmIndivs.find(r => r[0] === qrId);
         if (indiv) {
           const lot = rmLots.find(l => l[0] === indiv[1]);
-          labels.push({
-            indivId: qrId,
-            itemName: lot?.[2] || '원재료',
-            date: lot?.[6] || formatDate(),
-            exp: lot?.[7] ? `EXP: ${lot[7]}` : '',
-            storage: lot?.[11] ? `보관: ${lot[11]}` : '',
-            lotId: indiv[1],
-            qty: indiv[4] ? `${indiv[4]}${lot?.[5] || 'kg'}` : '',
-          });
+          labels.push({ indivId: qrId, itemName: lot?.[2] || '원재료', date: lot?.[6] || formatDate(),
+            exp: lot?.[7] ? `EXP: ${lot[7]}` : '', storage: lot?.[11] ? `보관: ${lot[11]}` : '', lotId: indiv[1] });
           found = true;
         }
       } else if (qrId.startsWith('FG-')) {
         const indiv = fgIndivs.find(r => r[0] === qrId);
         if (indiv) {
           const lot = fgLots.find(l => l[0] === indiv[1]);
-          labels.push({
-            indivId: qrId,
-            itemName: lot?.[2] || '완제품',
-            date: lot?.[5] || formatDate(),
-            exp: lot?.[6] ? `EXP: ${lot[6]}` : '',
-            storage: '',
-            lotId: indiv[1],
-            qty: '',
-          });
+          labels.push({ indivId: qrId, itemName: lot?.[2] || '완제품', date: lot?.[5] || formatDate(),
+            exp: lot?.[6] ? `EXP: ${lot[6]}` : '', storage: '', lotId: indiv[1] });
           found = true;
         }
       } else if (qrId.startsWith('SP-')) {
         const indiv = spIndivs.find(r => r[0] === qrId);
         if (indiv) {
           const lot = spLots.find(l => l[0] === indiv[1]);
-          labels.push({
-            indivId: qrId,
-            itemName: lot?.[2] || '소모품',
-            date: lot?.[5] || formatDate(),
-            exp: '',
-            storage: '',
-            lotId: indiv[1],
-            qty: indiv[4] ? `${indiv[4]}${lot?.[4] || ''}` : '',
-          });
+          labels.push({ indivId: qrId, itemName: lot?.[2] || '소모품', date: lot?.[5] || formatDate(),
+            exp: '', storage: '', lotId: indiv[1] });
           found = true;
         }
       }
-      if (!found) {
-        labels.push({ indivId: qrId, itemName: '⚠ 미등록 ID', date: '', exp: '', storage: '', lotId: '', qty: '', error: true });
-      }
+      if (!found) labels.push({ indivId: qrId, itemName: '⚠ 미등록 ID', date: '', exp: '', storage: '', lotId: '', error: true });
     }
-  } catch (e) {
-    toast('데이터 조회 실패: ' + e.message, 'err');
-    hideLoading();
-    return;
-  }
+  } catch (e) { toast('데이터 조회 실패: ' + e.message, 'err'); hideLoading(); return; }
   hideLoading();
 
   const errors = labels.filter(l => l.error);
-  if (errors.length > 0) {
-    toast(`${errors.length}개 ID를 찾을 수 없습니다: ${errors.map(e => e.indivId).join(', ')}`, 'warn');
-  }
-
+  if (errors.length > 0) toast(`${errors.length}개 ID를 찾을 수 없습니다`, 'warn');
   const validLabels = labels.filter(l => !l.error);
   if (validLabels.length === 0) { toast('출력 가능한 라벨이 없습니다', 'err'); return; }
-
   renderLabelCards(validLabels);
 }
 
