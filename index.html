@@ -603,6 +603,8 @@ const Router = {
       'qr-scan': 'scan',
       more: 'more', 'sop-list': 'more', 'sop-detail': 'more',
       equip: 'more', 'label-print': 'more', settings: 'more',
+      'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
+      vendors: 'more', haccp: 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -624,6 +626,7 @@ const Router = {
     if (renderer) {
       renderer(params);
     } else {
+      renderHeader(s, '준비 중');
       $id('content').innerHTML = `<div class="empty-state"><div class="es-icon">🚧</div><div class="es-title">준비 중</div><div class="es-desc">${s} 화면은 준비 중입니다</div></div>`;
     }
   },
@@ -1817,6 +1820,246 @@ Screens['sop-detail'] = async (params = {}) => {
           </div>
         `;
       }).join('')}
+    </div>
+  `;
+};
+
+// ─── RAW MATERIAL ITEMS (원재료 품목) ───
+Screens['items-rm'] = async () => {
+  renderHeader('원재료 품목', '원재료 마스터 데이터', { back: 'more' });
+  showLoading();
+  let items = [], lots = [];
+  try {
+    [items, lots] = await Promise.all([
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('원재료LOT').catch(() => []),
+    ]);
+  } catch(e) {}
+  hideLoading();
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 품목 · DB 연동 조회</div>
+      ${items.length === 0 ?
+        `<div class="empty-state"><div class="es-icon">📦</div><div class="es-title">등록된 원재료 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        items.map(item => {
+          const code = item[0], name = item[1], spec = item[2] || '', sku = item[3] || '', unit = item[4] || 'kg';
+          const category = item[5] || '', minStock = parseFloat(item[6]) || 0, allergen = item[7] || '';
+          const storage = item[8] || '실온';
+          const isWater = code === 'RM002';
+          const totalRemain = isWater ? '-' :
+            lots.filter(l => l[1] === code && l[9] !== '폐기' && l[9] !== '소진')
+              .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
+          const isLow = !isWater && minStock > 0 && totalRemain < minStock;
+          return `
+            <div class="card">
+              <div class="row between mb-4">
+                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                ${isWater ? '<span class="badge badge-info">수돗물</span>' :
+                  isLow ? '<span class="badge badge-err">재고부족</span>' : '<span class="badge badge-suc">정상</span>'}
+              </div>
+              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit} · SKU: ${sku || '-'}</div>
+              <div class="fs-12 c-txt-l">분류: ${category || '-'} · 보관: ${storage} · 알레르겐: ${allergen || '없음'}</div>
+              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b> ${minStock > 0 ? ` · 안전재고: ${minStock}${unit}` : ''}</div>` : ''}
+            </div>`;
+        }).join('')
+      }
+      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
+        <div class="fs-12 c-txt-l">품목 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/edit#gid=0','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+      </div>
+    </div>
+  `;
+};
+
+// ─── FINISHED GOODS ITEMS (완제품 품목) ───
+Screens['items-fg'] = async () => {
+  renderHeader('완제품 품목', '완제품 마스터 데이터', { back: 'more' });
+  showLoading();
+  let items = [], lots = [];
+  try {
+    [items, lots] = await Promise.all([
+      SheetsAPI.getAll('완제품품목').catch(() => []),
+      SheetsAPI.getAll('완제품LOT').catch(() => []),
+    ]);
+  } catch(e) {}
+  hideLoading();
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회</div>
+      ${items.length === 0 ?
+        `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">등록된 완제품 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        items.map(item => {
+          const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || 'kg';
+          const packUnit = item[4] || '', shelfLife = item[5] || '', storage = item[6] || '';
+          const totalStock = lots.filter(l => l[1] === code && l[7] !== '출하' && l[7] !== '폐기')
+            .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
+          return `
+            <div class="card">
+              <div class="row between mb-4">
+                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                <span class="badge badge-pri">${totalStock > 0 ? totalStock + (unit||'') : '재고없음'}</span>
+              </div>
+              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 포장: ${packUnit || '-'} · 단위: ${unit}</div>
+              <div class="fs-12 c-txt-l">유통기한: ${shelfLife || '-'} · 보관: ${storage || '-'}</div>
+            </div>`;
+        }).join('')
+      }
+      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
+        <div class="fs-12 c-txt-l">품목 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+      </div>
+    </div>
+  `;
+};
+
+// ─── CONSUMABLE ITEMS (소모품 품목) ───
+Screens['items-sp'] = async () => {
+  renderHeader('소모품 품목', '소모품 마스터 데이터', { back: 'more' });
+  showLoading();
+  let items = [], lots = [];
+  try {
+    [items, lots] = await Promise.all([
+      SheetsAPI.getAll('소모품품목').catch(() => []),
+      SheetsAPI.getAll('소모품LOT').catch(() => []),
+    ]);
+  } catch(e) {}
+  hideLoading();
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 소모품 · DB 연동 조회</div>
+      ${items.length === 0 ?
+        `<div class="empty-state"><div class="es-icon">🧹</div><div class="es-title">등록된 소모품 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        items.map(item => {
+          const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || '개';
+          const category = item[4] || '', minStock = parseFloat(item[5]) || 0;
+          const totalStock = lots.filter(l => l[1] === code && l[5] !== '폐기' && l[5] !== '소진')
+            .reduce((sum, l) => sum + (parseFloat(l[4]) || 0), 0);
+          const isLow = minStock > 0 && totalStock < minStock;
+          return `
+            <div class="card">
+              <div class="row between mb-4">
+                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                ${isLow ? '<span class="badge badge-err">재고부족</span>' : '<span class="badge badge-suc">정상</span>'}
+              </div>
+              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit} · 분류: ${category || '-'}</div>
+              <div class="fs-12" style="margin-top:4px">현재고: <b>${totalStock}${unit}</b>${minStock > 0 ? ` · 안전재고: ${minStock}${unit}` : ''}</div>
+            </div>`;
+        }).join('')
+      }
+      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
+        <div class="fs-12 c-txt-l">품목 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+      </div>
+    </div>
+  `;
+};
+
+// ─── VENDORS (거래처) ───
+Screens.vendors = async () => {
+  renderHeader('거래처 관리', '공급업체 · 고객사', { back: 'more' });
+  showLoading();
+  let vendors = [];
+  try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
+  hideLoading();
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="fs-12 c-txt-l mb-8">총 ${vendors.length}개 거래처 · DB 연동 조회</div>
+      ${vendors.length === 0 ?
+        `<div class="empty-state"><div class="es-icon">🏢</div><div class="es-title">등록된 거래처 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        vendors.map(v => {
+          const code = v[0], name = v[1], type = v[2] || '', contact = v[3] || '';
+          const phone = v[4] || '', addr = v[5] || '', note = v[6] || '';
+          return `
+            <div class="card">
+              <div class="row between mb-4">
+                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                <span class="badge badge-${type === '공급' ? 'pri' : type === '고객' ? 'suc' : 'gray'}">${type || '기타'}</span>
+              </div>
+              <div class="fs-12 c-txt-l">${contact ? '담당: ' + contact : ''}${phone ? ' · ☎ ' + phone : ''}</div>
+              ${addr ? `<div class="fs-12 c-txt-l">${addr}</div>` : ''}
+              ${note ? `<div class="fs-11 c-txt-l" style="margin-top:4px;font-style:italic">${note}</div>` : ''}
+            </div>`;
+        }).join('')
+      }
+      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
+        <div class="fs-12 c-txt-l">거래처 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+      </div>
+    </div>
+  `;
+};
+
+// ─── HACCP ───
+Screens.haccp = async () => {
+  renderHeader('HACCP 관리', 'CCP 점검 · 위생관리', { back: 'more' });
+  showLoading();
+  let records = [], equipment = [];
+  try {
+    [records, equipment] = await Promise.all([
+      SheetsAPI.getAll('공정기록').catch(() => []),
+      SheetsAPI.getAll('기기관리').catch(() => []),
+    ]);
+  } catch(e) {}
+  hideLoading();
+
+  // CCP records (금속검출)
+  const ccpRecords = records.filter(r => (r[2] || '').includes('금속검출') || (r[2] || '').includes('CCP'));
+  const recentCCP = ccpRecords.slice(-10).reverse();
+
+  // Equipment calibration
+  const today = new Date().toISOString().split('T')[0];
+  const upcomingCal = equipment.filter(e => {
+    if (!e[6]) return false;
+    const next = new Date(e[6]);
+    const diff = (next - new Date()) / (1000*60*60*24);
+    return diff <= 30 && diff >= -7;
+  });
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="card" style="background:linear-gradient(135deg,#1b5e20,#2e7d32);color:#fff;padding:16px">
+        <div class="fs-16 fw-7">HACCP 현황</div>
+        <div class="grid-2 mt-8">
+          <div style="text-align:center"><div class="fs-20 fw-7">${ccpRecords.length}</div><div class="fs-11" style="opacity:0.8">CCP 검사 기록</div></div>
+          <div style="text-align:center"><div class="fs-20 fw-7">${upcomingCal.length}</div><div class="fs-11" style="opacity:0.8">점검 예정 기기</div></div>
+        </div>
+      </div>
+
+      <div class="fs-14 fw-6 mt-12 mb-8">최근 CCP 금속검출 기록</div>
+      ${recentCCP.length === 0 ?
+        `<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">CCP 검사 기록이 없습니다</div></div>` :
+        recentCCP.map(r => `
+          <div class="card" style="padding:10px 14px">
+            <div class="row between">
+              <div>
+                <div class="fs-12 fw-6">${r[0] || ''} — ${r[2] || ''}</div>
+                <div class="fs-11 c-txt-l">${(r[4] || '').substring(0,16)}</div>
+              </div>
+              <span class="badge badge-suc">기록됨</span>
+            </div>
+          </div>
+        `).join('')
+      }
+
+      <div class="fs-14 fw-6 mt-12 mb-8">기기 점검/교정 예정</div>
+      ${upcomingCal.length === 0 ?
+        `<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">30일 이내 점검 예정 기기 없음</div></div>` :
+        upcomingCal.map(e => `
+          <div class="card" style="padding:10px 14px">
+            <div class="row between">
+              <div>
+                <div class="fs-12 fw-6">${e[1] || ''} <span class="c-txt-l">${e[0] || ''}</span></div>
+                <div class="fs-11 c-txt-l">다음 점검: ${(e[6] || '').substring(0,10)}</div>
+              </div>
+              <span class="badge badge-warn">점검예정</span>
+            </div>
+          </div>
+        `).join('')
+      }
+
+      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray);margin-top:12px">
+        <div class="fs-12 c-txt-l">HACCP 문서 관리는 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 확인하세요</div>
+      </div>
     </div>
   `;
 };
