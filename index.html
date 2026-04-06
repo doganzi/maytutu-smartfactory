@@ -1645,50 +1645,234 @@ function saveSettings() {
 Screens['label-print'] = (params = {}) => {
   renderHeader('라벨 인쇄', 'QR 라벨 생성 및 인쇄', { back: 'more' });
 
-  const { lotId, count, itemName, type } = params;
+  const { lotId, count, itemName, type, mode: initMode } = params;
+  const mode = initMode || (lotId ? 'lot' : 'lot');
 
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="input-group">
-        <label>LOT 번호</label>
-        <input type="text" id="lbl-lot" value="${lotId || ''}" placeholder="LOT 번호 입력">
+      <!-- 모드 토글 -->
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-full ${mode === 'lot' ? 'btn-pri' : 'btn-out'}" id="mode-lot-btn"
+          onclick="switchLabelMode('lot')">📦 LOT 일괄 발행</button>
+        <button class="btn btn-full ${mode === 'indiv' ? 'btn-pri' : 'btn-out'}" id="mode-indiv-btn"
+          onclick="switchLabelMode('indiv')">🏷️ 개별 재프린트</button>
       </div>
-      <div class="input-group">
-        <label>라벨 수량</label>
-        <input type="number" id="lbl-count" value="${count || 1}" placeholder="라벨 수">
+
+      <!-- LOT 일괄 모드 -->
+      <div id="label-mode-lot" style="display:${mode === 'lot' ? 'block' : 'none'}">
+        <div class="input-group">
+          <label>LOT 번호</label>
+          <input type="text" id="lbl-lot" value="${lotId || ''}" placeholder="예: RM-20260406-101">
+        </div>
+        <div class="input-group">
+          <label>라벨 수량</label>
+          <input type="number" id="lbl-count" value="${count || 1}" placeholder="라벨 수" min="1" max="50">
+        </div>
+        <div class="input-group">
+          <label>품목명 (자동조회 / 직접입력)</label>
+          <input type="text" id="lbl-item-name" value="${itemName || ''}" placeholder="LOT 입력 시 자동 조회됩니다">
+        </div>
+        <button class="btn btn-pri btn-full" onclick="generateLabelsLot()">라벨 미리보기 생성</button>
       </div>
-      <button class="btn btn-pri btn-full" onclick="generateLabels()">라벨 미리보기 생성</button>
+
+      <!-- 개별 재프린트 모드 -->
+      <div id="label-mode-indiv" style="display:${mode === 'indiv' ? 'block' : 'none'}">
+        <div class="card" style="background:var(--pri-bg);border:1px solid var(--pri-l)">
+          <div class="fs-12 fw-6" style="color:var(--pri)">💡 개별 재프린트 안내</div>
+          <div class="fs-11 c-txt-l mt-4">
+            특정 제품의 QR 라벨이 훼손되거나 분실된 경우, 해당 개별 ID를 입력하여 라벨을 다시 출력합니다.
+            시트에 등록된 실제 제품 정보(품목명, LOT, 유통기한, 보관온도)를 자동으로 불러옵니다.
+          </div>
+        </div>
+        <div class="input-group mt-12">
+          <label>개별 QR ID</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="lbl-indiv-id" placeholder="예: RM-20260406-101-01" style="flex:1">
+            <button class="btn btn-out" onclick="scanForReprint()" style="white-space:nowrap">📷 스캔</button>
+          </div>
+          <div class="fs-11 c-txt-l mt-4">쉼표(,) 또는 줄바꿈으로 여러 ID를 한번에 입력할 수 있습니다</div>
+        </div>
+        <button class="btn btn-pri btn-full" onclick="generateLabelsIndiv()">제품 조회 및 라벨 생성</button>
+      </div>
+
       <div id="label-preview" class="mt-16"></div>
       <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none" onclick="printLabels()">🖨️ 라벨 인쇄</button>
     </div>
   `;
 };
 
-function generateLabels() {
+function switchLabelMode(mode) {
+  $id('label-mode-lot').style.display = mode === 'lot' ? 'block' : 'none';
+  $id('label-mode-indiv').style.display = mode === 'indiv' ? 'block' : 'none';
+  $id('mode-lot-btn').className = `btn btn-full ${mode === 'lot' ? 'btn-pri' : 'btn-out'}`;
+  $id('mode-indiv-btn').className = `btn btn-full ${mode === 'indiv' ? 'btn-pri' : 'btn-out'}`;
+  $id('label-preview').innerHTML = '';
+  $id('btn-print').style.display = 'none';
+}
+
+// ── LOT 일괄 발행 (기존 로직 개선) ──
+async function generateLabelsLot() {
   const lotId = $id('lbl-lot')?.value?.trim();
   const count = parseInt($id('lbl-count')?.value) || 1;
   if (!lotId) { toast('LOT 번호를 입력하세요', 'err'); return; }
 
-  const previewEl = $id('label-preview');
-  previewEl.innerHTML = `<div class="fs-13 fw-7 mb-8">라벨 미리보기 (${count}매)</div>`;
+  let itemNameVal = $id('lbl-item-name')?.value?.trim();
+  let expDate = '', storageTemp = '', unit = 'kg';
 
+  // 시트에서 LOT 정보 자동조회
+  if (!itemNameVal) {
+    showLoading();
+    try {
+      let lots = [];
+      if (lotId.startsWith('RM-')) lots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
+      else if (lotId.startsWith('FG-')) lots = await SheetsAPI.getAll('완제품LOT').catch(() => []);
+      else if (lotId.startsWith('SP-')) lots = await SheetsAPI.getAll('소모품LOT').catch(() => []);
+      const lot = lots.find(l => l[0] === lotId);
+      if (lot) {
+        itemNameVal = lot[2] || '품목명 미확인';
+        if (lotId.startsWith('RM-')) { expDate = lot[7] || ''; storageTemp = lot[11] || ''; unit = lot[5] || 'kg'; }
+        else if (lotId.startsWith('FG-')) { expDate = lot[6] || ''; }
+        $id('lbl-item-name').value = itemNameVal;
+      }
+    } catch(e) { console.warn(e); }
+    hideLoading();
+  }
+  if (!itemNameVal) itemNameVal = '품목명 미확인';
+
+  renderLabelCards(
+    Array.from({length: count}, (_, i) => ({
+      indivId: `${lotId}-${String(i + 1).padStart(2, '0')}`,
+      itemName: itemNameVal,
+      date: formatDate(),
+      exp: expDate,
+      storage: storageTemp ? `보관: ${storageTemp}` : '',
+    }))
+  );
+}
+
+// ── 개별 재프린트 ──
+async function generateLabelsIndiv() {
+  const raw = $id('lbl-indiv-id')?.value?.trim();
+  if (!raw) { toast('개별 QR ID를 입력하세요', 'err'); return; }
+
+  // 쉼표 또는 줄바꿈으로 복수 ID 분리
+  const ids = raw.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+  if (ids.length === 0) { toast('유효한 ID를 입력하세요', 'err'); return; }
+
+  showLoading();
+  const labels = [];
+
+  try {
+    // 필요한 시트 한번만 로드
+    const rmIndivs = ids.some(id => id.startsWith('RM-')) ? await SheetsAPI.getAll('원재료개별').catch(() => []) : [];
+    const rmLots = ids.some(id => id.startsWith('RM-')) ? await SheetsAPI.getAll('원재료LOT').catch(() => []) : [];
+    const fgIndivs = ids.some(id => id.startsWith('FG-')) ? await SheetsAPI.getAll('완제품개별').catch(() => []) : [];
+    const fgLots = ids.some(id => id.startsWith('FG-')) ? await SheetsAPI.getAll('완제품LOT').catch(() => []) : [];
+    const spIndivs = ids.some(id => id.startsWith('SP-')) ? await SheetsAPI.getAll('소모품개별').catch(() => []) : [];
+    const spLots = ids.some(id => id.startsWith('SP-')) ? await SheetsAPI.getAll('소모품LOT').catch(() => []) : [];
+
+    for (const qrId of ids) {
+      let found = false;
+      if (qrId.startsWith('RM-')) {
+        const indiv = rmIndivs.find(r => r[0] === qrId);
+        if (indiv) {
+          const lot = rmLots.find(l => l[0] === indiv[1]);
+          labels.push({
+            indivId: qrId,
+            itemName: lot?.[2] || '원재료',
+            date: lot?.[6] || formatDate(),
+            exp: lot?.[7] ? `EXP: ${lot[7]}` : '',
+            storage: lot?.[11] ? `보관: ${lot[11]}` : '',
+            lotId: indiv[1],
+            qty: indiv[4] ? `${indiv[4]}${lot?.[5] || 'kg'}` : '',
+          });
+          found = true;
+        }
+      } else if (qrId.startsWith('FG-')) {
+        const indiv = fgIndivs.find(r => r[0] === qrId);
+        if (indiv) {
+          const lot = fgLots.find(l => l[0] === indiv[1]);
+          labels.push({
+            indivId: qrId,
+            itemName: lot?.[2] || '완제품',
+            date: lot?.[5] || formatDate(),
+            exp: lot?.[6] ? `EXP: ${lot[6]}` : '',
+            storage: '',
+            lotId: indiv[1],
+            qty: '',
+          });
+          found = true;
+        }
+      } else if (qrId.startsWith('SP-')) {
+        const indiv = spIndivs.find(r => r[0] === qrId);
+        if (indiv) {
+          const lot = spLots.find(l => l[0] === indiv[1]);
+          labels.push({
+            indivId: qrId,
+            itemName: lot?.[2] || '소모품',
+            date: lot?.[5] || formatDate(),
+            exp: '',
+            storage: '',
+            lotId: indiv[1],
+            qty: indiv[4] ? `${indiv[4]}${lot?.[4] || ''}` : '',
+          });
+          found = true;
+        }
+      }
+      if (!found) {
+        labels.push({ indivId: qrId, itemName: '⚠ 미등록 ID', date: '', exp: '', storage: '', lotId: '', qty: '', error: true });
+      }
+    }
+  } catch (e) {
+    toast('데이터 조회 실패: ' + e.message, 'err');
+    hideLoading();
+    return;
+  }
+  hideLoading();
+
+  const errors = labels.filter(l => l.error);
+  if (errors.length > 0) {
+    toast(`${errors.length}개 ID를 찾을 수 없습니다: ${errors.map(e => e.indivId).join(', ')}`, 'warn');
+  }
+
+  const validLabels = labels.filter(l => !l.error);
+  if (validLabels.length === 0) { toast('출력 가능한 라벨이 없습니다', 'err'); return; }
+
+  renderLabelCards(validLabels);
+}
+
+// ── 공통 라벨 렌더링 ──
+function renderLabelCards(labels) {
+  const previewEl = $id('label-preview');
+  previewEl.innerHTML = `<div class="fs-13 fw-7 mb-8">라벨 미리보기 (${labels.length}매)</div>`;
   const printArea = $id('print-area');
   printArea.innerHTML = '';
 
-  for (let i = 1; i <= count; i++) {
-    const indivId = `${lotId}-${String(i).padStart(2, '0')}`;
+  labels.forEach((lb, i) => {
+    const idx = i + 1;
+    // 상세 정보 라인 구성
+    const lines = [lb.itemName];
+    if (lb.qty) lines.push(lb.qty);
+    lines.push(lb.indivId);
+    if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
+    if (lb.date) lines.push(lb.date);
+    if (lb.exp) lines.push(lb.exp);
+    if (lb.storage) lines.push(lb.storage);
+    lines.push('메이투투');
 
-    // Preview
+    // Preview card
     const card = document.createElement('div');
     card.className = 'card';
     card.style.cssText = 'display:flex;gap:14px;align-items:center;border:2px dashed var(--gray-l)';
     card.innerHTML = `
-      <div id="qr-preview-${i}" style="width:70px;height:70px;flex-shrink:0"></div>
+      <div id="qr-preview-${idx}" style="width:70px;height:70px;flex-shrink:0"></div>
       <div class="fs-12" style="line-height:1.6">
-        <div class="fw-7">호두과자반죽</div>
-        <div class="c-txt-l">${indivId}</div>
-        <div class="c-txt-l">${formatDate()}</div>
-        <div class="c-txt-l">보관: 냉동 -18°C 이하</div>
+        <div class="fw-7">${lb.itemName}${lb.qty ? ` <span class="c-txt-l">${lb.qty}</span>` : ''}</div>
+        <div class="c-txt-l">${lb.indivId}</div>
+        ${lb.lotId ? `<div class="c-txt-l">LOT: ${lb.lotId}</div>` : ''}
+        ${lb.date ? `<div class="c-txt-l">${lb.date}</div>` : ''}
+        ${lb.exp ? `<div class="c-txt-l">${lb.exp}</div>` : ''}
+        ${lb.storage ? `<div class="c-txt-l">${lb.storage}</div>` : ''}
         <div class="fw-6" style="margin-top:2px">메이투투</div>
       </div>
     `;
@@ -1696,36 +1880,71 @@ function generateLabels() {
 
     // Generate QR
     setTimeout(() => {
-      const el = $id(`qr-preview-${i}`);
-      if (el) {
-        el.innerHTML = '';
-        new QRCode(el, { text: indivId, width: 70, height: 70, correctLevel: QRCode.CorrectLevel.M });
-      }
-    }, 50 * i);
+      const el = $id(`qr-preview-${idx}`);
+      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 70, height: 70, correctLevel: QRCode.CorrectLevel.M }); }
+    }, 50 * idx);
 
     // Print area
     const label = document.createElement('div');
     label.className = 'label';
     label.innerHTML = `
-      <div id="qr-print-${i}" class="qr-img"></div>
+      <div id="qr-print-${idx}" class="qr-img"></div>
       <div class="label-info">
-        <div><strong>호두과자반죽</strong></div>
-        <div>${indivId}</div>
-        <div>${formatDate()}</div>
-        <div>보관: 냉동 -18°C</div>
-        <div>메이투투</div>
+        ${lines.map((l, j) => j === 0 ? `<div><strong>${l}</strong></div>` : `<div>${l}</div>`).join('')}
       </div>
     `;
     printArea.appendChild(label);
-  }
+  });
 
   $id('btn-print').style.display = '';
 }
 
+// ── QR 스캔으로 재프린트 ID 입력 ──
+function scanForReprint() {
+  const scanModal = document.createElement('div');
+  scanModal.id = 'reprint-scan-modal';
+  scanModal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center';
+  scanModal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:20px;width:90%;max-width:400px">
+      <div class="fs-14 fw-7 mb-12">QR 스캔으로 ID 입력</div>
+      <div id="reprint-scanner" style="width:100%;border-radius:8px;overflow:hidden"></div>
+      <button class="btn btn-out btn-full mt-12" onclick="stopReprintScan()">닫기</button>
+    </div>
+  `;
+  document.body.appendChild(scanModal);
+
+  const scanner = new Html5Qrcode('reprint-scanner');
+  scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 200 },
+    (text) => {
+      const input = $id('lbl-indiv-id');
+      const existing = input.value.trim();
+      input.value = existing ? existing + ', ' + text : text;
+      toast(`스캔 완료: ${text}`, 'suc');
+      scanner.stop().then(() => scanModal.remove()).catch(() => scanModal.remove());
+    },
+    () => {}
+  ).catch(e => { toast('카메라 오류: ' + e, 'err'); scanModal.remove(); });
+
+  window._reprintScanner = scanner;
+  window._reprintModal = scanModal;
+}
+
+function stopReprintScan() {
+  if (window._reprintScanner) window._reprintScanner.stop().catch(() => {});
+  if (window._reprintModal) window._reprintModal.remove();
+}
+
 function printLabels() {
-  // Generate QR codes in print area
   const printArea = $id('print-area');
   printArea.style.display = 'block';
+
+  // Print 영역 QR 코드 생성
+  printArea.querySelectorAll('[id^="qr-print-"]').forEach((el, i) => {
+    if (el.children.length === 0) {
+      const previewQr = $id(`qr-preview-${i + 1}`);
+      if (previewQr) el.innerHTML = previewQr.innerHTML;
+    }
+  });
 
   setTimeout(() => {
     window.print();
@@ -2435,7 +2654,7 @@ function renderStepContent(step, stepType) {
         <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
         <div class="input-suffix">
           <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01"
-                 oninput="validateStepInputs(${stepNo})">
+                 data-target="${target}" oninput="validateStepInputs(${stepNo})">
           <span>kg</span>
         </div>
       </div>
@@ -2707,8 +2926,20 @@ function handleCompleteStep(isFinal = false) {
   const missing = [];
 
   if (stepType === 'input') {
-    const qtyVal = parseFloat($id(`input-qty-${stepNo}`)?.value);
+    const qtyInput = $id(`input-qty-${stepNo}`);
+    const qtyVal = parseFloat(qtyInput?.value);
     if (!qtyVal || qtyVal <= 0) missing.push('실제 투입량');
+
+    // ±5% 범위 검증
+    if (qtyVal > 0 && qtyInput?.dataset?.target) {
+      const targetVal = parseFloat(qtyInput.dataset.target);
+      if (targetVal > 0) {
+        const lo = targetVal * 0.95, hi = targetVal * 1.05;
+        if (qtyVal < lo || qtyVal > hi) {
+          missing.push(`투입량 범위 초과 (목표 ${targetVal}kg 의 ±5%: ${lo.toFixed(2)}~${hi.toFixed(2)}kg, 입력값 ${qtyVal}kg)`);
+        }
+      }
+    }
 
     const photoPreview = $id(`photo-preview-${stepNo}`);
     if (!photoPreview || !photoPreview.innerHTML.trim()) missing.push('저울 사진');
@@ -2947,8 +3178,31 @@ function validateStepInputs(stepNo) {
 
   if (stepType === 'input') {
     // Check: 투입량 입력됨?
-    const qtyVal = parseFloat($id(`input-qty-${stepNo}`)?.value);
+    const qtyInput = $id(`input-qty-${stepNo}`);
+    const qtyVal = parseFloat(qtyInput?.value);
     if (!qtyVal || qtyVal <= 0) allValid = false;
+
+    // Check: ±5% 범위 내?
+    const targetVal = parseFloat(qtyInput?.dataset?.target || '0');
+    let rangeHint = $id(`qty-range-hint-${stepNo}`);
+    if (!rangeHint) {
+      rangeHint = document.createElement('div');
+      rangeHint.id = `qty-range-hint-${stepNo}`;
+      rangeHint.style.cssText = 'font-size:11px;margin-top:4px';
+      qtyInput?.closest('.input-group')?.appendChild(rangeHint);
+    }
+    if (targetVal > 0 && qtyVal > 0) {
+      const lo = targetVal * 0.95, hi = targetVal * 1.05;
+      if (qtyVal >= lo && qtyVal <= hi) {
+        rangeHint.innerHTML = `<span style="color:var(--suc)">✓ 허용 범위 내 (${lo.toFixed(1)}~${hi.toFixed(1)}kg)</span>`;
+      } else {
+        rangeHint.innerHTML = `<span style="color:var(--err)">✗ 목표 대비 ±5% 초과 (허용: ${lo.toFixed(1)}~${hi.toFixed(1)}kg)</span>`;
+        allValid = false;
+      }
+    } else if (targetVal > 0) {
+      const lo = targetVal * 0.95, hi = targetVal * 1.05;
+      rangeHint.innerHTML = `<span style="color:var(--gray)">허용 범위: ${lo.toFixed(1)}~${hi.toFixed(1)}kg (±5%)</span>`;
+    }
 
     // Check: 사진 첨부됨?
     const photoPreview = $id(`photo-preview-${stepNo}`);
