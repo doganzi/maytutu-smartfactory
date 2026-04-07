@@ -2634,17 +2634,20 @@ function printLabels() {
 
   // 모든 라벨을 Canvas 이미지로 변환
   Promise.all(labels.map(lb => renderLabelToCanvas(lb))).then(images => {
-    // 이미지만으로 구성된 iframe (CSS 레이아웃 없음 = 회전/잘림 방지)
+    // 이미지가 페이지 전체를 100% 채우도록 — 프린터 드라이버가 용지 크기 제어
     const imgsHtml = images.map(src =>
-      '<div style="width:50mm;height:30mm;page-break-after:always;margin:0;padding:0;overflow:hidden">' +
-      '<img src="' + src + '" style="width:50mm;height:30mm;display:block">' +
+      '<div class="page">' +
+      '<img src="' + src + '">' +
       '</div>'
     ).join('');
 
     const iframeDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' +
       '*{margin:0;padding:0;box-sizing:border-box}' +
-      '@page{size:50mm 30mm;margin:0}' +
-      'html,body{margin:0;padding:0;width:50mm}' +
+      '@page{margin:0}' +
+      'html,body{margin:0;padding:0;width:100%;height:100%}' +
+      '.page{width:100vw;height:100vh;page-break-after:always;overflow:hidden;display:flex;align-items:center;justify-content:center}' +
+      '.page:last-child{page-break-after:auto}' +
+      '.page img{width:100%;height:100%;object-fit:fill;display:block}' +
       '</style></head><body>' + imgsHtml + '</body></html>';
 
     const iframe = document.createElement('iframe');
