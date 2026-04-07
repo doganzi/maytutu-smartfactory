@@ -4085,6 +4085,47 @@ async function initApp() {
       } catch(e) { console.warn('QR migration skip:', e); }
     }
 
+    // (3) 개별 레코드가 없는 LOT에 대해 자동 생성
+    if (!localStorage.getItem('mt_migr_gen_indiv_v2')) {
+      try {
+        const SHEETS = [
+          { lot: '원재료LOT', indiv: '원재료개별', qtyCol: 4, unitCol: 5, statusCol: 9, indivCountCol: 10 },
+          { lot: '완제품LOT', indiv: '완제품개별', qtyCol: 3, unitCol: 4, statusCol: 9, indivCountCol: 10 },
+          { lot: '소모품LOT', indiv: '소모품개별', qtyCol: 3, unitCol: 4, statusCol: 7, indivCountCol: null },
+        ];
+        let totalCreated = 0;
+        for (const cfg of SHEETS) {
+          const lots = await SheetsAPI.getAll(cfg.lot).catch(() => []);
+          const existingIndivs = await SheetsAPI.getAll(cfg.indiv).catch(() => []);
+          for (const lot of lots) {
+            const lotId = lot[0];
+            const status = lot[cfg.statusCol] || '미사용';
+            // 폐기/소진 LOT는 건너뜀
+            if (['폐기','소진','삭제'].includes(status)) continue;
+            // 이미 개별 레코드가 있으면 건너뜀
+            const existing = existingIndivs.filter(iv => iv[1] === lotId);
+            if (existing.length > 0) continue;
+            // 개별 수량 결정: LOT의 indivCount 열 또는 기본 1
+            const indivCount = cfg.indivCountCol ? (parseInt(lot[cfg.indivCountCol]) || 1) : 1;
+            const qty = parseFloat(lot[cfg.qtyCol]) || 0;
+            const perUnit = indivCount > 0 ? qty / indivCount : qty;
+            const itemCode = lot[1] || '';
+            const newRows = [];
+            for (let i = 1; i <= indivCount; i++) {
+              const indivId = `${lotId}-${String(i).padStart(2, '0')}`;
+              newRows.push([indivId, lotId, itemCode, status === '사용중' ? '사용중' : '미사용', String(perUnit), '', indivId]);
+            }
+            if (newRows.length > 0) {
+              await SheetsAPI.append(cfg.indiv, newRows);
+              totalCreated += newRows.length;
+            }
+          }
+        }
+        if (totalCreated > 0) toast(`개별 QR 레코드 ${totalCreated}건 자동 생성 ✅`, 'suc');
+        localStorage.setItem('mt_migr_gen_indiv_v2', '1');
+      } catch(e) { console.warn('Indiv gen migration skip:', e); }
+    }
+
   } else {
     Router.go('login');
   }
