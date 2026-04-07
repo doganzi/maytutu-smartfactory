@@ -103,7 +103,8 @@ a { text-decoration:none; color:inherit; }
 .photo-upload .photo-hint { font-size:11px; color:var(--txt-l); margin-top:2px; }
 .photo-upload .photo-preview, .photo-preview { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 .photo-upload .photo-preview img, .photo-preview img { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--gray-l); }
-.fab { position:fixed; bottom:72px; right:16px; width:52px; height:52px; border-radius:26px; background:var(--pri); color:#fff; display:flex; align-items:center; justify-content:center; font-size:28px; box-shadow:0 4px 12px rgba(26,35,126,0.3); cursor:pointer; z-index:5; }
+.fab { position:fixed; bottom:72px; right:calc(50% - 250px + 16px); width:52px; height:52px; border-radius:26px; background:var(--pri); color:#fff; display:flex; align-items:center; justify-content:center; font-size:28px; box-shadow:0 4px 12px rgba(26,35,126,0.3); cursor:pointer; z-index:5; }
+@media (max-width:500px) { .fab { right:16px; } }
 .fab:active { transform:scale(0.95); }
 .progress-bar { background:var(--bg); border-radius:4px; height:6px; overflow:hidden; }
 .progress-bar .fill { background:var(--suc); height:100%; border-radius:4px; transition:width 0.3s; }
