@@ -2433,31 +2433,27 @@ function renderLabelCards(labels) {
 
   labels.forEach((lb, i) => {
     const idx = i + 1;
-    // 상세 정보 라인 구성 (순서: 품목명→LOT→개별ID→입고일→사용기한→보관→메이투투)
-    const lines = [lb.itemName];
-    if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
-    lines.push(lb.indivId);
-    if (lb.date) lines.push(lb.date);
-    if (lb.exp) lines.push(lb.exp);
-    if (lb.storage) lines.push(lb.storage);
-    lines.push('메이투투');
 
-    // Preview card
+    // Preview card — 50×30mm 가로형 실제 비율 미리보기 (QR 왼쪽 | 정보 오른쪽)
     const card = document.createElement('div');
-    card.className = 'card';
-    card.style.cssText = 'display:flex;gap:14px;align-items:center;border:2px dashed var(--gray-l)';
+    card.style.cssText = 'position:relative;width:100%;max-width:340px;aspect-ratio:50/30;border:2px dashed var(--gray-l);border-radius:6px;display:flex;flex-direction:row;align-items:center;gap:8px;padding:6px 8px;margin-bottom:10px;background:#fff;overflow:hidden;box-sizing:border-box';
     card.innerHTML = `
-      <div id="qr-preview-${idx}" style="width:70px;height:70px;min-width:70px;flex-shrink:0;overflow:hidden"></div>
-      <div class="fs-12" style="line-height:1.6">
-        <div class="fw-7">${lb.itemName}</div>
-        ${lb.lotId ? `<div class="c-txt-l">LOT: ${lb.lotId}</div>` : ''}
-        <div class="c-txt-l">${lb.indivId}</div>
-        ${lb.date ? `<div class="c-txt-l">${lb.date}</div>` : ''}
-        ${lb.exp ? `<div class="c-txt-l">${lb.exp}</div>` : ''}
-        ${lb.storage ? `<div class="c-txt-l">${lb.storage}</div>` : ''}
-        <div class="fw-6" style="margin-top:2px">메이투투</div>
+      <div id="qr-preview-${idx}" style="width:72px;height:72px;min-width:72px;flex-shrink:0;overflow:hidden"></div>
+      <div style="flex:1;min-width:0;overflow:hidden;line-height:1.35">
+        <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lb.itemName}</div>
+        ${lb.lotId ? `<div style="font-size:10px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">LOT: ${lb.lotId}</div>` : ''}
+        <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lb.indivId}</div>
+        ${lb.date ? `<div style="font-size:9px;color:#888">${lb.date}</div>` : ''}
+        ${lb.exp ? `<div style="font-size:9px;color:#888">${lb.exp}</div>` : ''}
+        ${lb.storage ? `<div style="font-size:9px;color:#888">${lb.storage}</div>` : ''}
+        <div style="font-size:9px;font-weight:600;color:#333;margin-top:1px">메이투투</div>
       </div>
     `;
+    // 라벨 번호 표시
+    const badge = document.createElement('div');
+    badge.style.cssText = 'position:absolute;top:3px;right:6px;font-size:9px;color:#aaa';
+    badge.textContent = `${idx}/${labels.length}`;
+    card.appendChild(badge);
     previewEl.appendChild(card);
 
     // Generate QR
@@ -2467,11 +2463,19 @@ function renderLabelCards(labels) {
           el.innerHTML = '';
           el.setAttribute('data-qr-text', lb.indivId);
           new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M });
-          el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:70px!important;height:70px!important;display:block');
+          el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:72px!important;height:72px!important;display:block');
         }
     }, 50 * idx);
 
-    // Print area
+    // Print area (fallback용)
+    const lines = [lb.itemName];
+    if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
+    lines.push(lb.indivId);
+    if (lb.date) lines.push(lb.date);
+    if (lb.exp) lines.push(lb.exp);
+    if (lb.storage) lines.push(lb.storage);
+    lines.push('메이투투');
+
     const label = document.createElement('div');
     label.className = 'label';
     label.innerHTML = `
