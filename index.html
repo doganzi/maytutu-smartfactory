@@ -56,6 +56,7 @@ a { text-decoration:none; color:inherit; }
 .badge-err { background:#c6282818; color:var(--err); }
 .badge-info { background:#1565c018; color:var(--info); }
 .badge-gray { background:#61616118; color:var(--gray-d); }
+.badge-teal { background:#00695c18; color:var(--teal); }
 .btn { display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; color:#fff; border:none; transition:opacity 0.15s; }
 .btn:active { opacity:0.85; }
 .btn-pri { background:var(--pri); }
@@ -805,8 +806,14 @@ Screens.dashboard = async () => {
     State.rawMaterialLots = rmLots;
     State.equipment = eqData;
 
-    pendingApproval = woData.filter(r => r[12] === '승인대기').length;
-    inProgress = woData.filter(r => r[12] === '진행중').length;
+    if (isAdmin) {
+      pendingApproval = woData.filter(r => r[12] === '승인대기').length;
+      inProgress = woData.filter(r => r[12] === '진행중').length;
+    } else {
+      const myEmail = State.user?.email;
+      pendingApproval = woData.filter(r => r[8] === myEmail && r[12] === '승인대기').length;
+      inProgress = woData.filter(r => r[8] === myEmail && r[12] === '진행중').length;
+    }
 
     // Check low stock
     rmItems.forEach(item => {
@@ -1331,15 +1338,15 @@ Screens['lot-detail'] = async (params = {}) => {
         const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
         const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
         return `
-          <div class="card bl-${stColor}">
+          <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">
             <div class="row between mb-4">
-              <span class="fs-13 fw-6 clickable" style="color:var(--pri)" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">${l[0]}</span>
+              <span class="fs-13 fw-6 clickable" style="color:var(--pri)">${l[0]}</span>
               <div class="row" style="gap:6px;align-items:center">
                 ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">🖨️ 전체 ${printableIndivs.length}매</button>` : ''}
                 <span class="badge badge-${stColor}">${status}</span>
               </div>
             </div>
-            <div class="fs-12 c-txt-l clickable" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">
+            <div class="fs-12 c-txt-l clickable">
               입고: ${qty}${l[5]||'kg'} → 잔량: ${remain}${l[5]||'kg'} · 개별: ${printableIndivs.length}/${lotIndivs.length}건
             </div>
             <div class="fs-11 c-txt-l">소비기한: ${(l[7]||'').substring(0,10)}</div>
@@ -1950,27 +1957,6 @@ Screens['label-print'] = (params = {}) => {
   if (fromInventory && preLabels && preLabels.length > 0) {
     $id('content').innerHTML = `
       <div style="padding:16px">
-        <details id="printer-settings" style="margin-bottom:16px;background:var(--white);border:1px solid var(--gray-l);border-radius:10px;padding:12px">
-          <summary style="font-size:13px;font-weight:700;cursor:pointer;color:var(--txt)">🖨️ 프린터 설정 — ${preset.name}</summary>
-          <div style="margin-top:12px">
-            <div class="printer-setting-row">
-              <label>프린터</label>
-              <select id="sel-printer" onchange="onPrinterChange()">
-                ${Object.entries(PRINTER_PRESETS).map(([k,v]) =>
-                  `<option value="${k}" ${k===savedPrinter?'selected':''}>${v.name}</option>`
-                ).join('')}
-              </select>
-            </div>
-            <div class="printer-setting-row">
-              <label>라벨 크기</label>
-              <input type="number" id="lbl-w-input" value="${savedSize.w}" min="20" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
-              <span style="font-size:12px;color:var(--txt-l)">×</span>
-              <input type="number" id="lbl-h-input" value="${savedSize.h}" min="10" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
-              <span style="font-size:12px;color:var(--txt-l)">mm</span>
-            </div>
-            <div class="printer-info-box" id="printer-tips">${preset.tips}</div>
-          </div>
-        </details>
         <div id="label-preview" class="mt-8"></div>
         <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none;font-size:15px;padding:14px" onclick="printLabels()">🖨️ 인쇄</button>
       </div>
@@ -1986,29 +1972,6 @@ Screens['label-print'] = (params = {}) => {
   // 일반 모드 — 기존 폼 표시
   $id('content').innerHTML = `
     <div style="padding:16px">
-
-      <!-- 프린터 설정 -->
-      <details id="printer-settings" style="margin-bottom:16px;background:var(--white);border:1px solid var(--gray-l);border-radius:10px;padding:12px">
-        <summary style="font-size:13px;font-weight:700;cursor:pointer;color:var(--txt)">🖨️ 프린터 설정 — ${preset.name}</summary>
-        <div style="margin-top:12px">
-          <div class="printer-setting-row">
-            <label>프린터</label>
-            <select id="sel-printer" onchange="onPrinterChange()">
-              ${Object.entries(PRINTER_PRESETS).map(([k,v]) =>
-                `<option value="${k}" ${k===savedPrinter?'selected':''}>${v.name}</option>`
-              ).join('')}
-            </select>
-          </div>
-          <div class="printer-setting-row">
-            <label>라벨 크기</label>
-            <input type="number" id="lbl-w-input" value="${savedSize.w}" min="20" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
-            <span style="font-size:12px;color:var(--txt-l)">×</span>
-            <input type="number" id="lbl-h-input" value="${savedSize.h}" min="10" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
-            <span style="font-size:12px;color:var(--txt-l)">mm</span>
-          </div>
-          <div class="printer-info-box" id="printer-tips">${preset.tips}</div>
-        </div>
-      </details>
 
       <!-- 모드 토글 -->
       <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -2480,7 +2443,7 @@ function renderLabelCards(labels) {
   const btnPrint = $id('btn-print');
   if (btnPrint) {
     btnPrint.style.display = '';
-    btnPrint.textContent = `🖨️ ${pn2}으로 인쇄 (${labels.length}매)`;
+    btnPrint.textContent = `🖨️ 라벨 프린터기로 인쇄`;
   }
 }
 
@@ -2749,8 +2712,8 @@ Screens['sop-detail'] = async (params = {}) => {
 
   renderHeader('SOP 상세', `${sid} · ${sop?.[1] || ''}`, { back: 'sop-list' });
 
-  const typeColor = { input: 'info', process: 'pri', inspect: 'warn', pack: 'gray', store: 'teal' };
-  const typeLabel = { input: '투입', process: '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  const typeColorBase = { input: 'info', process: 'pri', inspect: 'warn', pack: 'gray', store: 'teal' };
+  const typeLabelBase = { input: '투입', process: '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -2780,8 +2743,11 @@ Screens['sop-detail'] = async (params = {}) => {
       <div class="fs-14 fw-7 mb-8">공정단계 (${steps.length}단계)</div>
       ${steps.map(s => {
         const t = s[3] || 'input';
+        const isMix = t === 'process' && (s[2]||'').includes('믹싱');
+        const color = isMix ? 'teal' : (typeColorBase[t]||'gray');
+        const label = isMix ? '믹싱' : (typeLabelBase[t]||t);
         return `
-          <div class="card bl-${typeColor[t]||'gray'}" style="padding:10px">
+          <div class="card bl-${color}" style="padding:10px">
             <div class="row between">
               <div class="row" style="gap:8px">
                 <span class="fs-12 fw-7 c-gray-d" style="width:20px">${s[1]||''}</span>
@@ -2790,7 +2756,7 @@ Screens['sop-detail'] = async (params = {}) => {
                   <div class="fs-11 c-txt-l">${s[6]||''}</div>
                 </div>
               </div>
-              <span class="badge badge-${typeColor[t]||'gray'}">${typeLabel[t]||t}</span>
+              <span class="badge badge-${color}">${label}</span>
             </div>
           </div>
         `;
@@ -3284,8 +3250,9 @@ function renderWOExecute() {
   if (!step) return;
 
   const stepType = step[3] || 'input';
-  const typeColor = { input: 'info', process: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
-  const typeLabel = { input: '투입', process: '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  const isMixingStep = stepType === 'process' && (step[2]||'').includes('믹싱');
+  const typeColor = { input: 'info', process: isMixingStep ? 'teal' : 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
+  const typeLabel = { input: '투입', process: isMixingStep ? '믹싱' : '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
 
   // Header
   renderHeader(woId, `${State.woExec.wo?.[4] || ''} ${targetQty}kg · ${unit}포장`);
@@ -3302,10 +3269,12 @@ function renderWOExecute() {
 
     <!-- Step dots -->
     <div class="step-nav">
-      ${steps.map((s, i) => `
-        <div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : ''}"
-             onclick="goToStep(${i})">${i + 1}</div>
-      `).join('')}
+      ${steps.map((s, i) => {
+        const isMix = (s[3]||'') === 'process' && (s[2]||'').includes('믹싱');
+        const dotStyle = i === currentStep && isMix ? 'background:var(--teal);color:#fff' : '';
+        return `<div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : ''}"
+             style="${dotStyle}" onclick="goToStep(${i})">${i + 1}</div>`;
+      }).join('')}
     </div>
 
     <!-- Step content -->
@@ -3338,8 +3307,9 @@ function renderStepContent(step, stepType) {
   const el = $id('step-content');
   const { recipes, targetQty } = State.woExec;
   const stepNo = parseInt(step[1]);
-  const typeColor = { input: 'info', process: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
-  const typeLabel = { input: '투입', process: '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  const isMixing = stepType === 'process' && (step[2]||'').includes('믹싱');
+  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
+  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
 
   let html = `
     <div class="card bl-${typeColor[stepType]||'gray'}">
@@ -3433,12 +3403,37 @@ function renderStepContent(step, stepType) {
 
   else if (stepType === 'process') {
     const std = step[5] || '';
-    html += `
-      <div class="info-box" style="background:var(--pri);background:${typeColor.process}12">
-        <div class="fs-12 fw-6 c-pri">기준값</div>
-        <div class="fs-20 fw-8 c-pri mt-4">${std}</div>
-      </div>
-    `;
+    const processColor = isMixing ? 'teal' : 'pri';
+    if (isMixing) {
+      // Parse RPM and time from std (e.g. "120RPM / 15분" or separate fields)
+      const rpmMatch = std.match(/(\d+)\s*RPM/i);
+      const timeMatch = std.match(/(\d+)\s*분/);
+      const targetRPM = rpmMatch ? rpmMatch[1] : '';
+      const mixTime = timeMatch ? timeMatch[1] : '';
+      html += `
+        <div class="info-box" style="background:rgba(20,184,166,0.1)">
+          <div class="fs-12 fw-6 c-teal">믹싱 기준값</div>
+          <div class="fs-20 fw-8 c-teal mt-4">${std}</div>
+        </div>
+        <div class="row mt-8" style="gap:8px">
+          <div class="info-box flex-1" style="background:rgba(20,184,166,0.08);text-align:center">
+            <div class="fs-11 fw-6 c-teal">목표 RPM</div>
+            <div class="fs-20 fw-8 c-teal mt-4">${targetRPM || '-'} <span class="fs-11">RPM</span></div>
+          </div>
+          <div class="info-box flex-1" style="background:rgba(20,184,166,0.08);text-align:center">
+            <div class="fs-11 fw-6 c-teal">믹싱 시간</div>
+            <div class="fs-20 fw-8 c-teal mt-4">${mixTime || '-'} <span class="fs-11">분</span></div>
+          </div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="info-box" style="background:rgba(59,130,246,0.1)">
+          <div class="fs-12 fw-6 c-pri">기준값</div>
+          <div class="fs-20 fw-8 c-pri mt-4">${std}</div>
+        </div>
+      `;
+    }
 
     // Check items
     const checks = (step[6] || '').split(',').filter(c => c.trim());
