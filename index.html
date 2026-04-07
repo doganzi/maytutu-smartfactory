@@ -2345,24 +2345,22 @@ async function generateLabelsLot() {
   let itemNameVal = $id('lbl-item-name')?.value?.trim();
   let expDate = '', storageTemp = '', unit = 'kg';
 
-  // 시트에서 LOT 정보 자동조회
-  if (!itemNameVal) {
-    showLoading();
-    try {
-      let lots = [];
-      if (lotId.startsWith('RM-')) lots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
-      else if (lotId.startsWith('FG-')) lots = await SheetsAPI.getAll('완제품LOT').catch(() => []);
-      else if (lotId.startsWith('SP-')) lots = await SheetsAPI.getAll('소모품LOT').catch(() => []);
-      const lot = lots.find(l => l[0] === lotId);
-      if (lot) {
-        itemNameVal = lot[2] || '품목명 미확인';
-        if (lotId.startsWith('RM-')) { expDate = lot[7] || ''; storageTemp = lot[11] || ''; unit = lot[5] || 'kg'; }
-        else if (lotId.startsWith('FG-')) { expDate = lot[6] || ''; }
-        $id('lbl-item-name').value = itemNameVal;
-      }
-    } catch(e) { console.warn(e); }
-    hideLoading();
-  }
+  // 시트에서 LOT 정보 자동조회 (소비기한·보관온도는 항상 조회)
+  showLoading();
+  try {
+    let lots = [];
+    if (lotId.startsWith('RM-')) lots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
+    else if (lotId.startsWith('FG-')) lots = await SheetsAPI.getAll('완제품LOT').catch(() => []);
+    else if (lotId.startsWith('SP-')) lots = await SheetsAPI.getAll('소모품LOT').catch(() => []);
+    const lot = lots.find(l => l[0] === lotId);
+    if (lot) {
+      if (!itemNameVal) itemNameVal = lot[2] || '품목명 미확인';
+      if (lotId.startsWith('RM-')) { expDate = lot[7] || ''; storageTemp = lot[11] || ''; unit = lot[5] || 'kg'; }
+      else if (lotId.startsWith('FG-')) { expDate = lot[6] || ''; }
+      $id('lbl-item-name').value = itemNameVal;
+    }
+  } catch(e) { console.warn(e); }
+  hideLoading();
   if (!itemNameVal) itemNameVal = '품목명 미확인';
 
   renderLabelCards(
@@ -2371,7 +2369,7 @@ async function generateLabelsLot() {
       itemName: itemNameVal,
       lotId: lotId,
       date: formatDate(),
-      exp: expDate,
+      exp: expDate ? `EXP: ${expDate}` : '',
       storage: storageTemp ? `보관: ${storageTemp}` : '',
     }))
   );
