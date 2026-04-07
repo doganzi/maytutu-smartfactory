@@ -1611,14 +1611,14 @@ Screens['receive-form'] = async () => {
       </div>
       <div class="input-group">
         <label>소비기한</label>
-        <input type="date" id="rcv-exp" value="${formatDate(new Date(Date.now()+90*86400000))}">
+        <input type="date" id="rcv-exp">
       </div>
       <div class="input-group">
         <label>보관온도</label>
         <select id="rcv-temp">
-          <option value="실온">실온</option>
-          <option value="냉장 5°C">냉장 5°C</option>
-          <option value="냉동 -18°C">냉동 -18°C</option>
+          <option value="상온 15~25℃">상온 15~25℃</option>
+          <option value="냉장 0~5℃">냉장 0~5℃</option>
+          <option value="냉동 -18℃ 이하">냉동 -18℃ 이하</option>
         </select>
       </div>
       <div class="input-group">
@@ -1648,6 +1648,8 @@ Screens['receive-form'] = async () => {
   // Store items data for dynamic updates
   window._rcvRmItems = rmItems;
   window._rcvSpItems = spItems;
+  // 초기 품목에 맞게 소비기한·보관온도 자동 세팅
+  updateReceiveUnit();
 };
 
 function updateReceiveItems() {
@@ -1668,6 +1670,22 @@ function updateReceiveUnit() {
   if (opt) {
     const unit = opt.dataset.unit || 'kg';
     $id('rcv-unit').value = unit;
+  }
+  // 소비기한·보관온도 자동 세팅
+  const type = $id('rcv-type')?.value;
+  const code = sel?.value;
+  const items = type === '원재료' ? (window._rcvRmItems || []) : (window._rcvSpItems || []);
+  const item = items.find(i => i[0] === code);
+  if (item) {
+    // 소비기한 = 오늘 + shelfLife days (col 7)
+    const days = parseInt(item[7]) || 90;
+    $id('rcv-exp').value = formatDate(new Date(Date.now() + days * 86400000));
+    // 보관온도 (col 8)
+    const temp = item[8] || '상온 15~25℃';
+    const tempSel = $id('rcv-temp');
+    if (tempSel) {
+      for (const o of tempSel.options) { if (o.value === temp) { tempSel.value = temp; break; } }
+    }
   }
 }
 
