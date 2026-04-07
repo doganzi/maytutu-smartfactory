@@ -162,11 +162,26 @@ a { text-decoration:none; color:inherit; }
 #screen-login { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; background:var(--bg); padding:32px; }
 
 /* ═══════════════════════════════════════════════
-   PRINT STYLES — iframe 인쇄 방식 사용 (fallback용)
+   PRINT STYLES — SLP-DX220 50×30mm 가로형 라벨
    ═══════════════════════════════════════════════ */
 @media print {
-  body > * { display:none !important; }
-  #print-area { display:block !important; }
+  html, body { margin:0!important; padding:0!important; width:50mm!important; height:auto!important; background:#fff!important; }
+  body > * { display:none!important; }
+  #print-area { display:block!important; position:absolute!important; top:0!important; left:0!important; width:50mm!important; margin:0!important; padding:0!important; z-index:99999!important; }
+  .label {
+    width:50mm!important; height:30mm!important;
+    page-break-after:always; page-break-inside:avoid;
+    display:flex!important; flex-direction:row!important; align-items:center!important;
+    gap:1.5mm!important; padding:1mm 1.5mm!important;
+    border:none!important; box-sizing:border-box!important; overflow:hidden!important; margin:0!important;
+    font-family:'Malgun Gothic','맑은 고딕',sans-serif!important;
+  }
+  .label .qr-img { width:20mm!important; height:20mm!important; min-width:20mm!important; flex-shrink:0!important; }
+  .label .qr-img canvas, .label .qr-img img { width:20mm!important; height:20mm!important; display:block!important; }
+  .label .label-info { font-size:5.5pt!important; line-height:1.2!important; flex:1!important; overflow:hidden!important; }
+  .label .label-info div { white-space:nowrap!important; overflow:hidden!important; text-overflow:ellipsis!important; max-width:26mm!important; }
+  .label .label-info div strong { font-size:6.5pt!important; }
+  @page { size:50mm 30mm; margin:0; }
 }
 /* 프린터 설정 패널 */
 .printer-setting-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -212,7 +227,6 @@ a { text-decoration:none; color:inherit; }
      ═══════════════════════════════════════════════ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
 /* ═══════════════════════════════════════════════
@@ -1958,21 +1972,7 @@ Screens['label-print'] = (params = {}) => {
           </div>
         </details>
         <div id="label-preview" class="mt-8"></div>
-        <div id="btn-download-area" style="display:none;margin-top:12px">
-          <button class="btn btn-suc btn-full" onclick="downloadLabelExcel()" style="font-size:15px;padding:14px">📥 Excel 다운로드 (.xlsx)</button>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-out btn-full" onclick="downloadLabelCSV()">CSV</button>
-            <button class="btn btn-out btn-full" onclick="downloadLabelJSON()">JSON</button>
-          </div>
-          <div style="margin-top:10px;padding:10px 12px;background:#f0f7ff;border:1px solid #cce0ff;border-radius:8px;font-size:11px;color:#1a5276;line-height:1.7">
-            💡 <b>Label Artist 사용법</b><br>
-            1. 위 버튼으로 파일 다운로드<br>
-            2. Label Artist → <b>DB 연결 → 엑셀/CSV 파일 열기</b><br>
-            3. <b>개별ID_QR</b> 컬럼 → QR코드 객체에 연결<br>
-            4. 나머지 컬럼 → 텍스트 객체에 연결<br>
-            5. 인쇄 실행
-          </div>
-        </div>
+        <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none;font-size:15px;padding:14px" onclick="printLabels()">🖨️ 인쇄</button>
       </div>
     `;
     applyPrintCSS();
@@ -2055,17 +2055,7 @@ Screens['label-print'] = (params = {}) => {
       </div>
 
       <div id="label-preview" class="mt-16"></div>
-      <div id="btn-download-area" style="display:none;margin-top:12px">
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-suc btn-full" onclick="downloadLabelCSV()">📥 CSV 다운로드</button>
-          <button class="btn btn-out" onclick="downloadLabelJSON()" style="white-space:nowrap">JSON</button>
-        </div>
-        <div style="margin-top:8px;padding:10px 12px;background:#f0f7ff;border:1px solid #cce0ff;border-radius:8px;font-size:11px;color:#1a5276;line-height:1.6">
-          💡 <b>사용법</b>: 다운로드한 CSV/JSON 파일을 라벨 프린터 프로그램(Label Artist 등)에서 <b>DB 연결 → 파일 열기</b>로 불러온 후 인쇄하세요.<br>
-          • <b>개별ID_QR</b> 컬럼을 QR코드 필드에 연결하면 QR이 자동 생성됩니다.
-        </div>
-        <button class="btn btn-out btn-full mt-8" id="btn-print" onclick="printLabels()" style="font-size:12px;color:var(--txt-l)">🖨️ 브라우저 직접 인쇄 (테스트용)</button>
-      </div>
+      <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none;font-size:15px;padding:14px" onclick="printLabels()">🖨️ 인쇄</button>
     </div>
   `;
 
@@ -2079,8 +2069,8 @@ function switchLabelMode(mode) {
   $id('mode-lot-btn').className = `btn btn-full ${mode === 'lot' ? 'btn-pri' : 'btn-out'}`;
   $id('mode-indiv-btn').className = `btn btn-full ${mode === 'indiv' ? 'btn-pri' : 'btn-out'}`;
   $id('label-preview').innerHTML = '';
-  const dlArea = $id('btn-download-area');
-  if (dlArea) dlArea.style.display = 'none';
+  const bp = $id('btn-print');
+  if (bp) bp.style.display = 'none';
   // 개별 모드 전환 시 재고 로드
   if (mode === 'indiv') loadReprintStock();
 }
@@ -2487,11 +2477,15 @@ function renderLabelCards(labels) {
     printArea.appendChild(label);
   });
 
-  // 라벨 데이터를 전역에 저장 (다운로드용)
   window._currentLabels = labels;
 
-  const btnArea = $id('btn-download-area');
-  if (btnArea) btnArea.style.display = '';
+  const pk2 = getSavedPrinter();
+  const pn2 = (PRINTER_PRESETS[pk2] || {}).name || '프린터';
+  const btnPrint = $id('btn-print');
+  if (btnPrint) {
+    btnPrint.style.display = '';
+    btnPrint.textContent = `🖨️ ${pn2}으로 인쇄 (${labels.length}매)`;
+  }
 }
 
 // ── QR 스캔으로 재프린트 ID 입력 ──
@@ -2529,107 +2523,88 @@ function stopReprintScan() {
   if (window._reprintModal) window._reprintModal.remove();
 }
 
-// ── 라벨 데이터를 행 배열로 변환 (공통) ──
-function labelToRows(labels) {
-  return labels.map(lb => ({
-    '품목명': lb.itemName || '',
-    'LOT번호': lb.lotId || '',
-    '개별ID_QR': lb.indivId || '',
-    '입고일': (lb.date || '').replace(/^입고: ?/, ''),
-    '사용기한': (lb.exp || '').replace(/^EXP: ?/, ''),
-    '보관조건': (lb.storage || '').replace(/^보관: ?/, ''),
-    '회사명': '메이투투'
-  }));
-}
-
-function getLabelFilename(labels, ext) {
-  const now = new Date();
-  const ts = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0')
-    + '_' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
-  return `라벨_${labels[0].lotId || 'data'}_${ts}.${ext}`;
-}
-
-// ── Excel (.xlsx) 다운로드 — Label Artist DB 연결용 ──
-function downloadLabelExcel() {
-  const labels = window._currentLabels;
-  if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
-
-  const rows = labelToRows(labels);
-  const ws = XLSX.utils.json_to_sheet(rows);
-  // 열 너비 자동 조정
-  ws['!cols'] = [
-    { wch: 15 }, // 품목명
-    { wch: 28 }, // LOT번호
-    { wch: 32 }, // 개별ID_QR
-    { wch: 12 }, // 입고일
-    { wch: 12 }, // 사용기한
-    { wch: 15 }, // 보관조건
-    { wch: 10 }, // 회사명
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '라벨데이터');
-  XLSX.writeFile(wb, getLabelFilename(labels, 'xlsx'));
-  toast(`Excel 파일 다운로드 완료 (${labels.length}건) — Label Artist에서 DB연결으로 열어주세요`, 'suc');
-}
-
-// ── CSV 파일 다운로드 ──
-function downloadLabelCSV() {
-  const labels = window._currentLabels;
-  if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
-
-  const rows = labelToRows(labels);
-  const header = Object.keys(rows[0]);
-  const csvEncode = (val) => {
-    const s = String(val);
-    return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const csvContent = '\uFEFF' + [header, ...rows.map(r => header.map(h => r[h]))].map(r => r.map(csvEncode).join(',')).join('\r\n');
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = getLabelFilename(labels, 'csv');
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast(`CSV 파일 다운로드 완료 (${labels.length}건)`, 'suc');
-}
-
-// ── JSON 파일 다운로드 ──
-function downloadLabelJSON() {
-  const labels = window._currentLabels;
-  if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
-
-  const rows = labelToRows(labels);
-  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = getLabelFilename(labels, 'json');
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast(`JSON 파일 다운로드 완료 (${labels.length}건)`, 'suc');
-}
-
-// ── 브라우저 인쇄 (fallback) ──
+// ── 라벨 인쇄 (iframe 방식 — QR을 dataURL 이미지로 변환 후 인쇄) ──
 function printLabels() {
+  const labels = window._currentLabels;
+  if (!labels || labels.length === 0) { toast('인쇄할 라벨이 없습니다', 'err'); return; }
+
   const printArea = $id('print-area');
   printArea.style.display = 'block';
-  printArea.querySelectorAll('[id^="qr-print-"]').forEach((el) => {
+
+  // QR 코드 고해상도 생성
+  printArea.querySelectorAll('[id^="qr-print-"]').forEach(el => {
     const qrText = el.getAttribute('data-qr-text');
     if (qrText && el.children.length === 0) {
       new QRCode(el, { text: qrText, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
     }
   });
-  toast('⚠️ 브라우저 인쇄: 여백 "없음", 머리글/바닥글 해제 필요', 'warn', 4000);
+
+  const sz = getLabelSize();
+  const pk = getSavedPrinter();
+  const pName = (PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220']).name;
+  const labelCount = printArea.querySelectorAll('.label').length;
+
+  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 준비 중...`, 'info');
+
+  // QR 렌더링 대기 → canvas를 dataURL로 변환 → iframe 인쇄
   setTimeout(() => {
-    window.print();
-    setTimeout(() => { printArea.style.display = 'none'; }, 500);
-  }, 600);
+    let labelsHtml = '';
+    printArea.querySelectorAll('.label').forEach(label => {
+      const qrDiv = label.querySelector('.qr-img');
+      const canvas = qrDiv ? qrDiv.querySelector('canvas') : null;
+      const img = qrDiv ? qrDiv.querySelector('img') : null;
+      const qrSrc = canvas ? canvas.toDataURL('image/png') : (img ? img.src : '');
+      const infoDiv = label.querySelector('.label-info');
+      const infoHtml = infoDiv ? infoDiv.innerHTML : '';
+
+      labelsHtml += '<div class="label">'
+        + (qrSrc ? '<img src="' + qrSrc + '" class="qr"/>' : '')
+        + '<div class="info">' + infoHtml + '</div>'
+        + '</div>';
+    });
+
+    const iframeDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+@page{size:${sz.w}mm ${sz.h}mm;margin:0}
+html,body{margin:0;padding:0;width:${sz.w}mm}
+.label{
+  width:${sz.w}mm;height:${sz.h}mm;
+  display:flex;flex-direction:row;align-items:center;
+  gap:1.5mm;padding:1mm 1.5mm;
+  page-break-after:always;page-break-inside:avoid;
+  overflow:hidden;font-family:'Malgun Gothic','맑은 고딕',sans-serif;
+}
+.label:last-child{page-break-after:auto}
+.qr{width:20mm;height:20mm;min-width:20mm;flex-shrink:0;object-fit:contain}
+.info{font-size:5.5pt;line-height:1.2;flex:1;overflow:hidden;min-width:0}
+.info div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:${sz.w - 24}mm}
+.info div strong{font-size:6.5pt}
+</style></head><body>${labelsHtml}</body></html>`;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;visibility:hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(iframeDoc);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch(e) {
+        // iframe 인쇄 실패 시 메인 윈도우 fallback
+        window.print();
+      }
+      setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch(e) {}
+        printArea.style.display = 'none';
+        toast('인쇄가 완료되었습니다', 'suc');
+      }, 2000);
+    }, 500);
+  }, 800);
 }
 
 // ── 테스트 라벨 인쇄 (프린터 설정 확인용) ──
@@ -2647,7 +2622,7 @@ function printTestLabel() {
     storage: '보관: 냉장(5℃)',
   }]);
 
-  toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — CSV 다운로드 버튼을 누르세요`, 'suc');
+  toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — 인쇄 버튼을 누르세요`, 'suc');
 }
 
 // ─── SOP LIST ───
