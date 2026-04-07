@@ -178,7 +178,7 @@ a { text-decoration:none; color:inherit; }
   .label .qr-img canvas, .label .qr-img img { width:var(--qr-sz, 18mm) !important; height:var(--qr-sz, 18mm) !important; }
   .label .label-info { font-size:var(--lbl-fs, 6pt); line-height:1.3; overflow:hidden; }
   .label .label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:var(--lbl-txt-w, 27mm); }
-  @page { size:var(--lbl-w, 50mm) var(--lbl-h, 30mm); margin:0; }
+  @page { size:50mm 30mm; margin:0; }
 }
 /* 프린터 설정 패널 */
 .printer-setting-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -2277,7 +2277,6 @@ function renderLabelCards(labels) {
 
   const btnPrint = $id('btn-print');
   btnPrint.style.display = '';
-  const pk = getSavedPrinter();
   const pn = (PRINTER_PRESETS[pk] || {}).name || '프린터';
   btnPrint.textContent = `🖨️ ${pn}으로 인쇄 (${labels.length}매)`;
 }
