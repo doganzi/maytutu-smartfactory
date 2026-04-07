@@ -2555,66 +2555,88 @@ function renderLabelToCanvas(lb) {
     const qrPx = mm(26);
     new QRCode(qrBox, { text: lb.indivId, width: qrPx, height: qrPx, correctLevel: QRCode.CorrectLevel.M });
 
+    // 자간 축소(80%) 텍스트 그리기 헬퍼
+    function drawCondensed(ctx, text, x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, 1);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+    // 자간 축소 시 실제 폭 계산
+    function condensedWidth(ctx, text, scale) {
+      return ctx.measureText(text).width * scale;
+    }
+    // 자간 축소 말줄임
+    function condensedTruncate(ctx, text, maxW, scale) {
+      if (!text) return '';
+      if (condensedWidth(ctx, text, scale) <= maxW) return text;
+      let t = text;
+      while (t.length > 1 && condensedWidth(ctx, t + '…', scale) > maxW) t = t.slice(0, -1);
+      return t + '…';
+    }
+
     // QR 렌더 대기 후 canvas에 그리기
     setTimeout(() => {
       const qrCanvas = qrBox.querySelector('canvas');
+      const topMargin = mm(20); // 위 여백 약 2cm
       const qrMarginX = mm(1.5);
-      const qrY = Math.round((H - qrPx) / 2);
+      const qrY = topMargin + Math.round(((H - topMargin) - qrPx) / 2);
       if (qrCanvas) ctx.drawImage(qrCanvas, qrMarginX, qrY, qrPx, qrPx);
       document.body.removeChild(qrBox);
 
       // 텍스트 영역
       const textX = qrMarginX + qrPx + mm(2.5);
       const textMaxW = W - textX - mm(1.5);
-      let y = mm(2.5);
+      let y = topMargin + mm(2);
+      const cScale = 0.8; // 자간 80%
 
-      // 품목명 (굵게, 크게)
-      const fontBold = `bold ${mm(3.5)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontNorm = `${mm(2.8)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontSmall = `${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      // 모든 텍스트 굵게
+      const fontTitle = `bold ${mm(3.5)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontMain  = `bold ${mm(2.8)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontSub   = `bold ${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
       const lineH = mm(4.2);
 
+      // 품목명
       ctx.fillStyle = '#000000';
-      ctx.font = fontBold;
-      ctx.fillText(canvasTruncate(ctx, lb.itemName, textMaxW), textX, y + mm(2.5));
+      ctx.font = fontTitle;
+      drawCondensed(ctx, condensedTruncate(ctx, lb.itemName, textMaxW, cScale), textX, y + mm(2.5), cScale);
       y += lineH + mm(0.5);
 
       // LOT 번호
-      ctx.font = fontNorm;
+      ctx.font = fontMain;
       if (lb.lotId) {
-        ctx.fillText(canvasTruncate(ctx, 'LOT: ' + lb.lotId, textMaxW), textX, y + mm(2));
+        drawCondensed(ctx, condensedTruncate(ctx, 'LOT: ' + lb.lotId, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
 
       // 개별 ID
-      ctx.font = fontSmall;
-      ctx.fillStyle = '#444444';
-      ctx.fillText(canvasTruncate(ctx, lb.indivId, textMaxW), textX, y + mm(2));
+      ctx.font = fontSub;
+      drawCondensed(ctx, condensedTruncate(ctx, lb.indivId, textMaxW, cScale), textX, y + mm(2), cScale);
       y += lineH;
 
       // 입고일
-      ctx.font = fontNorm;
-      ctx.fillStyle = '#000000';
+      ctx.font = fontMain;
       if (lb.date) {
-        ctx.fillText(canvasTruncate(ctx, lb.date, textMaxW), textX, y + mm(2));
+        drawCondensed(ctx, condensedTruncate(ctx, lb.date, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
 
       // 사용기한
       if (lb.exp) {
-        ctx.fillText(canvasTruncate(ctx, lb.exp, textMaxW), textX, y + mm(2));
+        drawCondensed(ctx, condensedTruncate(ctx, lb.exp, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
 
       // 보관조건
       if (lb.storage) {
-        ctx.fillText(canvasTruncate(ctx, lb.storage, textMaxW), textX, y + mm(2));
+        drawCondensed(ctx, condensedTruncate(ctx, lb.storage, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
 
       // 회사명
       ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText('메이투투', textX, y + mm(2));
+      drawCondensed(ctx, '메이투투', textX, y + mm(2), cScale);
 
       resolve(canvas.toDataURL('image/png'));
     }, 300);
