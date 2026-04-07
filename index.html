@@ -212,6 +212,7 @@ a { text-decoration:none; color:inherit; }
      ═══════════════════════════════════════════════ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
 /* ═══════════════════════════════════════════════
@@ -1958,15 +1959,19 @@ Screens['label-print'] = (params = {}) => {
         </details>
         <div id="label-preview" class="mt-8"></div>
         <div id="btn-download-area" style="display:none;margin-top:12px">
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-suc btn-full" onclick="downloadLabelCSV()">📥 CSV 다운로드</button>
-            <button class="btn btn-out" onclick="downloadLabelJSON()" style="white-space:nowrap">JSON</button>
+          <button class="btn btn-suc btn-full" onclick="downloadLabelExcel()" style="font-size:15px;padding:14px">📥 Excel 다운로드 (.xlsx)</button>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-out btn-full" onclick="downloadLabelCSV()">CSV</button>
+            <button class="btn btn-out btn-full" onclick="downloadLabelJSON()">JSON</button>
           </div>
-          <div style="margin-top:8px;padding:10px 12px;background:#f0f7ff;border:1px solid #cce0ff;border-radius:8px;font-size:11px;color:#1a5276;line-height:1.6">
-            💡 <b>사용법</b>: 다운로드한 CSV/JSON 파일을 라벨 프린터 프로그램(Label Artist 등)에서 <b>DB 연결 → 파일 열기</b>로 불러온 후 인쇄하세요.<br>
-            • <b>개별ID_QR</b> 컬럼을 QR코드 필드에 연결하면 QR이 자동 생성됩니다.
+          <div style="margin-top:10px;padding:10px 12px;background:#f0f7ff;border:1px solid #cce0ff;border-radius:8px;font-size:11px;color:#1a5276;line-height:1.7">
+            💡 <b>Label Artist 사용법</b><br>
+            1. 위 버튼으로 파일 다운로드<br>
+            2. Label Artist → <b>DB 연결 → 엑셀/CSV 파일 열기</b><br>
+            3. <b>개별ID_QR</b> 컬럼 → QR코드 객체에 연결<br>
+            4. 나머지 컬럼 → 텍스트 객체에 연결<br>
+            5. 인쇄 실행
           </div>
-          <button class="btn btn-out btn-full mt-8" id="btn-print" onclick="printLabels()" style="font-size:12px;color:var(--txt-l)">🖨️ 브라우저 직접 인쇄 (테스트용)</button>
         </div>
       </div>
     `;
@@ -2483,9 +2488,6 @@ function renderLabelCards(labels) {
 
   const btnArea = $id('btn-download-area');
   if (btnArea) btnArea.style.display = '';
-  // fallback: 기존 btn-print도 표시
-  const btnPrint = $id('btn-print');
-  if (btnPrint) btnPrint.style.display = '';
 }
 
 // ── QR 스캔으로 재프린트 ID 입력 ──
@@ -2523,38 +2525,67 @@ function stopReprintScan() {
   if (window._reprintModal) window._reprintModal.remove();
 }
 
-// ── CSV 파일 다운로드 (라벨 프린터 프로그램용) ──
+// ── 라벨 데이터를 행 배열로 변환 (공통) ──
+function labelToRows(labels) {
+  return labels.map(lb => ({
+    '품목명': lb.itemName || '',
+    'LOT번호': lb.lotId || '',
+    '개별ID_QR': lb.indivId || '',
+    '입고일': (lb.date || '').replace(/^입고: ?/, ''),
+    '사용기한': (lb.exp || '').replace(/^EXP: ?/, ''),
+    '보관조건': (lb.storage || '').replace(/^보관: ?/, ''),
+    '회사명': '메이투투'
+  }));
+}
+
+function getLabelFilename(labels, ext) {
+  const now = new Date();
+  const ts = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0')
+    + '_' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
+  return `라벨_${labels[0].lotId || 'data'}_${ts}.${ext}`;
+}
+
+// ── Excel (.xlsx) 다운로드 — Label Artist DB 연결용 ──
+function downloadLabelExcel() {
+  const labels = window._currentLabels;
+  if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
+
+  const rows = labelToRows(labels);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  // 열 너비 자동 조정
+  ws['!cols'] = [
+    { wch: 15 }, // 품목명
+    { wch: 28 }, // LOT번호
+    { wch: 32 }, // 개별ID_QR
+    { wch: 12 }, // 입고일
+    { wch: 12 }, // 사용기한
+    { wch: 15 }, // 보관조건
+    { wch: 10 }, // 회사명
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '라벨데이터');
+  XLSX.writeFile(wb, getLabelFilename(labels, 'xlsx'));
+  toast(`Excel 파일 다운로드 완료 (${labels.length}건) — Label Artist에서 DB연결으로 열어주세요`, 'suc');
+}
+
+// ── CSV 파일 다운로드 ──
 function downloadLabelCSV() {
   const labels = window._currentLabels;
   if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
 
-  // BOM + CSV 헤더 (Label Artist / Excel 호환)
-  const header = ['품목명','LOT번호','개별ID_QR','입고일','사용기한','보관조건','회사명'];
-  const rows = labels.map(lb => [
-    lb.itemName || '',
-    lb.lotId || '',
-    lb.indivId || '',
-    (lb.date || '').replace(/^입고: ?/, ''),
-    (lb.exp || '').replace(/^EXP: ?/, ''),
-    (lb.storage || '').replace(/^보관: ?/, ''),
-    '메이투투'
-  ]);
-
-  // CSV 문자열 생성 (쉼표 포함 필드는 쌍따옴표로 감싸기)
+  const rows = labelToRows(labels);
+  const header = Object.keys(rows[0]);
   const csvEncode = (val) => {
     const s = String(val);
     return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const csvContent = '\uFEFF' + [header, ...rows].map(r => r.map(csvEncode).join(',')).join('\r\n');
+  const csvContent = '\uFEFF' + [header, ...rows.map(r => header.map(h => r[h]))].map(r => r.map(csvEncode).join(',')).join('\r\n');
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const now = new Date();
-  const ts = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0')
-    + '_' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
   a.href = url;
-  a.download = `라벨_${labels[0].lotId || 'data'}_${ts}.csv`;
+  a.download = getLabelFilename(labels, 'csv');
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2567,24 +2598,12 @@ function downloadLabelJSON() {
   const labels = window._currentLabels;
   if (!labels || labels.length === 0) { toast('다운로드할 라벨 데이터가 없습니다', 'err'); return; }
 
-  const jsonData = labels.map(lb => ({
-    품목명: lb.itemName || '',
-    LOT번호: lb.lotId || '',
-    '개별ID_QR': lb.indivId || '',
-    입고일: (lb.date || '').replace(/^입고: ?/, ''),
-    사용기한: (lb.exp || '').replace(/^EXP: ?/, ''),
-    보관조건: (lb.storage || '').replace(/^보관: ?/, ''),
-    회사명: '메이투투'
-  }));
-
-  const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json;charset=utf-8;' });
+  const rows = labelToRows(labels);
+  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const now = new Date();
-  const ts = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0')
-    + '_' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
   a.href = url;
-  a.download = `라벨_${labels[0].lotId || 'data'}_${ts}.json`;
+  a.download = getLabelFilename(labels, 'json');
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
