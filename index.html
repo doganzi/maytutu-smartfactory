@@ -162,14 +162,14 @@ a { text-decoration:none; color:inherit; }
 #screen-login { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; background:var(--bg); padding:32px; }
 
 /* ═══════════════════════════════════════════════
-   PRINT STYLES — SLP-DX220 50×30mm 가로형 라벨
+   PRINT STYLES — SLP-DX220 60×40mm 가로형 라벨
    ═══════════════════════════════════════════════ */
 @media print {
-  html, body { margin:0!important; padding:0!important; width:50mm!important; height:auto!important; background:#fff!important; }
+  html, body { margin:0!important; padding:0!important; width:60mm!important; height:auto!important; background:#fff!important; }
   body > * { display:none!important; }
-  #print-area { display:block!important; position:absolute!important; top:0!important; left:0!important; width:50mm!important; margin:0!important; padding:0!important; z-index:99999!important; }
+  #print-area { display:block!important; position:absolute!important; top:0!important; left:0!important; width:60mm!important; margin:0!important; padding:0!important; z-index:99999!important; }
   .label {
-    width:50mm!important; height:30mm!important;
+    width:60mm!important; height:40mm!important;
     page-break-after:always; page-break-inside:avoid;
     display:flex!important; flex-direction:row!important; align-items:center!important;
     gap:1.5mm!important; padding:1mm 1.5mm!important;
@@ -181,7 +181,7 @@ a { text-decoration:none; color:inherit; }
   .label .label-info { font-size:5.5pt!important; line-height:1.2!important; flex:1!important; overflow:hidden!important; }
   .label .label-info div { white-space:nowrap!important; overflow:hidden!important; text-overflow:ellipsis!important; max-width:26mm!important; }
   .label .label-info div strong { font-size:6.5pt!important; }
-  @page { size:50mm 30mm; margin:0; }
+  @page { size:60mm 40mm; margin:0; }
 }
 /* 프린터 설정 패널 */
 .printer-setting-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -1865,19 +1865,19 @@ const PRINTER_PRESETS = {
   'slp-dx220': {
     name: 'BIXOLON SLP-DX220',
     desc: '감열 / 203DPI / USB+Serial / 용지 15~60mm',
-    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
-    tips: 'SLP-DX220 드라이버 설치 후 Windows 프린터에서 용지 크기를 50×30mm로 설정하세요. 빅솔론 라벨아티스트 프로그램으로 디자인 편집도 가능합니다.'
+    lblW: 60, lblH: 40, qrSz: 24, lblFs: 7, lblTxtW: 30, lblGap: 2, lblPad: '2mm 2.5mm',
+    tips: 'SLP-DX220 드라이버 설치 후 Windows 프린터에서 용지 크기를 60×40mm로 설정하세요. 빅솔론 라벨아티스트 프로그램으로 디자인 편집도 가능합니다.'
   },
   'xp-dt326b': {
     name: 'Xprinter XP-DT326B',
     desc: '감열 / 203DPI / USB+BT / 용지 20~80mm',
-    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
-    tips: 'Xprinter 드라이버 설치 후 용지 크기 50×30mm 설정. 블루투스 모델은 향후 Web Bluetooth 직접 인쇄 지원 예정.'
+    lblW: 60, lblH: 40, qrSz: 24, lblFs: 7, lblTxtW: 30, lblGap: 2, lblPad: '2mm 2.5mm',
+    tips: 'Xprinter 드라이버 설치 후 용지 크기 60×40mm 설정. 블루투스 모델은 향후 Web Bluetooth 직접 인쇄 지원 예정.'
   },
   'custom': {
     name: '직접 설정',
     desc: '기타 라벨 프린터',
-    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
+    lblW: 60, lblH: 40, qrSz: 24, lblFs: 7, lblTxtW: 30, lblGap: 2, lblPad: '2mm 2.5mm',
     tips: '프린터 드라이버에서 용지 크기를 라벨 크기에 맞게 설정하세요.'
   }
 };
@@ -2424,11 +2424,11 @@ function renderLabelCards(labels) {
   labels.forEach((lb, i) => {
     const idx = i + 1;
 
-    // Preview card — 50×30mm 가로형 실제 비율 미리보기 (QR 왼쪽 | 정보 오른쪽)
+    // Preview card — 60×40mm 가로형 실제 비율 미리보기 (QR 왼쪽 | 정보 오른쪽)
     const card = document.createElement('div');
-    card.style.cssText = 'position:relative;width:100%;max-width:340px;aspect-ratio:50/30;border:2px dashed var(--gray-l);border-radius:6px;display:flex;flex-direction:row;align-items:center;gap:8px;padding:6px 8px;margin-bottom:10px;background:#fff;overflow:hidden;box-sizing:border-box';
+    card.style.cssText = 'position:relative;width:100%;max-width:360px;aspect-ratio:60/40;border:2px dashed var(--gray-l);border-radius:6px;display:flex;flex-direction:row;align-items:center;gap:8px;padding:6px 8px;margin-bottom:10px;background:#fff;overflow:hidden;box-sizing:border-box';
     card.innerHTML = `
-      <div id="qr-preview-${idx}" style="width:72px;height:72px;min-width:72px;flex-shrink:0;overflow:hidden"></div>
+      <div id="qr-preview-${idx}" style="width:80px;height:80px;min-width:80px;flex-shrink:0;overflow:hidden"></div>
       <div style="flex:1;min-width:0;overflow:hidden;line-height:1.35">
         <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lb.itemName}</div>
         ${lb.lotId ? `<div style="font-size:10px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">LOT: ${lb.lotId}</div>` : ''}
@@ -2453,7 +2453,7 @@ function renderLabelCards(labels) {
           el.innerHTML = '';
           el.setAttribute('data-qr-text', lb.indivId);
           new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M });
-          el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:72px!important;height:72px!important;display:block');
+          el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:80px!important;height:80px!important;display:block');
         }
     }, 50 * idx);
 
@@ -2535,10 +2535,10 @@ function canvasTruncate(ctx, text, maxW) {
 // ── 라벨 1장을 Canvas에 그려서 dataURL 반환 ──
 function renderLabelToCanvas(lb) {
   return new Promise(resolve => {
-    // SLP-DX220: 203 DPI, 50×30mm
+    // SLP-DX220: 203 DPI, 60×40mm
     const DPI = 203;
     const mm = (v) => Math.round(v * DPI / 25.4);
-    const W = mm(50), H = mm(30);
+    const W = mm(60), H = mm(40);
 
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -2552,7 +2552,7 @@ function renderLabelToCanvas(lb) {
     const qrBox = document.createElement('div');
     qrBox.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
     document.body.appendChild(qrBox);
-    const qrPx = mm(20);
+    const qrPx = mm(26);
     new QRCode(qrBox, { text: lb.indivId, width: qrPx, height: qrPx, correctLevel: QRCode.CorrectLevel.M });
 
     // QR 렌더 대기 후 canvas에 그리기
@@ -2564,15 +2564,15 @@ function renderLabelToCanvas(lb) {
       document.body.removeChild(qrBox);
 
       // 텍스트 영역
-      const textX = qrMarginX + qrPx + mm(2);
-      const textMaxW = W - textX - mm(1);
-      let y = mm(2);
+      const textX = qrMarginX + qrPx + mm(2.5);
+      const textMaxW = W - textX - mm(1.5);
+      let y = mm(2.5);
 
       // 품목명 (굵게, 크게)
-      const fontBold = `bold ${mm(3)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontNorm = `${mm(2.3)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontSmall = `${mm(2)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const lineH = mm(3.6);
+      const fontBold = `bold ${mm(3.5)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontNorm = `${mm(2.8)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontSmall = `${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const lineH = mm(4.2);
 
       ctx.fillStyle = '#000000';
       ctx.font = fontBold;
@@ -2613,7 +2613,7 @@ function renderLabelToCanvas(lb) {
       }
 
       // 회사명
-      ctx.font = `bold ${mm(2.2)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
       ctx.fillText('메이투투', textX, y + mm(2));
 
       resolve(canvas.toDataURL('image/png'));
