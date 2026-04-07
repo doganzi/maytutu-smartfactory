@@ -2647,7 +2647,7 @@ function printLabels() {
       'html,body{margin:0;padding:0;width:100%;height:100%}' +
       '.page{width:100vw;height:100vh;page-break-after:always;overflow:hidden;display:flex;align-items:center;justify-content:center}' +
       '.page:last-child{page-break-after:auto}' +
-      '.page img{width:100%;height:100%;object-fit:fill;display:block}' +
+      '.page img{max-width:100%;max-height:100%;object-fit:contain;display:block}' +
       '</style></head><body>' + imgsHtml + '</body></html>';
 
     const iframe = document.createElement('iframe');
