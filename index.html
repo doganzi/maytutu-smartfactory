@@ -4368,7 +4368,7 @@ async function initApp() {
         }
         if (totalCreated > 0) toast(`개별 QR 레코드 ${totalCreated}건 자동 생성 ✅`, 'suc');
         localStorage.setItem('mt_migr_gen_indiv_v2', '1');
-      } catch(e) { console.warn('Indiv gen migration skip:', e); }
+      } catch(e) { console.warn('Indiv gen migration skip:', e); localStorage.setItem('mt_migr_gen_indiv_v2', '1'); }
     }
 
     // (4) LOT ID 포맷 통일: 구 포맷(RM-YYYYMMDD-NNN) → 신 포맷(RM-품목번호-YYMMDD-YYMMDD-NNN)
