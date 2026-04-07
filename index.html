@@ -4371,6 +4371,88 @@ async function initApp() {
       } catch(e) { console.warn('Indiv gen migration skip:', e); }
     }
 
+    // (4) LOT ID 포맷 통일: 구 포맷(RM-YYYYMMDD-NNN) → 신 포맷(RM-품목번호-YYMMDD-YYMMDD-NNN)
+    if (!localStorage.getItem('mt_migr_lot_id_v1')) {
+      try {
+        const OLD_LOT_RE = /^(RM|FG|SP)-(\d{8})-(\d{3})$/;
+        const toYY = (d) => d ? d.replace(/-/g, '').substring(2) : '000000';
+        const itemNum = (code) => (code || '').replace(/[A-Za-z]/g, '').padStart(3, '0');
+
+        // 원재료LOT: [lotId(0), itemCode(1), name(2), supplier(3), qty(4), unit(5), inDate(6), exp(7), ...]
+        // 완제품LOT: [lotId(0), itemCode(1), name(2), qty(3), unit(4), inDate(5), exp(6), ...]
+        const LOT_CONFIGS = [
+          { tab: '원재료LOT', indivTab: '원재료개별', inDateCol: 6, expCol: 7 },
+          { tab: '완제품LOT', indivTab: '완제품개별', inDateCol: 5, expCol: 6 },
+        ];
+
+        let totalMigrated = 0;
+        const idMap = {}; // oldId → newId 매핑 (입고기록·개별 업데이트용)
+
+        for (const cfg of LOT_CONFIGS) {
+          const allRows = await SheetsAPI.getRange(cfg.tab).catch(() => []);
+          // 같은 prefix별 순번 추적
+          const seqMap = {};
+          for (let i = 1; i < allRows.length; i++) {
+            const row = allRows[i];
+            if (!row || !row[0]) continue;
+            const m = row[0].match(OLD_LOT_RE);
+            if (!m) continue; // 이미 신 포맷이면 건너뜀
+
+            const prefix = m[1]; // RM or FG
+            const iCode = row[1] || '';
+            const iNum = itemNum(iCode);
+            const inDate = row[cfg.inDateCol] || '';
+            const expDate = row[cfg.expCol] || '';
+            const inYM = toYY(inDate);
+            const expYM = toYY(expDate);
+            const seqKey = `${prefix}-${iNum}-${inYM}`;
+            seqMap[seqKey] = (seqMap[seqKey] || 0) + 1;
+            const newId = `${prefix}-${iNum}-${inYM}-${expYM}-${String(seqMap[seqKey]).padStart(3, '0')}`;
+            const oldId = row[0];
+            idMap[oldId] = newId;
+
+            // LOT 테이블 A열(0) 업데이트
+            const sheetRow = i + 1; // 1-based (헤더=1, 데이터=2~)
+            await SheetsAPI.update(`${cfg.tab}!A${sheetRow}`, [[newId]]);
+            totalMigrated++;
+          }
+
+          // 개별 테이블: A열(개별ID)과 B열(LOT ID) 업데이트
+          const indivRows = await SheetsAPI.getRange(cfg.indivTab).catch(() => []);
+          for (let i = 1; i < indivRows.length; i++) {
+            const row = indivRows[i];
+            if (!row || !row[1]) continue;
+            const parentOld = row[1];
+            if (!idMap[parentOld]) continue;
+            const newLotId = idMap[parentOld];
+            // 개별ID: "구LOT-01" → "신LOT-01" (끝 부분 유지)
+            const suffix = row[0].substring(parentOld.length); // "-01" 등
+            const newIndivId = newLotId + suffix;
+            const sr = i + 1;
+            await SheetsAPI.update(`${cfg.indivTab}!A${sr}`, [[newIndivId]]);
+            await SheetsAPI.update(`${cfg.indivTab}!B${sr}`, [[newLotId]]);
+            // G열(6): QR 텍스트도 업데이트
+            if (row[6] && row[6].includes(parentOld)) {
+              await SheetsAPI.update(`${cfg.indivTab}!G${sr}`, [[row[6].replace(parentOld, newLotId)]]);
+            }
+          }
+        }
+
+        // 입고기록: F열(5)의 LOT ID 업데이트
+        const rcvRows = await SheetsAPI.getRange('입고기록').catch(() => []);
+        for (let i = 1; i < rcvRows.length; i++) {
+          const row = rcvRows[i];
+          if (!row || !row[5]) continue;
+          if (idMap[row[5]]) {
+            await SheetsAPI.update(`입고기록!F${i + 1}`, [[idMap[row[5]]]]);
+          }
+        }
+
+        if (totalMigrated > 0) toast(`LOT ID 포맷 통일: ${totalMigrated}건 변환 완료 ✅`, 'suc');
+        localStorage.setItem('mt_migr_lot_id_v1', '1');
+      } catch(e) { console.warn('LOT ID migration skip:', e); }
+    }
+
   } else {
     Router.go('login');
   }
