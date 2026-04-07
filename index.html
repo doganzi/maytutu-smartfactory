@@ -162,35 +162,11 @@ a { text-decoration:none; color:inherit; }
 #screen-login { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; background:var(--bg); padding:32px; }
 
 /* ═══════════════════════════════════════════════
-   PRINT STYLES (Label) — SLP-DX220 최적화
+   PRINT STYLES — iframe 인쇄 방식 사용 (fallback용)
    ═══════════════════════════════════════════════ */
 @media print {
-  /* 전체 숨김 */
-  html, body { margin:0 !important; padding:0 !important; width:50mm !important; height:auto !important; }
   body > * { display:none !important; }
-  #print-area { display:block !important; position:absolute !important; top:0 !important; left:0 !important; width:50mm !important; margin:0 !important; padding:0 !important; z-index:99999 !important; }
-  #print-area * { visibility:visible !important; }
-
-  /* 라벨 한 장 */
-  .label {
-    width:50mm !important; height:30mm !important;
-    page-break-after:always; page-break-inside:avoid;
-    display:flex !important; flex-direction:row !important; align-items:center !important;
-    gap:2mm !important; padding:1.5mm 2mm !important;
-    border:none !important; box-sizing:border-box !important; overflow:hidden !important; margin:0 !important;
-  }
-
-  /* QR 이미지 */
-  .label .qr-img { width:22mm !important; height:22mm !important; min-width:22mm !important; flex-shrink:0 !important; overflow:hidden !important; }
-  .label .qr-img canvas, .label .qr-img img { width:22mm !important; height:22mm !important; display:block !important; }
-
-  /* 텍스트 영역 */
-  .label .label-info { font-size:6pt !important; line-height:1.25 !important; overflow:hidden !important; flex:1 !important; }
-  .label .label-info div { white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; max-width:24mm !important; }
-  .label .label-info div strong { font-size:7pt !important; }
-
-  /* 페이지 설정 — 가로 50mm × 세로 30mm, 여백 없음 */
-  @page { size:50mm 30mm; margin:0; }
+  #print-area { display:block !important; }
 }
 /* 프린터 설정 패널 */
 .printer-setting-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -2523,13 +2499,10 @@ function stopReprintScan() {
 }
 
 function printLabels() {
-  // 인쇄 전 CSS 변수 재적용
-  applyPrintCSS();
-
   const printArea = $id('print-area');
   printArea.style.display = 'block';
 
-  // Print 영역 QR 코드 고해상도(300px) 생성 — 라벨 프린터 최적화
+  // Print 영역 QR 코드 고해상도(300px) 생성
   printArea.querySelectorAll('[id^="qr-print-"]').forEach((el) => {
     const qrText = el.getAttribute('data-qr-text');
     if (qrText && el.children.length === 0) {
@@ -2540,26 +2513,74 @@ function printLabels() {
   const pk = getSavedPrinter();
   const pName = (PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220']).name;
   const sz = getLabelSize();
-
-  // 인쇄 확인
   const labelCount = printArea.querySelectorAll('.label').length;
 
-  // 첫 인쇄 시 머리글/바닥글 끄기 안내
-  if (!localStorage.getItem('mt_print_guide_shown')) {
-    toast(`⚠️ 인쇄 설정에서 "머리글 및 바닥글" 체크 해제, 여백 "없음"으로 설정하세요!`, 'warn', 5000);
-    localStorage.setItem('mt_print_guide_shown', '1');
-  }
+  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 준비 중...`, 'info');
 
-  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 중...`, 'info');
-
-  // QR이 렌더링될 시간을 확보 후 인쇄
+  // QR 렌더링 대기 후 iframe 인쇄
   setTimeout(() => {
-    window.print();
+    // 각 라벨의 QR을 data URL 이미지로 변환하여 iframe에 삽입
+    let labelsHtml = '';
+    printArea.querySelectorAll('.label').forEach(label => {
+      const qrDiv = label.querySelector('.qr-img');
+      const canvas = qrDiv ? qrDiv.querySelector('canvas') : null;
+      const img = qrDiv ? qrDiv.querySelector('img') : null;
+      const qrDataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : '');
+
+      const infoDiv = label.querySelector('.label-info');
+      const infoHtml = infoDiv ? infoDiv.innerHTML : '';
+
+      labelsHtml += '<div class="label">'
+        + (qrDataUrl ? '<img src="' + qrDataUrl + '" class="qr-img"/>' : '<div class="qr-img"></div>')
+        + '<div class="label-info">' + infoHtml + '</div>'
+        + '</div>';
+    });
+
+    // iframe 전용 HTML — 깨끗한 문서로 머리글/바닥글 제거
+    const iframeHtml = '<!DOCTYPE html><html><head><style>'
+      + '*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }'
+      + '@page { size: ' + sz.w + 'mm ' + sz.h + 'mm; margin:0; }'
+      + 'html, body { margin:0; padding:0; width:' + sz.w + 'mm; }'
+      + '.label {'
+      + '  width:' + sz.w + 'mm; height:' + sz.h + 'mm;'
+      + '  display:flex; flex-direction:row; align-items:center;'
+      + '  gap:1.5mm; padding:1mm 1.5mm;'
+      + '  page-break-after:always; page-break-inside:avoid;'
+      + '  overflow:hidden; font-family:"Malgun Gothic","맑은 고딕",sans-serif;'
+      + '}'
+      + '.label:last-child { page-break-after:auto; }'
+      + '.qr-img { width:20mm; height:20mm; min-width:20mm; flex-shrink:0; object-fit:contain; }'
+      + '.label-info { font-size:5.5pt; line-height:1.2; flex:1; overflow:hidden; min-width:0; }'
+      + '.label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:' + (sz.w - 24) + 'mm; }'
+      + '.label-info div strong { font-size:6.5pt; }'
+      + '</style></head><body>' + labelsHtml + '</body></html>';
+
+    // 숨겨진 iframe 생성 후 인쇄
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;visibility:hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(iframeHtml);
+    doc.close();
+
+    // iframe 로드 완료 후 인쇄 실행
     setTimeout(() => {
-      printArea.style.display = 'none';
-      toast('인쇄가 완료되었습니다. 프린터를 확인하세요.', 'suc');
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch(e) {
+        // fallback: 메인 윈도우에서 인쇄
+        window.print();
+      }
+      setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch(e) {}
+        printArea.style.display = 'none';
+        toast('인쇄가 완료되었습니다. 프린터를 확인하세요.', 'suc');
+      }, 2000);
     }, 500);
-  }, 600);
+  }, 800);
 }
 
 // ── 테스트 라벨 인쇄 (프린터 설정 확인용) ──
