@@ -388,14 +388,14 @@ async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0) {
   }
 }
 
-// QR 이미지 URL 생성 (quickchart.io)
-function qrImageUrl(text, size = 200) {
-  return `https://quickchart.io/qr?text=${encodeURIComponent(text)}&size=${size}&margin=1`;
+// QR 데이터 반환 (로컬 qrcode.js 사용으로 URL 불필요 — ID 텍스트만 저장)
+function qrImageUrl(text) {
+  return text; // DB에는 QR ID 텍스트만 저장, 렌더링은 qrcode.js가 로컬에서 처리
 }
 
-// Google Sheets IMAGE 수식 생성
+// Google Sheets IMAGE 수식 생성 (하위호환용)
 function qrImageFormula(cellRef) {
-  return `=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(${cellRef})&"&size=200&margin=1")`;
+  return cellRef; // 더 이상 quickchart.io 미사용
 }
 
 /* ═══════════════════════════════════════════════
@@ -2148,6 +2148,7 @@ async function generateLabelsLot() {
     Array.from({length: count}, (_, i) => ({
       indivId: `${lotId}-${String(i + 1).padStart(2, '0')}`,
       itemName: itemNameVal,
+      lotId: lotId,
       date: formatDate(),
       exp: expDate,
       storage: storageTemp ? `보관: ${storageTemp}` : '',
@@ -2229,11 +2230,10 @@ function renderLabelCards(labels) {
 
   labels.forEach((lb, i) => {
     const idx = i + 1;
-    // 상세 정보 라인 구성
+    // 상세 정보 라인 구성 (순서: 품목명→LOT→개별ID→입고일→사용기한→보관→메이투투)
     const lines = [lb.itemName];
-    if (lb.qty) lines.push(lb.qty);
-    lines.push(lb.indivId);
     if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
+    lines.push(lb.indivId);
     if (lb.date) lines.push(lb.date);
     if (lb.exp) lines.push(lb.exp);
     if (lb.storage) lines.push(lb.storage);
@@ -2246,9 +2246,9 @@ function renderLabelCards(labels) {
     card.innerHTML = `
       <div id="qr-preview-${idx}" style="width:70px;height:70px;flex-shrink:0"></div>
       <div class="fs-12" style="line-height:1.6">
-        <div class="fw-7">${lb.itemName}${lb.qty ? ` <span class="c-txt-l">${lb.qty}</span>` : ''}</div>
-        <div class="c-txt-l">${lb.indivId}</div>
+        <div class="fw-7">${lb.itemName}</div>
         ${lb.lotId ? `<div class="c-txt-l">LOT: ${lb.lotId}</div>` : ''}
+        <div class="c-txt-l">${lb.indivId}</div>
         ${lb.date ? `<div class="c-txt-l">${lb.date}</div>` : ''}
         ${lb.exp ? `<div class="c-txt-l">${lb.exp}</div>` : ''}
         ${lb.storage ? `<div class="c-txt-l">${lb.storage}</div>` : ''}
@@ -2260,7 +2260,7 @@ function renderLabelCards(labels) {
     // Generate QR
     setTimeout(() => {
       const el = $id(`qr-preview-${idx}`);
-      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 70, height: 70, correctLevel: QRCode.CorrectLevel.L }); }
+      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M }); el.querySelector('img,canvas').style.cssText='width:70px;height:70px'; }
     }, 50 * idx);
 
     // Print area
@@ -2323,11 +2323,22 @@ function printLabels() {
   const printArea = $id('print-area');
   printArea.style.display = 'block';
 
-  // Print 영역 QR 코드 생성
+  // Print 영역 QR 코드 고해상도(300px) 생성 — 라벨 프린터 최적화
   printArea.querySelectorAll('[id^="qr-print-"]').forEach((el, i) => {
     if (el.children.length === 0) {
       const previewQr = $id(`qr-preview-${i + 1}`);
-      if (previewQr) el.innerHTML = previewQr.innerHTML;
+      if (previewQr) {
+        // 미리보기에서 텍스트 추출하여 고해상도로 재생성
+        const img = previewQr.querySelector('img');
+        const canvas = previewQr.querySelector('canvas');
+        // qrcode.js의 원본 텍스트는 img.title에 저장됨
+        const qrText = img?.title || canvas?.title || '';
+        if (qrText) {
+          new QRCode(el, { text: qrText, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
+        } else {
+          el.innerHTML = previewQr.innerHTML;
+        }
+      }
     }
   });
 
@@ -2357,11 +2368,10 @@ function printTestLabel() {
   renderLabelCards([{
     indivId: 'TEST-001-260407-260707-001-01',
     itemName: '테스트 라벨',
+    lotId: 'TEST-001-260407-260707-001',
     date: formatDate(),
     exp: 'EXP: 2026-07-07',
     storage: '보관: 냉장(5℃)',
-    lotId: 'TEST-001-260407-260707-001',
-    qty: ''
   }]);
 
   toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — 인쇄 버튼을 누르세요`, 'suc');
@@ -3866,7 +3876,8 @@ async function initApp() {
 
     Router.go('dashboard');
 
-    // ── 일회성 데이터 마이그레이션: 공정2 "수온 확인" → "불순물 확인" ──
+    // ── 일회성 데이터 마이그레이션 ──
+    // (1) 공정2 "수온 확인" → "불순물 확인"
     if (!localStorage.getItem('mt_migr_step2_check')) {
       try {
         const steps = await SheetsAPI.getAll('SOP공정단계');
@@ -3874,10 +3885,39 @@ async function initApp() {
         if (target) {
           const newVal = target[6].replace('수온 확인', '불순물 확인');
           await SheetsAPI.updateCell('SOP공정단계', 1, '2', 6, newVal);
-          toast('공정2 체크항목 수정: 수온 확인 → 불순물 확인 ✅', 'suc');
+          toast('공정2 체크항목 수정 완료 ✅', 'suc');
         }
         localStorage.setItem('mt_migr_step2_check', '1');
       } catch(e) { console.warn('Migration skip:', e); }
+    }
+
+    // (2) QR 이미지 URL → ID 텍스트 변환 (quickchart.io 제거)
+    if (!localStorage.getItem('mt_migr_qr_url_cleanup')) {
+      try {
+        const INDIV_SHEETS = ['원재료개별', '완제품개별', '소모품개별'];
+        let totalFixed = 0;
+        for (const sheet of INDIV_SHEETS) {
+          const rows = await SheetsAPI.getAll(sheet).catch(() => []);
+          for (const row of rows) {
+            // 6번 열(G열)에 quickchart.io URL이 있으면 ID 텍스트로 변환
+            if (row[6] && row[6].includes('quickchart.io')) {
+              // URL에서 text 파라미터 추출
+              try {
+                const url = new URL(row[6]);
+                const idText = url.searchParams.get('text') || row[0];
+                await SheetsAPI.updateCell(sheet, 0, row[0], 6, idText);
+                totalFixed++;
+              } catch(e2) {
+                // URL 파싱 실패 시 개별ID(0열)로 대체
+                await SheetsAPI.updateCell(sheet, 0, row[0], 6, row[0]);
+                totalFixed++;
+              }
+            }
+          }
+        }
+        if (totalFixed > 0) toast(`QR 데이터 정리: ${totalFixed}건 변환 완료 ✅`, 'suc');
+        localStorage.setItem('mt_migr_qr_url_cleanup', '1');
+      } catch(e) { console.warn('QR migration skip:', e); }
     }
 
   } else {
