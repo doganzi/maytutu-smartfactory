@@ -2523,63 +2523,129 @@ function stopReprintScan() {
   if (window._reprintModal) window._reprintModal.remove();
 }
 
-// ── 라벨 인쇄 (iframe 방식 — QR을 dataURL 이미지로 변환 후 인쇄) ──
+// ── Canvas 텍스트 말줄임 헬퍼 ──
+function canvasTruncate(ctx, text, maxW) {
+  if (!text) return '';
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+
+// ── 라벨 1장을 Canvas에 그려서 dataURL 반환 ──
+function renderLabelToCanvas(lb) {
+  return new Promise(resolve => {
+    // SLP-DX220: 203 DPI, 50×30mm
+    const DPI = 203;
+    const mm = (v) => Math.round(v * DPI / 25.4);
+    const W = mm(50), H = mm(30);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // 흰 배경
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // QR 코드 생성 (임시 div에)
+    const qrBox = document.createElement('div');
+    qrBox.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+    document.body.appendChild(qrBox);
+    const qrPx = mm(20);
+    new QRCode(qrBox, { text: lb.indivId, width: qrPx, height: qrPx, correctLevel: QRCode.CorrectLevel.M });
+
+    // QR 렌더 대기 후 canvas에 그리기
+    setTimeout(() => {
+      const qrCanvas = qrBox.querySelector('canvas');
+      const qrMarginX = mm(1.5);
+      const qrY = Math.round((H - qrPx) / 2);
+      if (qrCanvas) ctx.drawImage(qrCanvas, qrMarginX, qrY, qrPx, qrPx);
+      document.body.removeChild(qrBox);
+
+      // 텍스트 영역
+      const textX = qrMarginX + qrPx + mm(2);
+      const textMaxW = W - textX - mm(1);
+      let y = mm(2);
+
+      // 품목명 (굵게, 크게)
+      const fontBold = `bold ${mm(3)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontNorm = `${mm(2.3)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const fontSmall = `${mm(2)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      const lineH = mm(3.6);
+
+      ctx.fillStyle = '#000000';
+      ctx.font = fontBold;
+      ctx.fillText(canvasTruncate(ctx, lb.itemName, textMaxW), textX, y + mm(2.5));
+      y += lineH + mm(0.5);
+
+      // LOT 번호
+      ctx.font = fontNorm;
+      if (lb.lotId) {
+        ctx.fillText(canvasTruncate(ctx, 'LOT: ' + lb.lotId, textMaxW), textX, y + mm(2));
+        y += lineH;
+      }
+
+      // 개별 ID
+      ctx.font = fontSmall;
+      ctx.fillStyle = '#444444';
+      ctx.fillText(canvasTruncate(ctx, lb.indivId, textMaxW), textX, y + mm(2));
+      y += lineH;
+
+      // 입고일
+      ctx.font = fontNorm;
+      ctx.fillStyle = '#000000';
+      if (lb.date) {
+        ctx.fillText(canvasTruncate(ctx, lb.date, textMaxW), textX, y + mm(2));
+        y += lineH;
+      }
+
+      // 사용기한
+      if (lb.exp) {
+        ctx.fillText(canvasTruncate(ctx, lb.exp, textMaxW), textX, y + mm(2));
+        y += lineH;
+      }
+
+      // 보관조건
+      if (lb.storage) {
+        ctx.fillText(canvasTruncate(ctx, lb.storage, textMaxW), textX, y + mm(2));
+        y += lineH;
+      }
+
+      // 회사명
+      ctx.font = `bold ${mm(2.2)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      ctx.fillText('메이투투', textX, y + mm(2));
+
+      resolve(canvas.toDataURL('image/png'));
+    }, 300);
+  });
+}
+
+// ── 라벨 인쇄 (Canvas→이미지→iframe 인쇄 — WYSIWYG) ──
 function printLabels() {
   const labels = window._currentLabels;
   if (!labels || labels.length === 0) { toast('인쇄할 라벨이 없습니다', 'err'); return; }
 
-  const printArea = $id('print-area');
-  printArea.style.display = 'block';
-
-  // QR 코드 고해상도 생성
-  printArea.querySelectorAll('[id^="qr-print-"]').forEach(el => {
-    const qrText = el.getAttribute('data-qr-text');
-    if (qrText && el.children.length === 0) {
-      new QRCode(el, { text: qrText, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
-    }
-  });
-
   const sz = getLabelSize();
   const pk = getSavedPrinter();
   const pName = (PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220']).name;
-  const labelCount = printArea.querySelectorAll('.label').length;
 
-  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 준비 중...`, 'info');
+  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labels.length}매 이미지 생성 중...`, 'info');
 
-  // QR 렌더링 대기 → canvas를 dataURL로 변환 → iframe 인쇄
-  setTimeout(() => {
-    let labelsHtml = '';
-    printArea.querySelectorAll('.label').forEach(label => {
-      const qrDiv = label.querySelector('.qr-img');
-      const canvas = qrDiv ? qrDiv.querySelector('canvas') : null;
-      const img = qrDiv ? qrDiv.querySelector('img') : null;
-      const qrSrc = canvas ? canvas.toDataURL('image/png') : (img ? img.src : '');
-      const infoDiv = label.querySelector('.label-info');
-      const infoHtml = infoDiv ? infoDiv.innerHTML : '';
+  // 모든 라벨을 Canvas 이미지로 변환
+  Promise.all(labels.map(lb => renderLabelToCanvas(lb))).then(images => {
+    // 이미지만으로 구성된 iframe (CSS 레이아웃 없음 = 회전/잘림 방지)
+    const imgsHtml = images.map(src =>
+      '<div style="width:50mm;height:30mm;page-break-after:always;margin:0;padding:0;overflow:hidden">' +
+      '<img src="' + src + '" style="width:50mm;height:30mm;display:block">' +
+      '</div>'
+    ).join('');
 
-      labelsHtml += '<div class="label">'
-        + (qrSrc ? '<img src="' + qrSrc + '" class="qr"/>' : '')
-        + '<div class="info">' + infoHtml + '</div>'
-        + '</div>';
-    });
-
-    const iframeDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-*{margin:0;padding:0;box-sizing:border-box}
-@page{size:${sz.w}mm ${sz.h}mm;margin:0}
-html,body{margin:0;padding:0;width:${sz.w}mm}
-.label{
-  width:${sz.w}mm;height:${sz.h}mm;
-  display:flex;flex-direction:row;align-items:center;
-  gap:1.5mm;padding:1mm 1.5mm;
-  page-break-after:always;page-break-inside:avoid;
-  overflow:hidden;font-family:'Malgun Gothic','맑은 고딕',sans-serif;
-}
-.label:last-child{page-break-after:auto}
-.qr{width:20mm;height:20mm;min-width:20mm;flex-shrink:0;object-fit:contain}
-.info{font-size:5.5pt;line-height:1.2;flex:1;overflow:hidden;min-width:0}
-.info div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:${sz.w - 24}mm}
-.info div strong{font-size:6.5pt}
-</style></head><body>${labelsHtml}</body></html>`;
+    const iframeDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' +
+      '*{margin:0;padding:0;box-sizing:border-box}' +
+      '@page{size:50mm 30mm;margin:0}' +
+      'html,body{margin:0;padding:0;width:50mm}' +
+      '</style></head><body>' + imgsHtml + '</body></html>';
 
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;visibility:hidden';
@@ -2594,17 +2660,13 @@ html,body{margin:0;padding:0;width:${sz.w}mm}
       try {
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
-      } catch(e) {
-        // iframe 인쇄 실패 시 메인 윈도우 fallback
-        window.print();
-      }
+      } catch(e) { window.print(); }
       setTimeout(() => {
         try { document.body.removeChild(iframe); } catch(e) {}
-        printArea.style.display = 'none';
         toast('인쇄가 완료되었습니다', 'suc');
       }, 2000);
     }, 500);
-  }, 800);
+  });
 }
 
 // ── 테스트 라벨 인쇄 (프린터 설정 확인용) ──
