@@ -1237,6 +1237,33 @@ function renderInventoryContent(activeTab) {
     }
   }
 
+  else if (activeTab === '소모품') {
+    const spLots = State.consumableLots || [];
+    const grouped = {};
+    spLots.forEach(l => {
+      const code = l[1] || 'SP001';
+      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalRemain: 0 };
+      grouped[code].lots.push(l);
+      grouped[code].totalRemain += parseFloat(l[6]) || 0;
+    });
+
+    if (Object.keys(grouped).length === 0) {
+      listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🧴</div><div class="es-title">소모품 재고 없음</div></div>`;
+    } else {
+      listEl.innerHTML = Object.entries(grouped).map(([code, g]) => `
+        <div class="card clickable" onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${g.name}', type:'sp'})">
+          <div class="row between">
+            <div>
+              <div class="fs-14 fw-6">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
+              <div class="fs-12 c-txt-l mt-4">현재고: ${g.totalRemain} (${g.lots.length} LOT)</div>
+            </div>
+            <span class="badge badge-suc">정상</span>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
   else if (activeTab === '입고') {
     const records = (State.receivingRecords || []).slice().reverse().slice(0, 20);
     if (records.length === 0) {
@@ -1262,14 +1289,15 @@ Screens['lot-detail'] = async (params = {}) => {
   renderHeader('LOT 상세', `${itemCode || ''} ${itemName || ''}`, { back: 'inventory' });
 
   const isFG = type === 'fg';
-  const lotTab = isFG ? '완제품LOT' : '원재료LOT';
-  const indivTab = isFG ? '완제품개별' : '원재료개별';
+  const isSP = type === 'sp';
+  const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
+  const indivTab = isFG ? '완제품개별' : isSP ? '소모품개별' : '원재료개별';
 
   let lots = [], indivs = [], minStock = 0;
   try {
     lots = (await SheetsAPI.getAll(lotTab).catch(() => [])).filter(l => l[1] === itemCode);
     indivs = await SheetsAPI.getAll(indivTab).catch(() => []);
-    if (!isFG) {
+    if (!isFG && !isSP) {
       const item = State.rawMaterialItems?.find(i => i[0] === itemCode);
       minStock = parseFloat(item?.[6]) || 0;
     }
@@ -1284,37 +1312,165 @@ Screens['lot-detail'] = async (params = {}) => {
         <div class="row between">
           <div>
             <div class="fs-16 fw-7">${itemName}</div>
-            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${totalRemain}kg${!isFG && minStock > 0 ? ` · 안전재고 ${minStock}kg` : ''}</div>
+            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${totalRemain}kg${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${minStock}kg` : ''}</div>
           </div>
-          ${!isFG ? `<span class="badge badge-${isLow ? 'err' : 'suc'}">${isLow ? '부족' : '정상'}</span>` : ''}
+          ${!isFG && !isSP ? `<span class="badge badge-${isLow ? 'err' : 'suc'}">${isLow ? '부족' : '정상'}</span>` : ''}
         </div>
       </div>
 
-      <div class="fs-13 fw-7 mb-8">LOT 목록</div>
+      <div class="fs-13 fw-7 mb-8">LOT 목록 <span class="fs-11 c-txt-l">(미사용/사용중만 인쇄 가능)</span></div>
       ${lots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : lots.map(l => {
         const remain = parseFloat(l[8]) || 0;
         const qty = parseFloat(l[4]) || 1;
         const status = l[9] || '정상';
         const stColor = status === '정상' || status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
+        const canPrint = ['미사용','사용중','정상'].includes(status);
+        const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
+        const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
         return `
           <div class="card bl-${stColor}">
             <div class="row between mb-4">
-              <span class="fs-13 fw-6">${l[0]}</span>
-              <span class="badge badge-${stColor}">${status}</span>
+              <span class="fs-13 fw-6 clickable" style="color:var(--pri)" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">${l[0]}</span>
+              <div class="row" style="gap:6px;align-items:center">
+                ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">🖨️ 전체 ${printableIndivs.length}매</button>` : ''}
+                <span class="badge badge-${stColor}">${status}</span>
+              </div>
             </div>
-            <div class="fs-12 c-txt-l">입고: ${qty}${l[5]||'kg'} → 잔량: ${remain}${l[5]||'kg'}</div>
+            <div class="fs-12 c-txt-l clickable" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">
+              입고: ${qty}${l[5]||'kg'} → 잔량: ${remain}${l[5]||'kg'} · 개별: ${printableIndivs.length}/${lotIndivs.length}건
+            </div>
             <div class="fs-11 c-txt-l">소비기한: ${(l[7]||'').substring(0,10)}</div>
             ${remain > 0 && qty > 0 ? `
               <div class="progress-bar mt-8">
                 <div class="fill" style="width:${Math.min(100, (remain/qty)*100)}%;background:var(--info)"></div>
               </div>
             ` : ''}
+            <div id="indiv-list-${l[0].replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
           </div>
         `;
       }).join('')}
     </div>
   `;
 };
+
+// ── LOT 개별 항목 토글 표시 ──
+async function showLotIndividuals(lotId, itemName, type) {
+  const safeId = lotId.replace(/[^a-zA-Z0-9]/g, '_');
+  const container = $id('indiv-list-' + safeId);
+  if (!container) return;
+
+  // 토글
+  if (container.style.display !== 'none') {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'block';
+  container.innerHTML = '<div class="loading-inline"><div class="spinner-s"></div> 개별 조회 중...</div>';
+
+  try {
+    const isFG = type === 'fg';
+    const isSP = type === 'sp';
+    const indivTab = isFG ? '완제품개별' : isSP ? '소모품개별' : '원재료개별';
+    const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
+    const indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
+    const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
+
+    if (indivs.length === 0) {
+      container.innerHTML = '<div class="fs-12 c-txt-l" style="text-align:center;padding:8px">개별 항목 없음</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
+        <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (${indivs.length}건) — 클릭하여 개별 인쇄</div>
+        ${indivs.map(iv => {
+          const st = iv[3] || '미사용';
+          const canPrint = ['미사용','사용중','정상','미출하'].includes(st);
+          const stColor = st === '미사용' || st === '정상' || st === '미출하' ? 'suc' : st === '사용중' ? 'info' : 'gray';
+          return `
+            <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);${canPrint ? 'cursor:pointer' : 'opacity:0.5'}"
+                 ${canPrint ? `onclick="printSingleLabel('${iv[0]}','${itemName}','${lotId}','${type}')"` : ''}>
+              <div>
+                <span class="fs-12 fw-6">${iv[0]}</span>
+                <span class="badge badge-${stColor}" style="font-size:9px;padding:1px 6px;margin-left:4px">${st}</span>
+              </div>
+              ${canPrint ? '<span class="fs-11 c-pri fw-6">🖨️ 인쇄</span>' : '<span class="fs-11 c-txt-l">인쇄불가</span>'}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } catch(e) {
+    container.innerHTML = '<div class="fs-12 c-err">조회 실패: ' + e.message + '</div>';
+  }
+}
+
+// ── LOT 전체 라벨 인쇄 ──
+async function printLotLabels(lotId, itemName, type) {
+  showLoading();
+  try {
+    const isFG = type === 'fg';
+    const isSP = type === 'sp';
+    const indivTab = isFG ? '완제품개별' : isSP ? '소모품개별' : '원재료개별';
+    const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
+
+    const indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
+    const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
+    const printable = indivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
+
+    if (printable.length === 0) { toast('인쇄 가능한 개별 항목이 없습니다', 'warn'); hideLoading(); return; }
+
+    const expDate = isFG ? (lot?.[6] || '') : isSP ? (lot?.[6] || '') : (lot?.[7] || '');
+    const storageTemp = isFG ? (lot?.[11] || '냉동 -18°C') : isSP ? '' : (lot?.[11] || '');
+    const inDate = isFG ? (lot?.[5] || formatDate()) : isSP ? (lot?.[5] || formatDate()) : (lot?.[6] || formatDate());
+
+    const labels = printable.map(iv => ({
+      indivId: iv[0],
+      itemName: itemName,
+      lotId: lotId,
+      date: inDate,
+      exp: expDate ? `EXP: ${expDate}` : '',
+      storage: storageTemp ? `보관: ${storageTemp}` : '',
+    }));
+
+    hideLoading();
+    // 라벨 인쇄 화면으로 이동하여 렌더링
+    Router.go('label-print', {});
+    setTimeout(() => {
+      renderLabelCards(labels);
+      toast(`${lotId} 전체 ${labels.length}매 라벨 생성 완료`, 'suc');
+    }, 200);
+  } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
+}
+
+// ── 개별 1매 라벨 인쇄 ──
+async function printSingleLabel(indivId, itemName, lotId, type) {
+  showLoading();
+  try {
+    const isFG = type === 'fg';
+    const isSP = type === 'sp';
+    const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
+    const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
+
+    const expDate = isFG ? (lot?.[6] || '') : isSP ? (lot?.[6] || '') : (lot?.[7] || '');
+    const storageTemp = isFG ? (lot?.[11] || '냉동 -18°C') : isSP ? '' : (lot?.[11] || '');
+    const inDate = isFG ? (lot?.[5] || formatDate()) : isSP ? (lot?.[5] || formatDate()) : (lot?.[6] || formatDate());
+
+    hideLoading();
+    Router.go('label-print', {});
+    setTimeout(() => {
+      renderLabelCards([{
+        indivId: indivId,
+        itemName: itemName,
+        lotId: lotId,
+        date: inDate,
+        exp: expDate ? `EXP: ${expDate}` : '',
+        storage: storageTemp ? `보관: ${storageTemp}` : '',
+      }]);
+      toast(`${indivId} 라벨 1매 생성 완료`, 'suc');
+    }, 200);
+  } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
+}
 
 // ─── RECEIVE FORM ───
 Screens['receive-form'] = async () => {
