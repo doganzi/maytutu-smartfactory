@@ -2579,7 +2579,7 @@ function renderLabelToCanvas(lb) {
     // QR 렌더 대기 후 canvas에 그리기
     setTimeout(() => {
       const qrCanvas = qrBox.querySelector('canvas');
-      const topMargin = mm(20); // 위 여백 약 2cm
+      const topMargin = mm(5); // 위 여백 약 0.5cm
       const qrMarginX = mm(1.5);
       const qrY = topMargin + Math.round(((H - topMargin) - qrPx) / 2);
       if (qrCanvas) ctx.drawImage(qrCanvas, qrMarginX, qrY, qrPx, qrPx);
