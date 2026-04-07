@@ -162,18 +162,29 @@ a { text-decoration:none; color:inherit; }
 #screen-login { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; background:var(--bg); padding:32px; }
 
 /* ═══════════════════════════════════════════════
-   PRINT STYLES (Label)
+   PRINT STYLES (Label) — SLP-DX220 최적화
    ═══════════════════════════════════════════════ */
 @media print {
-  body * { visibility:hidden; }
-  #print-area, #print-area * { visibility:visible; }
-  #print-area { position:absolute; top:0; left:0; width:50mm; }
-  .label { width:50mm; height:30mm; page-break-after:always; display:flex; align-items:center; gap:2mm; padding:1.5mm 2mm; border:0.5px solid #ccc; box-sizing:border-box; overflow:hidden; }
-  .label .qr-img { width:18mm; height:18mm; flex-shrink:0; }
-  .label .qr-img canvas, .label .qr-img img { width:18mm !important; height:18mm !important; }
-  .label .label-info { font-size:6pt; line-height:1.3; overflow:hidden; }
-  .label .label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:27mm; }
+  body * { visibility:hidden !important; }
+  #print-area, #print-area * { visibility:visible !important; }
+  #print-area { position:absolute; top:0; left:0; width:var(--lbl-w, 50mm); margin:0; padding:0; }
+  .label {
+    width:var(--lbl-w, 50mm); height:var(--lbl-h, 30mm);
+    page-break-after:always; display:flex; align-items:center;
+    gap:var(--lbl-gap, 2mm); padding:var(--lbl-pad, 1.5mm 2mm);
+    border:none; box-sizing:border-box; overflow:hidden; margin:0;
+  }
+  .label .qr-img { width:var(--qr-sz, 18mm); height:var(--qr-sz, 18mm); flex-shrink:0; }
+  .label .qr-img canvas, .label .qr-img img { width:var(--qr-sz, 18mm) !important; height:var(--qr-sz, 18mm) !important; }
+  .label .label-info { font-size:var(--lbl-fs, 6pt); line-height:1.3; overflow:hidden; }
+  .label .label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:var(--lbl-txt-w, 27mm); }
+  @page { size:var(--lbl-w, 50mm) var(--lbl-h, 30mm); margin:0; }
 }
+/* 프린터 설정 패널 */
+.printer-setting-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.printer-setting-row label { font-size:12px; font-weight:600; min-width:70px; color:var(--txt-l); }
+.printer-setting-row select, .printer-setting-row input { font-size:13px; padding:6px 8px; border:1px solid var(--gray-l); border-radius:6px; flex:1; }
+.printer-info-box { background:#f0f7ff; border:1px solid #cce0ff; border-radius:8px; padding:10px 12px; font-size:11px; color:#1a5276; line-height:1.5; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -1692,14 +1703,115 @@ function saveSettings() {
 }
 
 // ─── LABEL PRINT ───
+// 프린터 프리셋 설정
+const PRINTER_PRESETS = {
+  'slp-dx220': {
+    name: 'BIXOLON SLP-DX220',
+    desc: '감열 / 203DPI / USB+Serial / 용지 15~60mm',
+    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
+    tips: 'SLP-DX220 드라이버 설치 후 Windows 프린터에서 용지 크기를 50×30mm로 설정하세요. 빅솔론 라벨아티스트 프로그램으로 디자인 편집도 가능합니다.'
+  },
+  'xp-dt326b': {
+    name: 'Xprinter XP-DT326B',
+    desc: '감열 / 203DPI / USB+BT / 용지 20~80mm',
+    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
+    tips: 'Xprinter 드라이버 설치 후 용지 크기 50×30mm 설정. 블루투스 모델은 향후 Web Bluetooth 직접 인쇄 지원 예정.'
+  },
+  'custom': {
+    name: '직접 설정',
+    desc: '기타 라벨 프린터',
+    lblW: 50, lblH: 30, qrSz: 18, lblFs: 6, lblTxtW: 27, lblGap: 2, lblPad: '1.5mm 2mm',
+    tips: '프린터 드라이버에서 용지 크기를 라벨 크기에 맞게 설정하세요.'
+  }
+};
+
+function getSavedPrinter() {
+  return localStorage.getItem('mt_printer') || 'slp-dx220';
+}
+function savePrinterSetting(key) {
+  localStorage.setItem('mt_printer', key);
+}
+function getLabelSize() {
+  const saved = localStorage.getItem('mt_label_size');
+  if (saved) { try { return JSON.parse(saved); } catch(e){} }
+  return { w: 50, h: 30 };
+}
+function saveLabelSize(w, h) {
+  localStorage.setItem('mt_label_size', JSON.stringify({ w, h }));
+}
+
+function applyPrintCSS() {
+  const pk = getSavedPrinter();
+  const preset = PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220'];
+  const sz = getLabelSize();
+  const r = document.documentElement;
+  r.style.setProperty('--lbl-w', sz.w + 'mm');
+  r.style.setProperty('--lbl-h', sz.h + 'mm');
+  r.style.setProperty('--qr-sz', preset.qrSz + 'mm');
+  r.style.setProperty('--lbl-fs', preset.lblFs + 'pt');
+  r.style.setProperty('--lbl-txt-w', (sz.w - preset.qrSz - preset.lblGap - 4) + 'mm');
+  r.style.setProperty('--lbl-gap', preset.lblGap + 'mm');
+  r.style.setProperty('--lbl-pad', preset.lblPad);
+}
+
+function onPrinterChange() {
+  const pk = $id('sel-printer')?.value || 'slp-dx220';
+  savePrinterSetting(pk);
+  const preset = PRINTER_PRESETS[pk];
+  // 라벨 사이즈도 프리셋으로 리셋
+  if ($id('lbl-w-input')) $id('lbl-w-input').value = preset.lblW;
+  if ($id('lbl-h-input')) $id('lbl-h-input').value = preset.lblH;
+  saveLabelSize(preset.lblW, preset.lblH);
+  // 팁 업데이트
+  if ($id('printer-tips')) $id('printer-tips').innerHTML = preset.tips;
+  // 커스텀 필드 표시
+  const customRow = $id('custom-size-row');
+  if (customRow) customRow.style.display = pk === 'custom' ? 'flex' : 'none';
+  applyPrintCSS();
+}
+
+function onLabelSizeChange() {
+  const w = parseInt($id('lbl-w-input')?.value) || 50;
+  const h = parseInt($id('lbl-h-input')?.value) || 30;
+  saveLabelSize(w, h);
+  applyPrintCSS();
+}
+
 Screens['label-print'] = (params = {}) => {
   renderHeader('라벨 인쇄', 'QR 라벨 생성 및 인쇄', { back: 'more' });
 
   const { lotId, count, itemName, type, mode: initMode } = params;
   const mode = initMode || (lotId ? 'lot' : 'lot');
+  const savedPrinter = getSavedPrinter();
+  const savedSize = getLabelSize();
+  const preset = PRINTER_PRESETS[savedPrinter] || PRINTER_PRESETS['slp-dx220'];
 
   $id('content').innerHTML = `
     <div style="padding:16px">
+
+      <!-- 프린터 설정 -->
+      <details id="printer-settings" style="margin-bottom:16px;background:var(--white);border:1px solid var(--gray-l);border-radius:10px;padding:12px">
+        <summary style="font-size:13px;font-weight:700;cursor:pointer;color:var(--txt)">🖨️ 프린터 설정 — ${preset.name}</summary>
+        <div style="margin-top:12px">
+          <div class="printer-setting-row">
+            <label>프린터</label>
+            <select id="sel-printer" onchange="onPrinterChange()">
+              ${Object.entries(PRINTER_PRESETS).map(([k,v]) =>
+                `<option value="${k}" ${k===savedPrinter?'selected':''}>${v.name}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="printer-setting-row">
+            <label>라벨 크기</label>
+            <input type="number" id="lbl-w-input" value="${savedSize.w}" min="20" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
+            <span style="font-size:12px;color:var(--txt-l)">×</span>
+            <input type="number" id="lbl-h-input" value="${savedSize.h}" min="10" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
+            <span style="font-size:12px;color:var(--txt-l)">mm</span>
+          </div>
+          <div class="printer-info-box" id="printer-tips">${preset.tips}</div>
+        </div>
+      </details>
+
       <!-- 모드 토글 -->
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <button class="btn btn-full ${mode === 'lot' ? 'btn-pri' : 'btn-out'}" id="mode-lot-btn"
@@ -1748,9 +1860,12 @@ Screens['label-print'] = (params = {}) => {
       </div>
 
       <div id="label-preview" class="mt-16"></div>
-      <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none" onclick="printLabels()">🖨️ 라벨 인쇄</button>
+      <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none" onclick="printLabels()">🖨️ ${preset.name}으로 인쇄</button>
     </div>
   `;
+
+  // CSS 변수 적용
+  applyPrintCSS();
 
   // 개별 모드로 바로 진입한 경우 재고 자동 로드
   if (mode === 'indiv') setTimeout(() => loadReprintStock(), 100);
@@ -2101,7 +2216,14 @@ async function generateLabelsIndiv() {
 // ── 공통 라벨 렌더링 ──
 function renderLabelCards(labels) {
   const previewEl = $id('label-preview');
-  previewEl.innerHTML = `<div class="fs-13 fw-7 mb-8">라벨 미리보기 (${labels.length}매)</div>`;
+  const sz = getLabelSize();
+  const pk = getSavedPrinter();
+  const pName = (PRINTER_PRESETS[pk] || {}).name || '프린터';
+  previewEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="fs-13 fw-7">라벨 미리보기 (${labels.length}매)</div>
+      <div class="fs-11 c-txt-l">${sz.w}×${sz.h}mm · ${pName}</div>
+    </div>`;
   const printArea = $id('print-area');
   printArea.innerHTML = '';
 
@@ -2153,7 +2275,11 @@ function renderLabelCards(labels) {
     printArea.appendChild(label);
   });
 
-  $id('btn-print').style.display = '';
+  const btnPrint = $id('btn-print');
+  btnPrint.style.display = '';
+  const pk = getSavedPrinter();
+  const pn = (PRINTER_PRESETS[pk] || {}).name || '프린터';
+  btnPrint.textContent = `🖨️ ${pn}으로 인쇄 (${labels.length}매)`;
 }
 
 // ── QR 스캔으로 재프린트 ID 입력 ──
@@ -2192,6 +2318,9 @@ function stopReprintScan() {
 }
 
 function printLabels() {
+  // 인쇄 전 CSS 변수 재적용
+  applyPrintCSS();
+
   const printArea = $id('print-area');
   printArea.style.display = 'block';
 
@@ -2203,10 +2332,40 @@ function printLabels() {
     }
   });
 
+  const pk = getSavedPrinter();
+  const pName = (PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220']).name;
+  const sz = getLabelSize();
+
+  // 인쇄 확인
+  const labelCount = printArea.querySelectorAll('.label').length;
+  toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 중...`, 'info');
+
   setTimeout(() => {
     window.print();
-    setTimeout(() => { printArea.style.display = 'none'; }, 500);
+    setTimeout(() => {
+      printArea.style.display = 'none';
+      toast('인쇄가 완료되었습니다. 프린터를 확인하세요.', 'suc');
+    }, 500);
   }, 300);
+}
+
+// ── 테스트 라벨 인쇄 (프린터 설정 확인용) ──
+function printTestLabel() {
+  const pk = getSavedPrinter();
+  const preset = PRINTER_PRESETS[pk] || PRINTER_PRESETS['slp-dx220'];
+  const sz = getLabelSize();
+
+  renderLabelCards([{
+    indivId: 'TEST-001-260407-260707-001-01',
+    itemName: '테스트 라벨',
+    date: formatDate(),
+    exp: 'EXP: 2026-07-07',
+    storage: '보관: 냉장(5℃)',
+    lotId: 'TEST-001-260407-260707-001',
+    qty: ''
+  }]);
+
+  toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — 인쇄 버튼을 누르세요`, 'suc');
 }
 
 // ─── SOP LIST ───
