@@ -3148,21 +3148,15 @@ Screens['wo-create'] = async () => {
 
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="fs-13 fw-7 mb-8">SOP 선택</div>
-      ${activeSops.map(s => `
-        <div class="card clickable" id="sop-card-${s[0]}" onclick="selectSOP('${s[0]}')" style="border:2px solid transparent">
-          <div class="row between">
-            <div>
-              <div class="fs-14 fw-6">${s[1]||''}</div>
-              <div class="fs-11 c-txt-l">${s[0]} · v${s[3]||'1.0'} · ${s[5]||''}공정</div>
-            </div>
-          </div>
-        </div>
-      `).join('')}
+      <div class="input-group">
+        <label>SOP 선택</label>
+        <select id="wo-sop" onchange="selectSOP(this.value)">
+          ${activeSops.map(s => `<option value="${s[0]}">${s[1]||''} (${s[0]} · v${s[3]||'1.0'} · ${s[5]||''}공정)</option>`).join('')}
+        </select>
+      </div>
 
-      <div class="mt-16">
-        <div class="input-group">
-          <label>생산 목표 수량 (총 수량)</label>
+      <div class="input-group">
+        <label>생산 목표 수량 (총 수량)</label>
           <input type="number" id="wo-qty" placeholder="수량 입력" oninput="updateWOCalc()">
         </div>
         <div class="input-group">
@@ -3203,10 +3197,6 @@ let _selectedSopId = null;
 
 function selectSOP(sopId) {
   _selectedSopId = sopId;
-  // Highlight selected
-  document.querySelectorAll('[id^=sop-card-]').forEach(el => el.style.borderColor = 'transparent');
-  const card = $id(`sop-card-${sopId}`);
-  if (card) card.style.borderColor = 'var(--pri)';
 
   // Show steps preview
   const steps = State.sopSteps.filter(s => s[0] === sopId);
