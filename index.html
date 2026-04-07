@@ -166,9 +166,9 @@ a { text-decoration:none; color:inherit; }
    ═══════════════════════════════════════════════ */
 @media print {
   /* 전체 숨김 */
-  html, body { margin:0 !important; padding:0 !important; width:50mm !important; height:30mm !important; }
+  html, body { margin:0 !important; padding:0 !important; width:50mm !important; height:auto !important; }
   body > * { display:none !important; }
-  #print-area { display:block !important; position:fixed !important; top:0 !important; left:0 !important; width:50mm !important; margin:0 !important; padding:0 !important; z-index:99999 !important; }
+  #print-area { display:block !important; position:absolute !important; top:0 !important; left:0 !important; width:50mm !important; margin:0 !important; padding:0 !important; z-index:99999 !important; }
   #print-area * { visibility:visible !important; }
 
   /* 라벨 한 장 */
