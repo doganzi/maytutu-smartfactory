@@ -1446,12 +1446,8 @@ async function printLotLabels(lotId, itemName, type) {
     }));
 
     hideLoading();
-    // 라벨 인쇄 화면으로 이동하여 렌더링
-    Router.go('label-print', {});
-    setTimeout(() => {
-      renderLabelCards(labels);
-      toast(`${lotId} 전체 ${labels.length}매 라벨 생성 완료`, 'suc');
-    }, 200);
+    // 라벨 인쇄 화면으로 이동 — fromInventory 모드로 폼 숨기고 바로 라벨 표시
+    Router.go('label-print', { fromInventory: true, preLabels: labels, srcLotId: lotId, srcItemName: itemName, srcType: type });
   } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
 }
 
@@ -1469,18 +1465,20 @@ async function printSingleLabel(indivId, itemName, lotId, type) {
     const inDate = isFG ? (lot?.[5] || formatDate()) : isSP ? (lot?.[5] || formatDate()) : (lot?.[6] || formatDate());
 
     hideLoading();
-    Router.go('label-print', {});
-    setTimeout(() => {
-      renderLabelCards([{
+    Router.go('label-print', {
+      fromInventory: true,
+      preLabels: [{
         indivId: indivId,
         itemName: itemName,
         lotId: lotId,
         date: inDate,
         exp: expDate ? `EXP: ${expDate}` : '',
         storage: storageTemp ? `보관: ${storageTemp}` : '',
-      }]);
-      toast(`${indivId} 라벨 1매 생성 완료`, 'suc');
-    }, 200);
+      }],
+      srcLotId: lotId,
+      srcItemName: itemName,
+      srcType: type
+    });
   } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
 }
 
@@ -1946,14 +1944,55 @@ function onLabelSizeChange() {
 }
 
 Screens['label-print'] = (params = {}) => {
-  renderHeader('라벨 인쇄', 'QR 라벨 생성 및 인쇄', { back: 'more' });
+  const { lotId, count, itemName, type, mode: initMode, fromInventory, preLabels, srcLotId, srcItemName, srcType } = params;
 
-  const { lotId, count, itemName, type, mode: initMode } = params;
+  // 뒤로가기: 재고에서 왔으면 inventory, 아니면 more
+  const backTarget = fromInventory ? 'inventory' : 'more';
+  renderHeader('라벨 인쇄', fromInventory ? `${srcItemName || ''} ${srcLotId || ''}` : 'QR 라벨 생성 및 인쇄', { back: backTarget });
+
   const mode = initMode || (lotId ? 'lot' : 'lot');
   const savedPrinter = getSavedPrinter();
   const savedSize = getLabelSize();
   const preset = PRINTER_PRESETS[savedPrinter] || PRINTER_PRESETS['slp-dx220'];
 
+  // 재고에서 직접 온 경우 — 폼 없이 라벨만 표시
+  if (fromInventory && preLabels && preLabels.length > 0) {
+    $id('content').innerHTML = `
+      <div style="padding:16px">
+        <details id="printer-settings" style="margin-bottom:16px;background:var(--white);border:1px solid var(--gray-l);border-radius:10px;padding:12px">
+          <summary style="font-size:13px;font-weight:700;cursor:pointer;color:var(--txt)">🖨️ 프린터 설정 — ${preset.name}</summary>
+          <div style="margin-top:12px">
+            <div class="printer-setting-row">
+              <label>프린터</label>
+              <select id="sel-printer" onchange="onPrinterChange()">
+                ${Object.entries(PRINTER_PRESETS).map(([k,v]) =>
+                  `<option value="${k}" ${k===savedPrinter?'selected':''}>${v.name}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div class="printer-setting-row">
+              <label>라벨 크기</label>
+              <input type="number" id="lbl-w-input" value="${savedSize.w}" min="20" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
+              <span style="font-size:12px;color:var(--txt-l)">×</span>
+              <input type="number" id="lbl-h-input" value="${savedSize.h}" min="10" max="100" style="width:60px;flex:none" onchange="onLabelSizeChange()">
+              <span style="font-size:12px;color:var(--txt-l)">mm</span>
+            </div>
+            <div class="printer-info-box" id="printer-tips">${preset.tips}</div>
+          </div>
+        </details>
+        <div id="label-preview" class="mt-8"></div>
+        <button class="btn btn-suc btn-full mt-12" id="btn-print" style="display:none" onclick="printLabels()">🖨️ ${preset.name}으로 인쇄</button>
+      </div>
+    `;
+    applyPrintCSS();
+    setTimeout(() => {
+      renderLabelCards(preLabels);
+      toast(`${srcLotId || ''} ${preLabels.length}매 라벨 생성 완료`, 'suc');
+    }, 100);
+    return;
+  }
+
+  // 일반 모드 — 기존 폼 표시
   $id('content').innerHTML = `
     <div style="padding:16px">
 
@@ -2007,7 +2046,6 @@ Screens['label-print'] = (params = {}) => {
 
       <!-- 개별 재프린트 모드 -->
       <div id="label-mode-indiv" style="display:${mode === 'indiv' ? 'block' : 'none'}">
-        <!-- 직접 ID 입력 / 스캔 영역 -->
         <div class="card" style="border:1px solid var(--gray-l);padding:12px">
           <div class="fs-12 fw-6 mb-8">직접 입력 / QR 스캔</div>
           <div style="display:flex;gap:8px">
@@ -2017,8 +2055,6 @@ Screens['label-print'] = (params = {}) => {
           <div class="fs-11 c-txt-l mt-4">쉼표(,)로 여러 ID 입력 가능</div>
           <button class="btn btn-pri btn-full mt-8" onclick="generateLabelsIndiv()">ID로 라벨 생성</button>
         </div>
-
-        <!-- 재고 기반 드릴다운 영역 -->
         <div class="mt-12">
           <div class="fs-13 fw-7 mb-8">📋 재고에서 선택</div>
           <div id="reprint-stock-area">
@@ -2032,10 +2068,7 @@ Screens['label-print'] = (params = {}) => {
     </div>
   `;
 
-  // CSS 변수 적용
   applyPrintCSS();
-
-  // 개별 모드로 바로 진입한 경우 재고 자동 로드
   if (mode === 'indiv') setTimeout(() => loadReprintStock(), 100);
 };
 
@@ -2412,7 +2445,7 @@ function renderLabelCards(labels) {
     card.className = 'card';
     card.style.cssText = 'display:flex;gap:14px;align-items:center;border:2px dashed var(--gray-l)';
     card.innerHTML = `
-      <div id="qr-preview-${idx}" style="width:70px;height:70px;flex-shrink:0"></div>
+      <div id="qr-preview-${idx}" style="width:70px;height:70px;min-width:70px;flex-shrink:0;overflow:hidden"></div>
       <div class="fs-12" style="line-height:1.6">
         <div class="fw-7">${lb.itemName}</div>
         ${lb.lotId ? `<div class="c-txt-l">LOT: ${lb.lotId}</div>` : ''}
@@ -2428,7 +2461,12 @@ function renderLabelCards(labels) {
     // Generate QR
     setTimeout(() => {
       const el = $id(`qr-preview-${idx}`);
-      if (el) { el.innerHTML = ''; el.setAttribute('data-qr-text', lb.indivId); new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M }); el.querySelector('img,canvas').style.cssText='width:70px;height:70px'; }
+      if (el) {
+          el.innerHTML = '';
+          el.setAttribute('data-qr-text', lb.indivId);
+          new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M });
+          el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:70px!important;height:70px!important;display:block');
+        }
     }, 50 * idx);
 
     // Print area
