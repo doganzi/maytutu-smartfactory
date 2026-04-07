@@ -3865,6 +3865,21 @@ async function initApp() {
     }
 
     Router.go('dashboard');
+
+    // ── 일회성 데이터 마이그레이션: 공정2 "수온 확인" → "불순물 확인" ──
+    if (!localStorage.getItem('mt_migr_step2_check')) {
+      try {
+        const steps = await SheetsAPI.getAll('SOP공정단계');
+        const target = steps.find(r => r[1] === '2' && (r[6] || '').includes('수온 확인'));
+        if (target) {
+          const newVal = target[6].replace('수온 확인', '불순물 확인');
+          await SheetsAPI.updateCell('SOP공정단계', 1, '2', 6, newVal);
+          toast('공정2 체크항목 수정: 수온 확인 → 불순물 확인 ✅', 'suc');
+        }
+        localStorage.setItem('mt_migr_step2_check', '1');
+      } catch(e) { console.warn('Migration skip:', e); }
+    }
+
   } else {
     Router.go('login');
   }
