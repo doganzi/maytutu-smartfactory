@@ -3486,31 +3486,7 @@ function renderStepContent(step, stepType) {
     const std = step[5] || '';
     const processColor = isMixing ? 'teal' : 'pri';
     if (isMixing) {
-      // Parse speed info: numeric RPM (e.g. "120RPM") or Korean speed words (저속/중속/고속)
-      const rpmMatch = std.match(/(\d+)\s*RPM/i);
-      const speedWords = std.match(/(저속|중속|고속)/g);
-      const speedLabel = rpmMatch ? `${rpmMatch[1]} RPM` : (speedWords ? [...new Set(speedWords)].join(' → ') : '');
-      // Parse total mixing time: sum all N분 occurrences (e.g. "저속 5분 → 중속 10분" = 15분)
-      const timeMatches = [...std.matchAll(/(\d+)\s*분/g)];
-      const totalTime = timeMatches.reduce((sum, m) => sum + parseInt(m[1]), 0);
-      const timeDetail = timeMatches.length > 1 ? `(${timeMatches.map(m => m[1] + '분').join('+')})` : '';
-      html += `
-        <div class="info-box" style="background:rgba(20,184,166,0.1)">
-          <div class="fs-12 fw-6 c-teal">믹싱 기준값</div>
-          <div class="fs-20 fw-8 c-teal mt-4">${std}</div>
-        </div>
-        <div class="row mt-8" style="gap:8px">
-          <div class="info-box flex-1" style="background:rgba(20,184,166,0.08);text-align:center">
-            <div class="fs-11 fw-6 c-teal">믹싱 속도</div>
-            <div class="fs-20 fw-8 c-teal mt-4">${speedLabel || '-'}</div>
-          </div>
-          <div class="info-box flex-1" style="background:rgba(20,184,166,0.08);text-align:center">
-            <div class="fs-11 fw-6 c-teal">믹싱 시간</div>
-            <div class="fs-20 fw-8 c-teal mt-4">${totalTime || '-'} <span class="fs-11">분</span></div>
-            ${timeDetail ? `<div class="fs-10 c-teal mt-2">${timeDetail}</div>` : ''}
-          </div>
-        </div>
-      `;
+      // Mixing step: no 기준값 display, check items handle RPM/time verification
     } else {
       html += `
         <div class="info-box" style="background:rgba(59,130,246,0.1)">
@@ -3522,6 +3498,10 @@ function renderStepContent(step, stepType) {
 
     // Check items
     const checks = (step[6] || '').split(',').filter(c => c.trim());
+    if (isMixing) {
+      if (!checks.includes('RPM 확인')) checks.push('RPM 확인');
+      if (!checks.includes('믹싱 시간 확인')) checks.push('믹싱 시간 확인');
+    }
     if (checks.length > 0) {
       html += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
       checks.forEach((c, i) => {
