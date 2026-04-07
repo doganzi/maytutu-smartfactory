@@ -834,6 +834,29 @@ Screens.dashboard = async () => {
     }).length;
 
     pendingWOs = woData.filter(r => r[12] === '승인대기').slice(0, 3);
+
+    // ── 알림 체크 ──
+    const lastCheck = localStorage.getItem('lastNotifCheck') || '2000-01-01';
+    const now = new Date().toISOString();
+    if (isAdmin) {
+      // 관리자: 새 승인요청 알림
+      const newRequests = woData.filter(r => r[12] === '승인대기' && r[10] > lastCheck);
+      if (newRequests.length > 0) {
+        toast(`🔔 새 승인요청 ${newRequests.length}건이 있습니다`, 'warn');
+      }
+    } else {
+      // 작업자: 승인완료 알림
+      const myApproved = woData.filter(r => r[8] === State.user?.email && r[12] === '승인완료' && r[16] > lastCheck);
+      if (myApproved.length > 0) {
+        toast(`🔔 작업지시서 ${myApproved.length}건이 승인완료 되었습니다`, 'suc');
+      }
+      // 작업자: 거부 알림
+      const myRejected = woData.filter(r => r[8] === State.user?.email && r[12]?.startsWith('거부') && r[16] > lastCheck);
+      if (myRejected.length > 0) {
+        toast(`🔔 작업지시서 ${myRejected.length}건이 거부되었습니다`, 'err');
+      }
+    }
+    localStorage.setItem('lastNotifCheck', now);
   } catch (e) {
     console.warn('Dashboard data load error:', e);
   }
@@ -865,7 +888,7 @@ Screens.dashboard = async () => {
       </div>
 
       ${isAdmin && pendingWOs.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8">승인 대기</div>
+        <div class="fs-14 fw-7 mb-8">🔔 승인 대기</div>
         ${pendingWOs.map(wo => `
           <div class="card clickable" onclick="Router.go('approval-detail', {woId:'${wo[0]}'})">
             <div class="row between">
@@ -878,6 +901,22 @@ Screens.dashboard = async () => {
           </div>
         `).join('')}
       ` : ''}
+
+      ${!isAdmin ? (() => {
+        const myEmail = State.user?.email;
+        const myPending = State.workOrders.filter(r => r[8] === myEmail && r[12] === '승인대기');
+        const myRecent = State.workOrders.filter(r => r[8] === myEmail && (r[12] === '승인완료' || r[12]?.startsWith('거부'))).slice(0, 3);
+        let notifHtml = '';
+        if (myPending.length > 0) {
+          notifHtml += '<div class="fs-14 fw-7 mb-8">⏳ 승인 대기 중</div>' +
+            myPending.map(wo => '<div class="card bl-warn"><div class="row between"><div><div class="fs-14 fw-6">' + (wo[4]||'') + ' ' + (wo[5]||'') + 'kg</div><div class="fs-12 c-txt-l">' + wo[0] + ' · 승인 대기 중</div></div><span class="badge badge-warn">대기중</span></div></div>').join('');
+        }
+        if (myRecent.length > 0) {
+          notifHtml += '<div class="fs-14 fw-7 mb-8 mt-8">🔔 최근 승인 결과</div>' +
+            myRecent.map(wo => '<div class="card bl-' + (wo[12]==='승인완료'?'suc':'err') + '"><div class="row between"><div><div class="fs-14 fw-6">' + (wo[4]||'') + ' ' + (wo[5]||'') + 'kg</div><div class="fs-12 c-txt-l">' + wo[0] + ' · ' + (wo[16]||'').substring(0,16) + '</div></div><span class="badge badge-' + (wo[12]==='승인완료'?'suc':'err') + '">' + wo[12] + '</span></div></div>').join('');
+        }
+        return notifHtml;
+      })() : ''}
 
       ${lowStockItems.length > 0 ? `
         <div class="fs-14 fw-7 mb-8 mt-8">재고 알림</div>
@@ -909,12 +948,12 @@ Screens.production = async () => {
     State.productionRequests = await SheetsAPI.getAll('생산요청').catch(() => []);
   } catch (e) { console.warn(e); }
 
-  const defaultTab = isAdmin ? '생산요청' : '내 작업';
+  const defaultTab = isAdmin ? '생산요청' : '새 작업';
   renderProductionContent(defaultTab, isAdmin);
 };
 
 function renderProductionContent(activeTab, isAdmin) {
-  const tabs = isAdmin ? ['생산요청', '승인대기', '전체작업'] : ['내 작업', '새 작업', '완료'];
+  const tabs = isAdmin ? ['생산요청', '승인대기', '전체작업'] : ['새 작업', '작업 현황', '완료된 작업'];
 
   $id('content').innerHTML = `
     <div class="tab-filter">
@@ -966,26 +1005,28 @@ function renderProductionContent(activeTab, isAdmin) {
     }
   }
 
-  else if (activeTab === '내 작업') {
+  else if (activeTab === '작업 현황') {
     const myWO = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '진행중' || r[12] === '승인대기'));
     if (myWO.length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🔧</div><div class="es-title">진행 중인 작업 없음</div><div class="es-desc">"새 작업" 탭에서 작업을 시작하세요</div></div>`;
     } else {
       listEl.innerHTML = myWO.map(wo => {
-        const lastStep = parseInt(wo[13]) || 0; // lastSavedStep column
+        const lastStep = parseInt(wo[13]) || 0;
         const progress = Math.round((lastStep / 11) * 100);
         const canDelete = wo[12] !== '진행중' || lastStep === 0;
+        const isPending = wo[12] === '승인대기';
         return `
-          <div class="card clickable" onclick="Router.go('wo-execute', {woId:'${wo[0]}'})"
-            oncontextmenu="event.preventDefault();${canDelete ? `deleteWorkOrder('${wo[0]}')` : ''}"
-            ontouchstart="this._ts=Date.now()" ontouchend="if(Date.now()-this._ts>600){event.preventDefault();${canDelete ? `deleteWorkOrder('${wo[0]}')` : 'toast(\"진행중인 건은 삭제할 수 없습니다\",\"err\")'}}">
+          <div class="card ${isPending ? 'bl-warn' : 'clickable'}" ${!isPending ? `onclick="Router.go('wo-execute', {woId:'${wo[0]}'})"` : ''}
+            ${!isPending ? `oncontextmenu="event.preventDefault();${canDelete ? `deleteWorkOrder('${wo[0]}')` : ''}"
+            ontouchstart="this._ts=Date.now()" ontouchend="if(Date.now()-this._ts>600){event.preventDefault();${canDelete ? `deleteWorkOrder('${wo[0]}')` : 'toast(\"진행중인 건은 삭제할 수 없습니다\",\"err\")'}}"` : ''}>
             <div class="row between mb-4">
               <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-              <span class="badge badge-${wo[12]==='진행중'?'info':'warn'}">${wo[12]}</span>
+              <span class="badge badge-${isPending?'warn':'info'}">${wo[12]}</span>
             </div>
-            <div class="fs-11 c-txt-l">${wo[0]} · 공정 ${lastStep}/11${lastStep > 0 ? ' · 임시저장됨' : ''}</div>
+            <div class="fs-11 c-txt-l">${wo[0]} · 공정 ${lastStep}/11${isPending ? ' · 관리자 승인 대기 중' : lastStep > 0 ? ' · 임시저장됨' : ''}</div>
             <div class="progress-bar mt-8"><div class="fill" style="width:${progress}%"></div></div>
-            ${canDelete ? '<div class="long-press-hint">길게 누르면 삭제</div>' : ''}
+            ${isPending ? `<button class="btn btn-sm btn-outline btn-err mt-8" style="width:100%" onclick="event.stopPropagation();cancelApprovalRequest('${wo[0]}')">승인요청 취소</button>` : ''}
+            ${!isPending && canDelete ? '<div class="long-press-hint">길게 누르면 삭제</div>' : ''}
           </div>
         `;
       }).join('');
@@ -1003,20 +1044,45 @@ function renderProductionContent(activeTab, isAdmin) {
     `;
   }
 
-  else if (activeTab === '완료') {
-    const done = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12]?.startsWith('거부')));
-    if (done.length === 0) {
-      listEl.innerHTML = `<div class="empty-state"><div class="es-icon">📝</div><div class="es-title">완료된 작업 없음</div></div>`;
+  else if (activeTab === '완료된 작업') {
+    const allDone = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12]?.startsWith('거부')));
+
+    // Date range filter
+    const today = new Date();
+    const weekAgo = new Date(today.getTime() - 7*86400000);
+    const monthAgo = new Date(today.getTime() - 30*86400000);
+    const savedRange = window._doneFilterRange || 'all';
+
+    listEl.innerHTML = `
+      <div class="row mb-12" style="gap:6px">
+        <button class="btn btn-sm ${savedRange==='week'?'btn-pri':'btn-outline btn-gray'}" onclick="window._doneFilterRange='week';renderProductionContent('완료된 작업',${isAdmin})">최근 1주</button>
+        <button class="btn btn-sm ${savedRange==='month'?'btn-pri':'btn-outline btn-gray'}" onclick="window._doneFilterRange='month';renderProductionContent('완료된 작업',${isAdmin})">최근 1개월</button>
+        <button class="btn btn-sm ${savedRange==='all'?'btn-pri':'btn-outline btn-gray'}" onclick="window._doneFilterRange='all';renderProductionContent('완료된 작업',${isAdmin})">전체</button>
+      </div>
+      <div id="done-list-inner"></div>
+    `;
+
+    let filtered = allDone;
+    if (savedRange === 'week') {
+      filtered = allDone.filter(wo => wo[16] && new Date(wo[16]) >= weekAgo);
+    } else if (savedRange === 'month') {
+      filtered = allDone.filter(wo => wo[16] && new Date(wo[16]) >= monthAgo);
+    }
+
+    const innerEl = $id('done-list-inner');
+    if (filtered.length === 0) {
+      innerEl.innerHTML = `<div class="empty-state"><div class="es-icon">📝</div><div class="es-title">완료된 작업 없음</div><div class="es-desc">선택 기간 내 완료된 작업이 없습니다</div></div>`;
     } else {
-      listEl.innerHTML = done.map(wo => `
-        <div class="card">
-          <div class="row between mb-4">
-            <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-            <span class="badge badge-${wo[12]==='승인완료'?'suc':'err'}">${wo[12]}</span>
+      innerEl.innerHTML = `<div class="fs-11 c-txt-l mb-8">총 ${filtered.length}건</div>` +
+        filtered.map(wo => `
+          <div class="card">
+            <div class="row between mb-4">
+              <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
+              <span class="badge badge-${wo[12]==='승인완료'?'suc':'err'}">${wo[12]}</span>
+            </div>
+            <div class="fs-11 c-txt-l">${wo[0]} · ${(wo[16]||'').substring(0,16)}</div>
           </div>
-          <div class="fs-11 c-txt-l">${wo[0]} · ${wo[15] || ''}</div>
-        </div>
-      `).join('');
+        `).join('');
     }
   }
 
@@ -3269,12 +3335,10 @@ function renderWOExecute() {
 
     <!-- Step dots -->
     <div class="step-nav">
-      ${steps.map((s, i) => {
-        const isMix = (s[3]||'') === 'process' && (s[2]||'').includes('믹싱');
-        const dotStyle = i === currentStep && isMix ? 'background:var(--teal);color:#fff' : '';
-        return `<div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : ''}"
-             style="${dotStyle}" onclick="goToStep(${i})">${i + 1}</div>`;
-      }).join('')}
+      ${steps.map((s, i) => `
+        <div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : ''}"
+             onclick="goToStep(${i})">${i + 1}</div>
+      `).join('')}
     </div>
 
     <!-- Step content -->
@@ -3614,7 +3678,7 @@ function renderStepContent(step, stepType) {
 
   // Check items for non-input, non-process, non-inspect types (input has its own above)
   if (stepType !== 'input' && stepType !== 'process' && stepType !== 'inspect') {
-    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    const checks = (step[6] || '').split(',').filter(c => c.trim() && !c.trim().includes('라벨 부착'));
     if (checks.length > 0) {
       html += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8" style="border-top:1px solid var(--gray-l);padding-top:10px">체크항목</div>`;
       checks.forEach((c, i) => {
@@ -3769,6 +3833,25 @@ async function submitForApproval() {
       Router.go('production');
     } catch (e) {
       toast('승인요청 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
+// ── 승인요청 취소 ──
+async function cancelApprovalRequest(woId) {
+  confirm('승인요청 취소', `${woId}의 승인요청을 취소하시겠습니까?\n작업은 마지막 공정 상태로 복원됩니다.`, async () => {
+    try {
+      showLoading();
+      await SheetsAPI.updateRow('작업지시서', 0, woId, {
+        11: '',              // freezeStartTime 초기화
+        12: '진행중',         // status 복원
+      });
+      toast('승인요청이 취소되었습니다', 'suc');
+      Router.go('production');
+    } catch (e) {
+      toast('취소 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
     }
