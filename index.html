@@ -165,19 +165,31 @@ a { text-decoration:none; color:inherit; }
    PRINT STYLES (Label) — SLP-DX220 최적화
    ═══════════════════════════════════════════════ */
 @media print {
-  body * { visibility:hidden !important; }
-  #print-area, #print-area * { visibility:visible !important; }
-  #print-area { position:absolute; top:0; left:0; width:var(--lbl-w, 50mm); margin:0; padding:0; }
+  /* 전체 숨김 */
+  html, body { margin:0 !important; padding:0 !important; width:50mm !important; height:30mm !important; }
+  body > * { display:none !important; }
+  #print-area { display:block !important; position:fixed !important; top:0 !important; left:0 !important; width:50mm !important; margin:0 !important; padding:0 !important; z-index:99999 !important; }
+  #print-area * { visibility:visible !important; }
+
+  /* 라벨 한 장 */
   .label {
-    width:var(--lbl-w, 50mm); height:var(--lbl-h, 30mm);
-    page-break-after:always; display:flex; align-items:center;
-    gap:var(--lbl-gap, 2mm); padding:var(--lbl-pad, 1.5mm 2mm);
-    border:none; box-sizing:border-box; overflow:hidden; margin:0;
+    width:50mm !important; height:30mm !important;
+    page-break-after:always; page-break-inside:avoid;
+    display:flex !important; flex-direction:row !important; align-items:center !important;
+    gap:2mm !important; padding:1.5mm 2mm !important;
+    border:none !important; box-sizing:border-box !important; overflow:hidden !important; margin:0 !important;
   }
-  .label .qr-img { width:var(--qr-sz, 18mm); height:var(--qr-sz, 18mm); flex-shrink:0; }
-  .label .qr-img canvas, .label .qr-img img { width:var(--qr-sz, 18mm) !important; height:var(--qr-sz, 18mm) !important; }
-  .label .label-info { font-size:var(--lbl-fs, 6pt); line-height:1.3; overflow:hidden; }
-  .label .label-info div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:var(--lbl-txt-w, 27mm); }
+
+  /* QR 이미지 */
+  .label .qr-img { width:22mm !important; height:22mm !important; min-width:22mm !important; flex-shrink:0 !important; overflow:hidden !important; }
+  .label .qr-img canvas, .label .qr-img img { width:22mm !important; height:22mm !important; display:block !important; }
+
+  /* 텍스트 영역 */
+  .label .label-info { font-size:6pt !important; line-height:1.25 !important; overflow:hidden !important; flex:1 !important; }
+  .label .label-info div { white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; max-width:24mm !important; }
+  .label .label-info div strong { font-size:7pt !important; }
+
+  /* 페이지 설정 — 가로 50mm × 세로 30mm, 여백 없음 */
   @page { size:50mm 30mm; margin:0; }
 }
 /* 프린터 설정 패널 */
@@ -2416,14 +2428,14 @@ function renderLabelCards(labels) {
     // Generate QR
     setTimeout(() => {
       const el = $id(`qr-preview-${idx}`);
-      if (el) { el.innerHTML = ''; new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M }); el.querySelector('img,canvas').style.cssText='width:70px;height:70px'; }
+      if (el) { el.innerHTML = ''; el.setAttribute('data-qr-text', lb.indivId); new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M }); el.querySelector('img,canvas').style.cssText='width:70px;height:70px'; }
     }, 50 * idx);
 
     // Print area
     const label = document.createElement('div');
     label.className = 'label';
     label.innerHTML = `
-      <div id="qr-print-${idx}" class="qr-img"></div>
+      <div id="qr-print-${idx}" class="qr-img" data-qr-text="${lb.indivId}"></div>
       <div class="label-info">
         ${lines.map((l, j) => j === 0 ? `<div><strong>${l}</strong></div>` : `<div>${l}</div>`).join('')}
       </div>
@@ -2480,21 +2492,10 @@ function printLabels() {
   printArea.style.display = 'block';
 
   // Print 영역 QR 코드 고해상도(300px) 생성 — 라벨 프린터 최적화
-  printArea.querySelectorAll('[id^="qr-print-"]').forEach((el, i) => {
-    if (el.children.length === 0) {
-      const previewQr = $id(`qr-preview-${i + 1}`);
-      if (previewQr) {
-        // 미리보기에서 텍스트 추출하여 고해상도로 재생성
-        const img = previewQr.querySelector('img');
-        const canvas = previewQr.querySelector('canvas');
-        // qrcode.js의 원본 텍스트는 img.title에 저장됨
-        const qrText = img?.title || canvas?.title || '';
-        if (qrText) {
-          new QRCode(el, { text: qrText, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
-        } else {
-          el.innerHTML = previewQr.innerHTML;
-        }
-      }
+  printArea.querySelectorAll('[id^="qr-print-"]').forEach((el) => {
+    const qrText = el.getAttribute('data-qr-text');
+    if (qrText && el.children.length === 0) {
+      new QRCode(el, { text: qrText, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
     }
   });
 
@@ -2504,15 +2505,23 @@ function printLabels() {
 
   // 인쇄 확인
   const labelCount = printArea.querySelectorAll('.label').length;
+
+  // 첫 인쇄 시 머리글/바닥글 끄기 안내
+  if (!localStorage.getItem('mt_print_guide_shown')) {
+    toast(`⚠️ 인쇄 설정에서 "머리글 및 바닥글" 체크 해제, 여백 "없음"으로 설정하세요!`, 'warn', 5000);
+    localStorage.setItem('mt_print_guide_shown', '1');
+  }
+
   toast(`${pName} | ${sz.w}×${sz.h}mm | ${labelCount}매 인쇄 중...`, 'info');
 
+  // QR이 렌더링될 시간을 확보 후 인쇄
   setTimeout(() => {
     window.print();
     setTimeout(() => {
       printArea.style.display = 'none';
       toast('인쇄가 완료되었습니다. 프린터를 확인하세요.', 'suc');
     }, 500);
-  }, 300);
+  }, 600);
 }
 
 // ── 테스트 라벨 인쇄 (프린터 설정 확인용) ──
