@@ -1341,14 +1341,22 @@ function renderInventoryContent(activeTab) {
   }
 
   else if (activeTab === '완제품') {
+    // 개별 항목도 함께 로드하여 정확한 재고 카운트
+    let fgIndivs = [];
+    try { fgIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []); } catch(e) {}
+    const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+
     const fgLots = (State.finishedGoodsLots || []).filter(l => l[9] !== '폐기' && l[9] !== '소진' && l[9] !== '출하완료');
     // Group by itemCode
     const grouped = {};
     fgLots.forEach(l => {
       const code = l[1] || 'FG001';
-      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalRemain: 0 };
+      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalActiveIndivs: 0 };
+      // 출하완료/폐기 제외한 실제 개별 수량 카운트
+      const lotActiveIndivs = fgIndivs.filter(iv => iv[1] === l[0] && activeStatuses.includes(iv[3]));
+      l._activeCount = lotActiveIndivs.length;
       grouped[code].lots.push(l);
-      grouped[code].totalRemain += parseFloat(l[8]) || 0;
+      grouped[code].totalActiveIndivs += lotActiveIndivs.length;
     });
 
     if (Object.keys(grouped).length === 0) {
@@ -1364,7 +1372,7 @@ function renderInventoryContent(activeTab) {
             <div class="row between">
               <div>
                 <div class="fs-14 fw-7">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
-                <div class="fs-12 c-txt-l mt-4">총 ${g.lots.length} LOT · ${g.totalRemain}개 · 냉동 -18°C</div>
+                <div class="fs-12 c-txt-l mt-4">총 ${g.lots.length} LOT · ${g.totalActiveIndivs}개 · 냉동 -18°C</div>
               </div>
               <div style="text-align:right">
                 ${freezingCount > 0 ? `<span class="badge badge-warn" style="display:block;margin-bottom:2px">냉동중 ${freezingCount}</span>` : ''}
@@ -1378,8 +1386,8 @@ function renderInventoryContent(activeTab) {
           const lotId = l[0];
           const status = l[9] || '정상';
           const stColor = status === '출하가능' || status === '정상' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
-          const remain = parseFloat(l[8]) || 0;
-          const qty = parseFloat(l[3]) || 1;
+          const activeCount = l._activeCount || 0;
+          const totalCount = parseFloat(l[10]) || parseFloat(l[3]) || 0;
           const mfgDate = (l[5] || '').substring(0,10);
           const expDate = (l[6] || '').substring(0,10);
           html += `
@@ -1391,8 +1399,9 @@ function renderInventoryContent(activeTab) {
                   <span class="badge badge-${stColor}">${status}</span>
                 </div>
               </div>
-              <div class="fs-12 c-txt-l">수량: ${remain}개 · 제조: ${mfgDate}</div>
+              <div class="fs-12 c-txt-l">재고: ${activeCount}개 / 전체 ${totalCount}개 · 제조: ${mfgDate}</div>
               <div class="fs-11 c-txt-l">소비기한: ${expDate}</div>
+              ${totalCount > 0 ? `<div class="progress-bar mt-6"><div class="fill" style="width:${Math.min(100,(activeCount/totalCount)*100)}%;background:var(--${stColor})"></div></div>` : ''}
               <div id="indiv-list-${lotId.replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
             </div>
           `;
@@ -1468,8 +1477,18 @@ Screens['lot-detail'] = async (params = {}) => {
     }
   } catch (e) { console.warn(e); }
 
-  const totalRemain = lots.reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
+  // 완제품: 출하완료 제외한 실제 재고 카운트
+  let totalRemain;
+  if (isFG) {
+    const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+    totalRemain = indivs.filter(iv => lots.some(l => l[0] === iv[1]) && activeStatuses.includes(iv[3])).length;
+  } else {
+    totalRemain = lots.reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
+  }
   const isLow = minStock > 0 && totalRemain < minStock;
+
+  // 완제품: 출하완료 LOT 제외
+  const displayLots = isFG ? lots.filter(l => l[9] !== '출하완료' && l[9] !== '폐기' && l[9] !== '소진') : lots;
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -1477,27 +1496,53 @@ Screens['lot-detail'] = async (params = {}) => {
         <div class="row between">
           <div>
             <div class="fs-16 fw-7">${itemName}</div>
-            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${totalRemain}kg${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${minStock}kg` : ''}</div>
+            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${totalRemain}${isFG ? '개' : 'kg'}${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${minStock}kg` : ''}</div>
           </div>
           ${!isFG && !isSP ? `<span class="badge badge-${isLow ? 'err' : 'suc'}">${isLow ? '부족' : '정상'}</span>` : ''}
         </div>
       </div>
 
-      <div class="fs-13 fw-7 mb-8">LOT 목록 <span class="fs-11 c-txt-l">(미사용/사용중만 인쇄 가능)</span></div>
-      ${lots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : lots.map(l => {
+      <div class="fs-13 fw-7 mb-8">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></div>
+      ${displayLots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : displayLots.map(l => {
+        const status = l[9] || '정상';
+        const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
+
+        if (isFG) {
+          // 완제품 LOT: 개별 기반 카운트
+          const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+          const activeIndivs = lotIndivs.filter(iv => activeStatuses.includes(iv[3]));
+          const totalIndivs = lotIndivs.length;
+          const stColor = status === '출하가능' || status === '정상' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
+          const canPrint = activeIndivs.length > 0;
+          return `
+            <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','fg')">
+              <div class="row between mb-4">
+                <span class="fs-13 fw-6 clickable" style="color:var(--pri)">${l[0]}</span>
+                <div class="row" style="gap:6px;align-items:center">
+                  ${canPrint ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','fg')">🖨️ 전체 ${activeIndivs.length}매</button>` : ''}
+                  <span class="badge badge-${stColor}">${status}</span>
+                </div>
+              </div>
+              <div class="fs-12 c-txt-l">재고: ${activeIndivs.length}개 / 전체 ${totalIndivs}개 · 제조: ${(l[5]||'').substring(0,10)}</div>
+              <div class="fs-11 c-txt-l">소비기한: ${(l[6]||'').substring(0,10)}</div>
+              ${totalIndivs > 0 ? `<div class="progress-bar mt-8"><div class="fill" style="width:${Math.min(100,(activeIndivs.length/totalIndivs)*100)}%;background:var(--${stColor})"></div></div>` : ''}
+              <div id="indiv-list-${l[0].replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
+            </div>
+          `;
+        }
+
+        // 원재료/소모품 LOT (기존 로직)
         const remain = parseFloat(l[8]) || 0;
         const qty = parseFloat(l[4]) || 1;
-        const status = l[9] || '정상';
         const stColor = status === '정상' || status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
         const canPrint = ['미사용','사용중','정상'].includes(status);
-        const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
         const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
         return `
-          <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">
+          <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">
             <div class="row between mb-4">
               <span class="fs-13 fw-6 clickable" style="color:var(--pri)">${l[0]}</span>
               <div class="row" style="gap:6px;align-items:center">
-                ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isFG?'fg':isSP?'sp':'rm'}')">🖨️ 전체 ${printableIndivs.length}매</button>` : ''}
+                ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">🖨️ 전체 ${printableIndivs.length}매</button>` : ''}
                 <span class="badge badge-${stColor}">${status}</span>
               </div>
             </div>
@@ -1545,24 +1590,42 @@ async function showLotIndividuals(lotId, itemName, type) {
       return;
     }
 
+    const activeIndivs = indivs.filter(iv => !['출하완료','폐기'].includes(iv[3]));
+    const shippedIndivs = indivs.filter(iv => iv[3] === '출하완료');
     container.innerHTML = `
       <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
-        <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (${indivs.length}건) — 클릭하여 개별 인쇄</div>
-        ${indivs.map(iv => {
+        <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (재고 ${activeIndivs.length}건 / 전체 ${indivs.length}건)</div>
+        ${activeIndivs.map(iv => {
           const st = iv[3] || '미사용';
-          const canPrint = ['미사용','사용중','정상','미출하'].includes(st);
-          const stColor = st === '미사용' || st === '정상' || st === '미출하' ? 'suc' : st === '사용중' ? 'info' : 'gray';
+          const canPrint = ['미사용','사용중','정상','미출하','냉동보관중','출하가능'].includes(st);
+          const canShip = isFG && (st === '출하가능' || st === '정상');
+          const isFreezing = st === '냉동보관중';
+          const stColor = st === '출하가능' || st === '정상' || st === '미출하' ? 'suc' : st === '냉동보관중' ? 'warn' : st === '사용중' ? 'info' : 'gray';
           return `
-            <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);${canPrint ? 'cursor:pointer' : 'opacity:0.5'}"
-                 ${canPrint ? `onclick="printSingleLabel('${iv[0]}','${itemName}','${lotId}','${type}')"` : ''}>
-              <div>
+            <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:center">
+              <div style="flex:1;min-width:0">
                 <span class="fs-12 fw-6">${iv[0]}</span>
                 <span class="badge badge-${stColor}" style="font-size:9px;padding:1px 6px;margin-left:4px">${st}</span>
               </div>
-              ${canPrint ? '<span class="fs-11 c-pri fw-6">🖨️ 인쇄</span>' : '<span class="fs-11 c-txt-l">인쇄불가</span>'}
+              <div class="row" style="gap:4px;flex-shrink:0">
+                ${canShip ? `<button class="btn btn-sm btn-suc" style="padding:2px 8px;font-size:10px" onclick="event.stopPropagation();showShipmentPopup('${iv[0]}','${lotId}','${itemName}')">출하</button>` : ''}
+                ${isFreezing ? `<span class="fs-10 c-warn">냉동중</span>` : ''}
+                ${canPrint ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:10px" onclick="event.stopPropagation();printSingleLabel('${iv[0]}','${itemName}','${lotId}','${type}')">인쇄</button>` : '<span class="fs-10 c-txt-l">인쇄불가</span>'}
+              </div>
             </div>
           `;
         }).join('')}
+        ${shippedIndivs.length > 0 ? `
+          <div class="fs-11 c-txt-l mt-8 mb-4" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">출하완료 ${shippedIndivs.length}건 ▸</div>
+          <div style="display:none;opacity:0.5">
+            ${shippedIndivs.map(iv => `
+              <div class="row between" style="padding:4px 0;border-bottom:1px solid var(--bg)">
+                <div><span class="fs-11">${iv[0]}</span> <span class="badge badge-gray" style="font-size:9px;padding:1px 6px">출하완료</span></div>
+                <span class="fs-10 c-txt-l">${(iv[4]||'').substring(0,16)}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
       </div>
     `;
   } catch(e) {
@@ -4538,33 +4601,83 @@ async function processDisposal(itemId, lotId, type, itemName) {
 }
 
 // ─── 출하 처리 (스캔 후) ───
-async function processShipment(indivId, lotId, itemName) {
-  confirm('출하 처리', `${indivId}\n${itemName}\n\n이 제품을 출하 처리하시겠습니까?`, async () => {
-    try {
-      showLoading();
-      const shipTime = formatDateTime();
+// ── 출하 거래처 선택 팝업 ──
+async function showShipmentPopup(indivId, lotId, itemName) {
+  let vendors = [];
+  try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
+  const customerVendors = vendors.filter(v => (v[2]||'') === '고객' || (v[2]||'') === '');
 
-      // 1. 완제품개별 상태 업데이트
-      await SheetsAPI.updateRow('완제품개별', 0, indivId, {
-        3: '출하완료',
-        4: shipTime,
-        5: State.user?.email,
-      });
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:360px;max-height:80vh;overflow-y:auto">
+      <div class="fs-16 fw-7 mb-8">출하 처리</div>
+      <div class="fs-12 c-txt-l mb-12">${indivId}<br>${itemName}</div>
+      <div class="fs-13 fw-6 mb-8">거래처 선택</div>
+      ${customerVendors.length === 0 ?
+        '<div class="fs-12 c-txt-l mb-8">등록된 거래처가 없습니다. Google Sheets에서 거래처를 추가하세요.</div>' :
+        customerVendors.map(v => `
+          <div class="card clickable" style="padding:10px;margin-bottom:6px;border:1.5px solid var(--gray-l)" onclick="executeShipment('${indivId}','${lotId}','${itemName}','${(v[1]||'').replace(/'/g,"\\'")}','${v[0]}');this.closest('.dialog-overlay').remove()">
+            <div class="fs-13 fw-6">${v[1] || ''} <span class="fs-11 c-txt-l">${v[0]}</span></div>
+            ${v[3] ? `<div class="fs-11 c-txt-l">${v[3]}</div>` : ''}
+          </div>
+        `).join('')
+      }
+      <div class="row mt-12" style="gap:8px">
+        <button class="btn btn-outline btn-gray flex-1" onclick="this.closest('.dialog-overlay').remove()">취소</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
 
-      // 2. 출하기록 시트에 기록 저장 (기존 시트 구조: shipId, fgLotId, indivIds, customer, qty, unit, shippedAt, carrier)
-      const shipId = await generateSeqId('SHP', '출하기록');
-      await SheetsAPI.append('출하기록', [
-        shipId, lotId, indivId, '', '1', 'kg', shipTime, State.user?.email
-      ]);
+async function executeShipment(indivId, lotId, itemName, customerName, customerCode) {
+  try {
+    showLoading();
+    const shipTime = formatDateTime();
 
-      toast(`출하 완료: ${indivId}`, 'suc');
-      setTimeout(() => Router.go('qr-scan'), 1500);
-    } catch (e) {
-      toast('출하 실패: ' + e.message, 'err');
-    } finally {
-      hideLoading();
+    // 1. 완제품개별 상태 업데이트
+    await SheetsAPI.updateRow('완제품개별', 0, indivId, {
+      3: '출하완료',
+      4: shipTime,
+      5: State.user?.email,
+    });
+
+    // 2. 출하기록 시트에 기록 저장
+    const shipId = await generateSeqId('SHP', '출하기록');
+    await SheetsAPI.append('출하기록', [
+      shipId, lotId, indivId, customerName, '1', 'ea', shipTime, State.user?.email
+    ]);
+
+    // 3. LOT 잔량 업데이트 — 출하완료 아닌 개별 수 세기
+    const allIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []);
+    const lotIndivs = allIndivs.filter(iv => iv[1] === lotId);
+    const activeCount = lotIndivs.filter(iv => !['출하완료','폐기'].includes(iv[3])).length;
+    await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 8: String(activeCount) });
+
+    // 4. 모든 개별이 출하/폐기면 LOT 상태도 출하완료
+    if (activeCount === 0) {
+      await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 9: '출하완료' });
     }
-  });
+
+    toast(`출하 완료: ${indivId} → ${customerName}`, 'suc');
+    // 현재 화면 새로고침
+    if (State.currentScreen === 'qr-scan') {
+      setTimeout(() => Router.go('qr-scan'), 1000);
+    } else {
+      setTimeout(() => Router.go('inventory'), 1000);
+    }
+  } catch (e) {
+    toast('출하 실패: ' + e.message, 'err');
+  } finally {
+    hideLoading();
+  }
+}
+
+// 하위호환: 기존 processShipment 호출 시 팝업으로 전환
+async function processShipment(indivId, lotId, itemName) {
+  showShipmentPopup(indivId, lotId, itemName);
 }
 
 // ─── 냉동 12h 경과 체크 & 출하가능 전환 ───
