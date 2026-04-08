@@ -1515,7 +1515,7 @@ async function printLotLabels(lotId, itemName, type) {
 
     const indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
     const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
-    const printable = indivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
+    const printable = indivs.filter(iv => ['미사용','사용중','정상','미출하','냉동보관중','출하가능'].includes(iv[3]));
 
     if (printable.length === 0) { toast('인쇄 가능한 개별 항목이 없습니다', 'warn'); hideLoading(); return; }
 
@@ -1634,7 +1634,7 @@ Screens['receive-form'] = async () => {
         <label>검수자</label>
         <input type="text" id="rcv-inspector" value="${State.user?.name || ''}" readonly>
       </div>
-      <div class="input-group">
+      <div class="input-group" id="rcv-indiv-group">
         <label>개별 포장 수 (QR 라벨 수)</label>
         <input type="number" id="rcv-indiv-count" placeholder="포장 수" value="1">
         <div class="input-hint" id="rcv-indiv-hint"></div>
@@ -1671,6 +1671,9 @@ function updateReceiveItems() {
     sel.innerHTML = (window._rcvSpItems || [])
       .map(i => `<option value="${i[0]}" data-unit="${i[3]||'개'}">${i[0]} ${i[1]}</option>`).join('');
   }
+  // 소모품은 개별 QR 불필요 → 필드 숨김
+  const indivGroup = $id('rcv-indiv-group');
+  if (indivGroup) indivGroup.style.display = type === '소모품' ? 'none' : '';
 }
 
 function updateReceiveUnit() {
@@ -1832,7 +1835,18 @@ async function onQRScanSuccess(decodedText) {
   resultEl.innerHTML = `<div class="spinner" style="margin:0 auto"></div>`;
 
   try {
+    // QR 형식 검증: RM-, FG-, SP- 접두어 확인
     const id = decodedText.trim();
+    if (!id.match(/^(RM|FG|SP)-/)) {
+      resultEl.innerHTML = `
+        <div class="fs-14 fw-7 mb-8">스캔 결과</div>
+        <div class="c-err fs-13">유효하지 않은 QR 형식입니다</div>
+        <div class="fs-11 c-txt-l mt-4">QR 코드는 RM-, FG-, SP-로 시작해야 합니다</div>
+        <div class="fs-11 c-txt-l mt-2">인식된 값: ${id.substring(0, 50)}</div>
+        <button class="btn btn-info btn-full mt-12" onclick="Router.go('qr-scan')">다시 스캔</button>
+      `;
+      return;
+    }
     let data = null, type = '';
 
     if (id.startsWith('RM-')) {
@@ -4409,15 +4423,14 @@ setInterval(checkFreezeAndUpdateStatus, 5 * 60 * 1000);
 
 // ─── QR 라벨 프린트 (재고 화면에서) ───
 async function printFGLabels(itemCode, itemName) {
+  // printLotLabels와 동일한 방식 — 개별 레코드 조회 후 preLabels 전달
   try {
     showLoading();
     const lots = (State.finishedGoodsLots || []).filter(l => l[1] === itemCode);
     if (lots.length === 0) { toast('해당 완제품 LOT가 없습니다', 'err'); hideLoading(); return; }
     const lot = lots[lots.length - 1];
     const lotId = lot[0];
-    const packCount = parseInt(lot[10]) || 50;
-    hideLoading();
-    Router.go('label-print', { lotId, count: packCount, itemName, type: 'fg' });
+    await printLotLabels(lotId, itemName, 'fg');
   } catch (e) {
     hideLoading();
     toast('라벨 로드 실패: ' + e.message, 'err');
