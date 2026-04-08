@@ -1059,7 +1059,7 @@ function renderProductionContent(activeTab, isAdmin) {
   }
 
   else if (activeTab === '완료된 작업') {
-    const allDone = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12]?.startsWith('거부')));
+    const allDone = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12] === '냉동보관중' || r[12] === '출하가능' || r[12]?.startsWith('거부')));
 
     // Date range filter
     const today = new Date();
@@ -1092,7 +1092,7 @@ function renderProductionContent(activeTab, isAdmin) {
           <div class="card">
             <div class="row between mb-4">
               <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-              <span class="badge badge-${wo[12]==='승인완료'?'suc':'err'}">${wo[12]}</span>
+              <span class="badge badge-${wo[12]==='승인완료'||wo[12]==='출하가능'?'suc':wo[12]==='냉동보관중'?'warn':'err'}">${wo[12]}</span>
             </div>
             <div class="fs-11 c-txt-l">${wo[0]} · ${(wo[16]||'').substring(0,16)}</div>
           </div>
@@ -1106,7 +1106,7 @@ function renderProductionContent(activeTab, isAdmin) {
       <div class="card clickable" onclick="${wo[12]==='승인대기' ? `Router.go('approval-detail',{woId:'${wo[0]}'})` : ''}">
         <div class="row between mb-4">
           <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-          <span class="badge badge-${wo[12]==='승인완료'?'suc':wo[12]==='진행중'?'info':wo[12]==='승인대기'?'warn':'err'}">${wo[12]}</span>
+          <span class="badge badge-${wo[12]==='출하가능'||wo[12]==='승인완료'?'suc':wo[12]==='진행중'?'info':wo[12]==='승인대기'||wo[12]==='냉동보관중'?'warn':'err'}">${wo[12]}</span>
         </div>
         <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''}</div>
       </div>
@@ -1238,7 +1238,7 @@ Screens.inventory = async () => {
 };
 
 function renderInventoryContent(activeTab) {
-  const tabs = ['원재료', '완제품', '소모품', '입고', '출하'];
+  const tabs = ['원재료', '완제품', '소모품'];
 
   $id('content').innerHTML = `
     <div class="tab-filter">
@@ -1311,7 +1311,14 @@ function renderInventoryContent(activeTab) {
     if (Object.keys(grouped).length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">완제품 재고 없음</div></div>`;
     } else {
-      listEl.innerHTML = Object.entries(grouped).map(([code, g]) => `
+      listEl.innerHTML = Object.entries(grouped).map(([code, g]) => {
+        // Check freeze status across lots
+        const freezingLots = g.lots.filter(l => (l[9]||'') === '냉동보관중');
+        const readyLots = g.lots.filter(l => (l[9]||'') === '출하가능' || (l[9]||'') === '정상');
+        const statusBadge = freezingLots.length > 0
+          ? `<span class="badge badge-warn">냉동보관중 ${freezingLots.length}</span>`
+          : `<span class="badge badge-suc">출하가능</span>`;
+        return `
         <div class="card clickable" onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${g.name}', type:'fg'})">
           <div class="row between">
             <div>
@@ -1319,10 +1326,13 @@ function renderInventoryContent(activeTab) {
               <div class="fs-12 c-txt-l mt-4">현재고: ${g.totalRemain}kg (${g.lots.length} LOT) · 냉동 -18°C</div>
               <div class="fs-11 c-txt-l">가장 빠른 소비기한: ${g.earliestExp ? g.earliestExp.substring(5,10) : '-'}</div>
             </div>
-            <span class="badge badge-suc">정상</span>
+            ${statusBadge}
+          </div>
+          <div class="row mt-8" style="gap:6px">
+            <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="event.stopPropagation();printFGLabels('${code}','${g.name}')">🏷️ QR 라벨</button>
           </div>
         </div>
-      `).join('');
+      `;}).join('');
     }
   }
 
@@ -1781,7 +1791,7 @@ Screens['qr-scan'] = () => {
     <div style="background:#000;height:100%;display:flex;flex-direction:column">
       <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
         <span style="color:#fff;font-size:16px;font-weight:700">QR 스캔</span>
-        <span style="color:#fff;opacity:0.6;font-size:13px;cursor:pointer" onclick="stopQRScan();Router.go('dashboard')">닫기</span>
+        <span style="color:#fff;opacity:0.6;font-size:13px;cursor:pointer" onclick="stopQRScan().then(()=>Router.go('dashboard')).catch(()=>Router.go('dashboard'))">닫기</span>
       </div>
       <div id="qr-reader" style="flex:1"></div>
       <div id="qr-result" style="background:var(--white);border-radius:16px 16px 0 0;padding:20px;min-height:100px">
@@ -1808,9 +1818,10 @@ Screens['qr-scan'] = () => {
   }, 300);
 };
 
-function stopQRScan() {
+async function stopQRScan() {
   if (window._qrScanner) {
-    window._qrScanner.stop().catch(() => {});
+    try { await window._qrScanner.stop(); } catch(e) {}
+    try { window._qrScanner.clear(); } catch(e) {}
     window._qrScanner = null;
   }
 }
@@ -1860,19 +1871,32 @@ async function onQRScanSuccess(decodedText) {
       return;
     }
 
+    // 완제품: 출하 가능 여부 체크 (냉동 12h 이상)
+    let shipBtn = '';
+    if (type === '완제품') {
+      const fgStatus = data.status || '';
+      const canShip = fgStatus === '출하가능' || fgStatus === '정상';
+      if (canShip) {
+        shipBtn = `<button class="btn btn-suc flex-1" onclick="processShipment('${data.id}','${data.lotId}','${data.itemName}')">출하처리</button>`;
+      } else if (fgStatus === '냉동보관중') {
+        shipBtn = `<button class="btn btn-gray flex-1" disabled>출하불가 (냉동보관중)</button>`;
+      } else {
+        shipBtn = `<button class="btn btn-suc flex-1" onclick="processShipment('${data.id}','${data.lotId}','${data.itemName}')">출하처리</button>`;
+      }
+    }
+
     resultEl.innerHTML = `
       <div class="fs-14 fw-7 mb-8">스캔 결과</div>
       <div class="card bl-info">
         <div class="fs-14 fw-6">${data.id}</div>
         <div class="fs-12 c-txt-l mt-4">${data.itemName} · ${data.remain ? data.remain + 'kg' : ''} · 소비기한 ${(data.exp||'').substring(0,10)}</div>
-        <div class="fs-11 c-suc mt-4">상태: ${data.status || '정상'}</div>
+        <div class="fs-11 ${data.status === '냉동보관중' ? 'c-warn' : 'c-suc'} mt-4">상태: ${data.status || '정상'}</div>
       </div>
       <div class="row mt-12" style="gap:8px">
-        <button class="btn btn-info flex-1" onclick="toast('상세조회 준비중','info')">상세조회</button>
-        ${type === '완제품' ? '<button class="btn btn-suc flex-1" onclick="toast(\'출하처리 준비중\',\'info\')">출하처리</button>' : ''}
+        ${shipBtn}
         <button class="btn btn-outline btn-err flex-1" onclick="toast('폐기처리 준비중','info')">폐기</button>
       </div>
-      <div class="fs-11 c-txt-l" style="text-align:center;margin-top:8px">* 생산 투입은 작업지시서 공정에서만 가능합니다</div>
+      ${type !== '완제품' ? '<div class="fs-11 c-txt-l" style="text-align:center;margin-top:8px">* 생산 투입은 작업지시서 공정에서만 가능합니다</div>' : ''}
       <button class="btn btn-outline btn-gray btn-full mt-8" onclick="Router.go('qr-scan')">다시 스캔</button>
     `;
 
@@ -3389,8 +3413,8 @@ function renderStepContent(step, stepType) {
   const { recipes, targetQty } = State.woExec;
   const stepNo = parseInt(step[1]);
   const isMixing = stepType === 'process' && (step[2]||'').includes('믹싱');
-  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
-  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', seal: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
+  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', seal: '포장(밀봉)', inspect: '검사(CCP)', pack: '포장', store: '보관' };
 
   let html = `
     <div class="card bl-${typeColor[stepType]||'gray'}">
@@ -3469,7 +3493,7 @@ function renderStepContent(step, stepType) {
 
     // ⑤ 사진 촬영 (카메라 / 갤러리 분리)
     html += `
-      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 사진 촬영 <span class="c-err">*필수</span></div>
+      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">투입 후 사용한 포대 사진 촬영 <span class="c-err">*필수</span></div>
       <div class="row mb-8" style="gap:8px">
         <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="document.getElementById('photo-camera-${stepNo}').click()">📷 카메라 촬영</button>
         <button class="btn btn-sm btn-outline btn-gray flex-1" onclick="document.getElementById('photo-gallery-${stepNo}').click()">🖼️ 갤러리 선택</button>
@@ -3568,6 +3592,43 @@ function renderStepContent(step, stepType) {
     }
   }
 
+  else if (stepType === 'seal') {
+    // 포장(밀봉) 공정 — 금속검출 전
+    const packTarget = State.woExec.packCount;
+    html += `
+      <div class="info-box" style="background:rgba(124,58,237,0.1)">
+        <div class="fs-12 fw-6" style="color:#7c3aed">포장 공정</div>
+        <div class="fs-11 c-txt-l mt-4">포장 밀봉 후 라벨 부착 상태를 확인하고, 무작위 3개 샘플 사진을 첨부하세요.</div>
+      </div>
+      <div class="fs-12 fw-6 c-txt-l mb-4 mt-8" style="border-top:1px solid var(--gray-l);padding-top:10px">체크항목</div>
+      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-0" onclick="toggleCheck(this)"></div><span>제품 라벨 부착 확인</span></div>
+      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-1" onclick="toggleCheck(this)"></div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>
+      <div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 사진 촬영 <span class="c-err">*필수</span></div>
+    `;
+    for (let n = 1; n <= 3; n++) {
+      html += `
+        <div class="card" style="padding:10px;border-left:3px solid #7c3aed">
+          <div class="fs-13 fw-6 mb-8">샘플 #${n}</div>
+          <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
+            <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}')">
+            <div class="photo-label" style="font-size:11px">📷 제품 #${n} 사진 *필수</div>
+            <div class="photo-preview" id="photo-preview-${stepNo}-seal${n}"></div>
+          </div>
+        </div>
+      `;
+    }
+    html += `
+      <div class="input-group mt-12">
+        <label>최종 완제품 수량 <span class="c-err">*필수</span></label>
+        <div class="input-suffix">
+          <input type="number" id="seal-qty-${stepNo}" placeholder="밀봉 완료 수량" value="${packTarget || ''}">
+          <span>개</span>
+        </div>
+        <div class="input-hint">이 수량이 최종 재고 인정 수량으로 처리됩니다</div>
+      </div>
+    `;
+  }
+
   else if (stepType === 'inspect') {
     // CCP Metal Detection - 7 steps
     html += `
@@ -3630,9 +3691,14 @@ function renderStepContent(step, stepType) {
         <div class="info-box warn" style="padding:8px">
           <div class="fs-12 fw-6 c-warn">다음 검증 예정: Step4 시작 + 2시간</div>
         </div>
-        <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1">합격</button><button class="btn btn-sm btn-outline btn-err flex-1">불합격</button></div>
-        <div class="row mb-8" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">실제 검사 시간:</span><input type="time" id="ccp-time-5" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"><span class="fs-11 c-txt-l">(직접 입력)</span></div>
-        <button class="btn btn-sm btn-outline btn-warn btn-full">+ 추가 2시간 검증 기록</button>
+        <div id="ccp5-records-${stepNo}">
+          <div class="ccp5-record" style="border:1px solid var(--gray-l);border-radius:8px;padding:8px;margin-bottom:6px">
+            <div class="fs-11 fw-6 c-txt-l mb-4">검증 #1</div>
+            <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1" onclick="this.parentElement.parentElement.dataset.result='합격';this.classList.add('active');this.nextElementSibling.classList.remove('active')" style="opacity:0.6">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" onclick="this.parentElement.parentElement.dataset.result='불합격';this.classList.add('active');this.previousElementSibling.classList.remove('active')" style="opacity:0.6">불합격</button></div>
+            <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검사 시간:</span><input type="time" class="ccp5-time" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"><span class="fs-11 c-txt-l">(직접 입력)</span></div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline btn-warn btn-full" onclick="addCCP5Record('${stepNo}')">+ 추가 2시간 검증 기록</button>
       </div>
     `;
     // Step 6
@@ -3690,6 +3756,22 @@ function renderStepContent(step, stepType) {
 
   html += `</div>`; // Close card
   el.innerHTML = html;
+}
+
+function addCCP5Record(stepNo) {
+  const container = $id('ccp5-records-' + stepNo);
+  if (!container) return;
+  const count = container.querySelectorAll('.ccp5-record').length + 1;
+  const div = document.createElement('div');
+  div.className = 'ccp5-record';
+  div.style.cssText = 'border:1px solid var(--gray-l);border-radius:8px;padding:8px;margin-bottom:6px';
+  div.innerHTML = `
+    <div class="fs-11 fw-6 c-txt-l mb-4">검증 #${count}</div>
+    <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1" onclick="this.parentElement.parentElement.dataset.result='합격';this.classList.add('active');this.nextElementSibling.classList.remove('active')" style="opacity:0.6">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" onclick="this.parentElement.parentElement.dataset.result='불합격';this.classList.add('active');this.previousElementSibling.classList.remove('active')" style="opacity:0.6">불합격</button></div>
+    <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검사 시간:</span><input type="time" class="ccp5-time" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${new Date().toTimeString().substring(0,5)}"><span class="fs-11 c-txt-l">(직접 입력)</span></div>
+  `;
+  container.appendChild(div);
+  toast(`검증 #${count} 추가됨`, 'suc');
 }
 
 // Helper functions for WO execution
@@ -3772,6 +3854,25 @@ function handleCompleteStep(isFinal = false) {
       const scanned = State.woExec._scannedLots?.[stepNo]?.length || 0;
       if (scanned === 0) missing.push('QR 스캔 (원재료 LOT)');
     }
+  }
+
+  if (stepType === 'seal') {
+    // 밀봉 체크항목 확인
+    const sealCheck0 = $id(`check-seal-${stepNo}-0`);
+    const sealCheck1 = $id(`check-seal-${stepNo}-1`);
+    if (!sealCheck0 || sealCheck0.textContent !== '✓') missing.push('제품 라벨 부착 확인');
+    if (!sealCheck1 || sealCheck1.textContent !== '✓') missing.push('밀봉 상태 확인');
+    // 사진 확인
+    let photoCount = 0;
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-seal${n}`);
+      if (prev && prev.innerHTML.trim()) photoCount++;
+    }
+    if (photoCount < 3) missing.push(`샘플 사진 (${3-photoCount}건 미촬영)`);
+    // 수량 확인
+    const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
+    if (!sealQty || sealQty <= 0) missing.push('최종 완제품 수량');
+    else State.woExec.packCount = sealQty; // 최종 재고 인정 수량 반영
   }
 
   if (missing.length > 0) {
@@ -4082,14 +4183,9 @@ Screens['approval-detail'] = async (params = {}) => {
     if (!wo) { toast('작업지시서를 찾을 수 없습니다', 'err'); hideLoading(); Router.go('production'); return; }
 
     const records = (await SheetsAPI.getAll('공정기록').catch(() => [])).filter(r => r[0] === wo[0]);
+    const woStatus = wo[12] || '';
 
-    const freezeStart = wo[11] ? new Date(wo[11]) : null;
-    const freezeHours = freezeStart ? ((Date.now() - freezeStart.getTime()) / (1000*60*60)) : 0;
-    const canApprove = freezeHours >= 12;
-    const remainH = Math.floor(12 - freezeHours);
-    const remainM = Math.round(((12 - freezeHours) % 1) * 60);
-
-    renderHeader('출하승인 심사', wo[0], { back: 'production' });
+    renderHeader('공정 완료 승인', wo[0], { back: 'production' });
 
     $id('content').innerHTML = `
       <div style="padding:16px">
@@ -4102,12 +4198,10 @@ Screens['approval-detail'] = async (params = {}) => {
           <div class="fs-12 c-txt-l">시작: ${(wo[9]||'').substring(11,16)} → 완료: ${(wo[10]||'').substring(11,16)}</div>
         </div>
 
-        <div class="card bl-${canApprove ? 'suc' : 'warn'}" style="background:${canApprove ? '#e8f5e9' : '#fff3e0'}">
-          <div class="fs-13 fw-7 ${canApprove ? 'c-suc' : 'c-warn'}">
-            ${canApprove ? '냉동 12시간 완료 — 승인 가능' : '냉동 시간 미경과 — 승인 불가'}
-          </div>
-          <div class="fs-12 c-txt-l mt-4">냉동 시작: ${freezeStart ? formatTime(freezeStart) : '-'} · 경과: ${freezeHours.toFixed(1)}시간</div>
-          ${!canApprove ? `<div class="fs-14 fw-7 c-warn mt-4">남은 시간: ${remainH > 0 ? remainH+'시간 ' : ''}${remainM}분</div>` : ''}
+        <div class="card bl-info" style="background:#e3f2fd">
+          <div class="fs-13 fw-7 c-pri">1단계: 공정 완료 승인</div>
+          <div class="fs-12 c-txt-l mt-4">승인 시 재고로 인정되고 QR 코드가 생성됩니다.</div>
+          <div class="fs-12 c-txt-l mt-2">냉동 입고 시간이 자동 기록되며, 12시간 이후 출하 가능 상태가 됩니다.</div>
         </div>
 
         <div class="fs-14 fw-7 mb-8">공정 기록 타임라인</div>
@@ -4126,8 +4220,8 @@ Screens['approval-detail'] = async (params = {}) => {
 
       <div style="display:flex;gap:10px;padding:12px 16px;background:var(--white);border-top:1px solid var(--gray-l)">
         <button class="btn btn-outline btn-err flex-1" onclick="Router.go('reject-modal', {woId:'${wo[0]}'})">거부</button>
-        <button class="btn btn-suc" style="flex:2" onclick="approveWO('${wo[0]}')" ${!canApprove ? 'disabled' : ''}>
-          ${canApprove ? '승인 · LOT 생성' : `승인 불가 (${remainH > 0 ? remainH+'h ' : ''}${remainM}m)`}
+        <button class="btn btn-suc" style="flex:2" onclick="approveWO('${wo[0]}')">
+          공정 완료 승인 · QR 생성
         </button>
       </div>
     `;
@@ -4140,7 +4234,7 @@ Screens['approval-detail'] = async (params = {}) => {
 };
 
 async function approveWO(woId) {
-  confirm('출하 승인', '승인하고 완제품 LOT를 생성하시겠습니까?', async () => {
+  confirm('공정 완료 승인', '공정 완료를 승인하시겠습니까?\n재고로 인정되고 QR 코드가 생성됩니다.\n냉동 입고가 시작됩니다.', async () => {
     try {
       showLoading();
       const wos = await SheetsAPI.getAll('작업지시서');
@@ -4152,30 +4246,35 @@ async function approveWO(woId) {
       const fgItemCode = wo[3] || 'FG001';
       const expDate = formatDate(new Date(Date.now() + 90*86400000)); // +90 days
       const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
+      const freezeStart = formatDateTime(); // 냉동 입고 시점 = 승인 시점
 
-      // 1. Update WO
+      // 1. Update WO — 상태를 '냉동보관중'으로 (출하 승인 전 단계)
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
-        12: '승인완료',
+        11: freezeStart,        // freezeStartTime
+        12: '냉동보관중',        // status: 공정완료 승인됨, 냉동 중
         14: fgLotId,
         15: State.user?.email,
         16: formatDateTime(),
       });
 
-      // 2. Create FG LOT
+      // 2. Create FG LOT — status '냉동보관중'
       await SheetsAPI.append('완제품LOT', [
         fgLotId, fgItemCode, wo[4] || '호두과자 반죽', qty, wo[6] || '1kg',
-        formatDate(), expDate, woId, qty, '정상', packCount, '냉동 -18°C'
+        formatDate(), expDate, woId, qty, '냉동보관중', packCount, '냉동 -18°C'
       ]);
 
-      // 3. Create FG individual QR records + QR 이미지 URL
+      // 3. Create FG individual QR records
       const indivRows = [];
       for (let i = 1; i <= packCount; i++) {
         const fgIndivId = `${fgLotId}-${String(i).padStart(2,'0')}`;
-        indivRows.push([fgIndivId, fgLotId, fgItemCode, '미출하', '', '', qrImageUrl(fgIndivId)]);
+        indivRows.push([fgIndivId, fgLotId, fgItemCode, '냉동보관중', '', '', qrImageUrl(fgIndivId)]);
       }
       await SheetsAPI.append('완제품개별', indivRows);
 
-      toast(`승인 완료! ${fgLotId} 생성 (QR ${packCount}개)`, 'suc');
+      toast(`공정 승인 완료! ${fgLotId} 재고 인정 (QR ${packCount}개)\n냉동 입고 시작 — 12시간 후 출하 가능`, 'suc', 5000);
+
+      // 냉동 입고 알림
+      showFreezeNotification(woId, fgLotId, wo[4], freezeStart);
 
       confirm('라벨 인쇄', `완제품 QR 라벨 ${packCount}매를 인쇄하시겠습니까?`, () => {
         Router.go('label-print', { lotId: fgLotId, count: packCount, itemName: wo[4], type: 'fg' });
@@ -4189,6 +4288,27 @@ async function approveWO(woId) {
       hideLoading();
     }
   });
+}
+
+// 냉동 입고 알림
+function showFreezeNotification(woId, lotId, itemName, freezeStart) {
+  // Show a persistent notification card
+  const notifEl = document.createElement('div');
+  notifEl.id = 'freeze-notif';
+  notifEl.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:468px;z-index:100;';
+  notifEl.innerHTML = `
+    <div class="card bl-info" style="background:#e3f2fd;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
+      <div class="row between mb-4">
+        <span class="fs-13 fw-7 c-pri">냉동 입고 완료</span>
+        <span style="cursor:pointer;font-size:18px;color:var(--txt-l)" onclick="this.closest('#freeze-notif').remove()">×</span>
+      </div>
+      <div class="fs-12 c-txt">${itemName} (${lotId})</div>
+      <div class="fs-12 c-txt-l mt-4">냉동 입고 시간: ${freezeStart}</div>
+      <div class="fs-12 c-pri fw-6 mt-4">12시간 후 출하 가능 상태로 전환됩니다</div>
+    </div>
+  `;
+  document.body.appendChild(notifEl);
+  setTimeout(() => notifEl.remove(), 10000);
 }
 
 // ─── REJECT MODAL ───
@@ -4240,6 +4360,70 @@ async function rejectWO(woId, action) {
   }
 }
 
+// ─── 출하 처리 (스캔 후) ───
+async function processShipment(indivId, lotId, itemName) {
+  confirm('출하 처리', `${indivId}\n${itemName}\n\n이 제품을 출하 처리하시겠습니까?`, async () => {
+    try {
+      showLoading();
+      await SheetsAPI.updateRow('완제품개별', 0, indivId, {
+        3: '출하완료',
+        4: formatDateTime(),
+        5: State.user?.email,
+      });
+      toast(`출하 완료: ${indivId}`, 'suc');
+      setTimeout(() => Router.go('qr-scan'), 1500);
+    } catch (e) {
+      toast('출하 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
+// ─── 냉동 12h 경과 체크 & 출하가능 전환 ───
+async function checkFreezeAndUpdateStatus() {
+  try {
+    const wos = await SheetsAPI.getAll('작업지시서');
+    const freezing = wos.filter(w => w[12] === '냉동보관중' && w[11]);
+    let updated = 0;
+    for (const wo of freezing) {
+      const freezeStart = new Date(wo[11]);
+      const hours = (Date.now() - freezeStart.getTime()) / (1000 * 60 * 60);
+      if (hours >= 12) {
+        await SheetsAPI.updateRow('작업지시서', 0, wo[0], { 12: '출하가능' });
+        if (wo[14]) {
+          await SheetsAPI.updateRow('완제품LOT', 0, wo[14], { 9: '출하가능' });
+          const indivs = await SheetsAPI.getAll('완제품개별');
+          const lotIndivs = indivs.filter(r => r[1] === wo[14] && r[3] === '냉동보관중');
+          for (const ind of lotIndivs) {
+            await SheetsAPI.updateRow('완제품개별', 0, ind[0], { 3: '출하가능' });
+          }
+        }
+        updated++;
+      }
+    }
+    if (updated > 0) toast(`${updated}건 출하 가능 상태로 전환됨`, 'suc');
+  } catch (e) { console.error('Freeze check error:', e); }
+}
+setInterval(checkFreezeAndUpdateStatus, 5 * 60 * 1000);
+
+// ─── QR 라벨 프린트 (재고 화면에서) ───
+async function printFGLabels(itemCode, itemName) {
+  try {
+    showLoading();
+    const lots = (State.finishedGoodsLots || []).filter(l => l[1] === itemCode);
+    if (lots.length === 0) { toast('해당 완제품 LOT가 없습니다', 'err'); hideLoading(); return; }
+    const lot = lots[lots.length - 1];
+    const lotId = lot[0];
+    const packCount = parseInt(lot[10]) || 50;
+    hideLoading();
+    Router.go('label-print', { lotId, count: packCount, itemName, type: 'fg' });
+  } catch (e) {
+    hideLoading();
+    toast('라벨 로드 실패: ' + e.message, 'err');
+  }
+}
+
 /* ═══════════════════════════════════════════════
    APP INITIALIZATION
    ═══════════════════════════════════════════════ */
@@ -4285,6 +4469,9 @@ async function initApp() {
     }
 
     Router.go('dashboard');
+
+    // 냉동 상태 체크 (12h 경과 시 출하가능으로 전환)
+    checkFreezeAndUpdateStatus();
 
     // ── 일회성 데이터 마이그레이션 ──
     // (1) 공정2 "수온 확인" → "불순물 확인"
