@@ -1102,15 +1102,61 @@ function renderProductionContent(activeTab, isAdmin) {
 
   else if (activeTab === '전체작업') {
     const all = State.workOrders.filter(r => r[12] !== '삭제');
-    listEl.innerHTML = all.map(wo => `
-      <div class="card clickable" onclick="${wo[12]==='승인대기' ? `Router.go('approval-detail',{woId:'${wo[0]}'})` : ''}">
-        <div class="row between mb-4">
-          <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-          <span class="badge badge-${wo[12]==='출하가능'||wo[12]==='승인완료'?'suc':wo[12]==='진행중'?'info':wo[12]==='승인대기'||wo[12]==='냉동보관중'?'warn':'err'}">${wo[12]}</span>
-        </div>
-        <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''}</div>
+
+    // 상태별 건수 집계
+    const statusCounts = {};
+    all.forEach(wo => { const s = wo[12] || '미지정'; statusCounts[s] = (statusCounts[s] || 0) + 1; });
+    const statusOrder = ['진행중','승인대기','냉동보관중','출하가능','출하완료','승인완료'];
+    const statusBadgeMap = { '진행중':'info','승인대기':'warn','냉동보관중':'warn','출하가능':'suc','출하완료':'suc','승인완료':'suc' };
+
+    // 필터/정렬 상태
+    const curFilter = window._allWoFilter || '전체';
+    const curSort = window._allWoSort || 'desc';
+
+    // 필터링
+    let filtered = curFilter === '전체' ? all : all.filter(wo => wo[12] === curFilter);
+
+    // 날짜 정렬 (wo[9] = 생성일시)
+    filtered.sort((a, b) => {
+      const da = new Date(a[9] || '2000-01-01'), db = new Date(b[9] || '2000-01-01');
+      return curSort === 'desc' ? db - da : da - db;
+    });
+
+    // 요약 카드
+    const summaryCards = statusOrder.filter(s => statusCounts[s]).map(s =>
+      `<div style="text-align:center;padding:8px 0;min-width:60px;flex:1;border-radius:8px;background:${curFilter===s?'var(--pri)':'var(--bg)'};color:${curFilter===s?'#fff':'var(--txt)'};cursor:pointer" onclick="window._allWoFilter='${s}';renderProductionContent('전체작업',${isAdmin})">
+        <div style="font-size:18px;font-weight:800">${statusCounts[s]}</div>
+        <div style="font-size:10px;margin-top:2px">${s}</div>
+      </div>`
+    ).join('');
+
+    listEl.innerHTML = `
+      <div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding:2px 0">
+        ${summaryCards}
       </div>
-    `).join('') || `<div class="empty-state"><div class="es-icon">📝</div><div class="es-title">작업 내역 없음</div></div>`;
+      <div class="row between mb-8" style="gap:6px;align-items:center">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;flex:1">
+          <button class="btn btn-sm ${curFilter==='전체'?'btn-pri':'btn-outline btn-gray'}" onclick="window._allWoFilter='전체';renderProductionContent('전체작업',${isAdmin})">전체 (${all.length})</button>
+          ${statusOrder.filter(s => statusCounts[s]).map(s =>
+            `<button class="btn btn-sm ${curFilter===s?'btn-pri':'btn-outline btn-gray'}" onclick="window._allWoFilter='${s}';renderProductionContent('전체작업',${isAdmin})">${s}</button>`
+          ).join('')}
+        </div>
+        <button class="btn btn-sm btn-outline btn-gray" onclick="window._allWoSort=window._allWoSort==='desc'?'asc':'desc';renderProductionContent('전체작업',${isAdmin})" style="white-space:nowrap;flex-shrink:0">
+          ${curSort === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
+        </button>
+      </div>
+      <div class="fs-11 c-txt-l mb-8">${curFilter !== '전체' ? curFilter + ' · ' : ''}${filtered.length}건</div>
+      ${filtered.length === 0 ? `<div class="empty-state"><div class="es-icon">📝</div><div class="es-title">${curFilter} 작업 없음</div></div>` :
+        filtered.map(wo => `
+          <div class="card clickable" onclick="${wo[12]==='승인대기' ? `Router.go('approval-detail',{woId:'${wo[0]}'})` : ''}">
+            <div class="row between mb-4">
+              <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
+              <span class="badge badge-${statusBadgeMap[wo[12]]||'err'}">${wo[12]}</span>
+            </div>
+            <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · ${(wo[9]||'').substring(0,10)}</div>
+          </div>
+        `).join('')}
+    `;
   }
 }
 
