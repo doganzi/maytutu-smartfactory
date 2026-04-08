@@ -1283,7 +1283,7 @@ Screens.inventory = async () => {
   renderInventoryContent('원재료');
 };
 
-function renderInventoryContent(activeTab) {
+async function renderInventoryContent(activeTab) {
   const tabs = ['원재료', '완제품', '소모품'];
 
   $id('content').innerHTML = `
