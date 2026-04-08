@@ -1723,8 +1723,14 @@ async function submitReceiving() {
   const indivCount = parseInt($id('rcv-indiv-count')?.value) || 1;
   const photoInput = $id('rcv-photo-input');
 
-  if (!qty || parseFloat(qty) <= 0) { toast('수량을 입력하세요', 'err'); return; }
-  if (!photoInput?.files?.length) { toast('입고 사진을 첨부하세요', 'err'); return; }
+  // 필수 필드 검증
+  const missing = [];
+  if (!itemCode) missing.push('품목');
+  if (!supplier?.trim()) missing.push('공급업체');
+  if (!qty || parseFloat(qty) <= 0) missing.push('수량');
+  if (!exp) missing.push('소비기한');
+  if (!photoInput?.files?.length) missing.push('입고 사진');
+  if (missing.length > 0) { toast('미입력 항목: ' + missing.join(', '), 'err'); return; }
 
   try {
     showLoading();
@@ -1908,7 +1914,7 @@ async function onQRScanSuccess(decodedText) {
       </div>
       <div class="row mt-12" style="gap:8px">
         ${shipBtn}
-        <button class="btn btn-outline btn-err flex-1" onclick="toast('폐기처리 준비중','info')">폐기</button>
+        <button class="btn btn-outline btn-err flex-1" onclick="processDisposal('${data.id}','${data.lotId||''}','${type}','${data.itemName}')">폐기</button>
       </div>
       ${type !== '완제품' ? '<div class="fs-11 c-txt-l" style="text-align:center;margin-top:8px">* 생산 투입은 작업지시서 공정에서만 가능합니다</div>' : ''}
       <button class="btn btn-outline btn-gray btn-full mt-8" onclick="Router.go('qr-scan')">다시 스캔</button>
@@ -3904,12 +3910,54 @@ function handleCompleteStep(isFinal = false) {
 async function completeStep() {
   const { woId, steps, currentStep } = State.woExec;
   const step = steps[currentStep];
+  const stepNo = parseInt(step[1]);
+  const stepType = step[3] || 'input';
 
   try {
     showLoading();
-    // Save process record
+
+    // input step: 원재료 재고 차감 (스캔된 LOT)
+    let usedLotIds = '';
+    if (stepType === 'input') {
+      const scannedItems = State.woExec._scannedLots?.[stepNo] || [];
+      const qtyInput = $id(`input-qty-${stepNo}`);
+      const consumedQty = parseFloat(qtyInput?.value) || 0;
+
+      for (const item of scannedItems) {
+        // 개별 상태 변경: '미사용' → '사용완료'
+        await SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '사용완료' });
+
+        // LOT 잔량 차감
+        if (item.lotId) {
+          const lots = await SheetsAPI.getAll('원재료LOT');
+          const lot = lots.find(l => l[0] === item.lotId);
+          if (lot) {
+            const prevRemain = parseFloat(lot[8]) || 0;
+            const qtyPerIndiv = scannedItems.length > 0 ? consumedQty / scannedItems.length : consumedQty;
+            const newRemain = Math.max(0, prevRemain - qtyPerIndiv);
+            const newStatus = newRemain <= 0 ? '소진' : '사용중';
+            await SheetsAPI.updateRow('원재료LOT', 0, item.lotId, {
+              8: String(newRemain.toFixed(2)),
+              9: newStatus,
+            });
+          }
+        }
+      }
+      usedLotIds = scannedItems.map(s => s.lotId).filter(Boolean).join(',');
+    }
+
+    // seal step: 최종 완제품 수량 반영
+    if (stepType === 'seal') {
+      const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
+      if (sealQty > 0) {
+        await SheetsAPI.updateCell('작업지시서', 0, woId, 7, String(sealQty));
+        State.woExec.packCount = sealQty;
+      }
+    }
+
+    // Save process record (with used LOT IDs for input steps)
     await SheetsAPI.append('공정기록', [
-      woId, step[1], step[2], step[3], '', '', '', '', '', '', '', formatDateTime(), State.user?.email
+      woId, step[1], step[2], step[3], usedLotIds, '', '', '', '', '', '', formatDateTime(), State.user?.email
     ]);
 
     // Update lastSavedStep
@@ -4374,16 +4422,75 @@ async function rejectWO(woId, action) {
   }
 }
 
+// ─── 폐기 처리 (스캔 후) ───
+async function processDisposal(itemId, lotId, type, itemName) {
+  // 폐기 사유 입력 모달
+  const reason = prompt(`폐기 사유를 입력하세요\n\n${itemId} · ${itemName}`);
+  if (!reason || !reason.trim()) { toast('폐기 사유를 입력해야 합니다', 'err'); return; }
+
+  confirm('폐기 처리', `${itemId}\n${itemName}\n사유: ${reason}\n\n정말 폐기하시겠습니까?`, async () => {
+    try {
+      showLoading();
+      const isFG = type === '완제품';
+      const isRM = type === '원재료';
+      const isSP = type === '소모품';
+
+      // 개별 레코드 상태 변경
+      if (isFG) {
+        await SheetsAPI.updateRow('완제품개별', 0, itemId, { 3: '폐기', 4: formatDateTime(), 5: `폐기:${reason}` });
+      } else if (isRM) {
+        await SheetsAPI.updateRow('원재료개별', 0, itemId, { 3: '폐기', 5: `폐기:${reason}` });
+      } else if (isSP && lotId) {
+        // 소모품은 LOT 단위
+        await SheetsAPI.updateRow('소모품LOT', 0, lotId, { 7: '폐기' });
+      }
+
+      // LOT 잔량 업데이트 (개별 폐기 시)
+      if ((isRM || isFG) && lotId) {
+        const lotTab = isFG ? '완제품LOT' : '원재료LOT';
+        const indivTab = isFG ? '완제품개별' : '원재료개별';
+        const lots = await SheetsAPI.getAll(lotTab);
+        const lot = lots.find(l => l[0] === lotId);
+        if (lot) {
+          const indivs = await SheetsAPI.getAll(indivTab);
+          const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','사용완료','출하완료'].includes(iv[3]));
+          if (activeIndivs.length === 0) {
+            const statusCol = isFG ? 9 : 9;
+            await SheetsAPI.updateRow(lotTab, 0, lotId, { [statusCol]: '소진' });
+          }
+        }
+      }
+
+      toast(`폐기 완료: ${itemId}`, 'suc');
+      setTimeout(() => Router.go('qr-scan'), 1500);
+    } catch (e) {
+      toast('폐기 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
 // ─── 출하 처리 (스캔 후) ───
 async function processShipment(indivId, lotId, itemName) {
   confirm('출하 처리', `${indivId}\n${itemName}\n\n이 제품을 출하 처리하시겠습니까?`, async () => {
     try {
       showLoading();
+      const shipTime = formatDateTime();
+
+      // 1. 완제품개별 상태 업데이트
       await SheetsAPI.updateRow('완제품개별', 0, indivId, {
         3: '출하완료',
-        4: formatDateTime(),
+        4: shipTime,
         5: State.user?.email,
       });
+
+      // 2. 출하기록 시트에 기록 저장 (기존 시트 구조: shipId, fgLotId, indivIds, customer, qty, unit, shippedAt, carrier)
+      const shipId = await generateSeqId('SHP', '출하기록');
+      await SheetsAPI.append('출하기록', [
+        shipId, lotId, indivId, '', '1', 'kg', shipTime, State.user?.email
+      ]);
+
       toast(`출하 완료: ${indivId}`, 'suc');
       setTimeout(() => Router.go('qr-scan'), 1500);
     } catch (e) {
