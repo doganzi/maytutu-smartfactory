@@ -1341,44 +1341,64 @@ function renderInventoryContent(activeTab) {
   }
 
   else if (activeTab === '완제품') {
-    const fgLots = State.finishedGoodsLots || [];
+    const fgLots = (State.finishedGoodsLots || []).filter(l => l[9] !== '폐기' && l[9] !== '소진' && l[9] !== '출하완료');
     // Group by itemCode
     const grouped = {};
     fgLots.forEach(l => {
       const code = l[1] || 'FG001';
-      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalRemain: 0, earliestExp: null };
+      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalRemain: 0 };
       grouped[code].lots.push(l);
       grouped[code].totalRemain += parseFloat(l[8]) || 0;
-      if (l[6] && (!grouped[code].earliestExp || l[6] < grouped[code].earliestExp)) {
-        grouped[code].earliestExp = l[6];
-      }
     });
 
     if (Object.keys(grouped).length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">완제품 재고 없음</div></div>`;
     } else {
-      listEl.innerHTML = Object.entries(grouped).map(([code, g]) => {
-        // Check freeze status across lots
-        const freezingLots = g.lots.filter(l => (l[9]||'') === '냉동보관중');
-        const readyLots = g.lots.filter(l => (l[9]||'') === '출하가능' || (l[9]||'') === '정상');
-        const statusBadge = freezingLots.length > 0
-          ? `<span class="badge badge-warn">냉동보관중 ${freezingLots.length}</span>`
-          : `<span class="badge badge-suc">출하가능</span>`;
-        return `
-        <div class="card clickable" onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${g.name}', type:'fg'})">
-          <div class="row between">
-            <div>
-              <div class="fs-14 fw-6">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
-              <div class="fs-12 c-txt-l mt-4">현재고: ${g.totalRemain}kg (${g.lots.length} LOT) · 냉동 -18°C</div>
-              <div class="fs-11 c-txt-l">가장 빠른 소비기한: ${g.earliestExp ? g.earliestExp.substring(5,10) : '-'}</div>
+      let html = '';
+      Object.entries(grouped).forEach(([code, g]) => {
+        // 품목 헤더
+        const freezingCount = g.lots.filter(l => (l[9]||'') === '냉동보관중').length;
+        const readyCount = g.lots.filter(l => (l[9]||'') === '출하가능' || (l[9]||'') === '정상').length;
+        html += `
+          <div class="card info-box suc" style="margin-bottom:8px">
+            <div class="row between">
+              <div>
+                <div class="fs-14 fw-7">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
+                <div class="fs-12 c-txt-l mt-4">총 ${g.lots.length} LOT · ${g.totalRemain}개 · 냉동 -18°C</div>
+              </div>
+              <div style="text-align:right">
+                ${freezingCount > 0 ? `<span class="badge badge-warn" style="display:block;margin-bottom:2px">냉동중 ${freezingCount}</span>` : ''}
+                ${readyCount > 0 ? `<span class="badge badge-suc" style="display:block">출하가능 ${readyCount}</span>` : ''}
+              </div>
             </div>
-            ${statusBadge}
           </div>
-          <div class="row mt-8" style="gap:6px">
-            <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="event.stopPropagation();printFGLabels('${code}','${g.name}')">🏷️ QR 라벨</button>
-          </div>
-        </div>
-      `;}).join('');
+        `;
+        // LOT별 카드
+        g.lots.forEach(l => {
+          const lotId = l[0];
+          const status = l[9] || '정상';
+          const stColor = status === '출하가능' || status === '정상' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
+          const remain = parseFloat(l[8]) || 0;
+          const qty = parseFloat(l[3]) || 1;
+          const mfgDate = (l[5] || '').substring(0,10);
+          const expDate = (l[6] || '').substring(0,10);
+          html += `
+            <div class="card bl-${stColor} clickable" style="margin-bottom:6px" onclick="showLotIndividuals('${lotId}','${g.name}','fg')">
+              <div class="row between mb-4">
+                <span class="fs-13 fw-6" style="color:var(--pri)">${lotId}</span>
+                <div class="row" style="gap:6px;align-items:center">
+                  <button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${lotId}','${g.name}','fg')">🖨️ 라벨</button>
+                  <span class="badge badge-${stColor}">${status}</span>
+                </div>
+              </div>
+              <div class="fs-12 c-txt-l">수량: ${remain}개 · 제조: ${mfgDate}</div>
+              <div class="fs-11 c-txt-l">소비기한: ${expDate}</div>
+              <div id="indiv-list-${lotId.replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
+            </div>
+          `;
+        });
+      });
+      listEl.innerHTML = html;
     }
   }
 
@@ -4352,7 +4372,7 @@ async function approveWO(woId) {
       const packCount = parseInt(wo[7]) || 50;
       const qty = parseFloat(wo[5]) || 50;
       const fgItemCode = wo[3] || 'FG001';
-      const expDate = formatDate(new Date(Date.now() + 90*86400000)); // +90 days
+      const expDate = formatDate(new Date(Date.now() + 180*86400000)); // +6개월 (제조일로부터)
       const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
       const freezeStart = formatDateTime(); // 냉동 입고 시점 = 승인 시점
 
