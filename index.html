@@ -339,6 +339,20 @@ function dayOfWeek(d) {
   return ['일','월','화','수','목','금','토'][d.getDay()];
 }
 
+// UI 표시용 날짜 포맷 (CON-015: 통일된 표시 형식)
+function displayDate(d) {
+  if (!d) d = new Date();
+  if (typeof d === 'string') d = new Date(d);
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  return `${y}.${m}.${dd}`;
+}
+
+function displayDateTime(d) {
+  if (!d) d = new Date();
+  if (typeof d === 'string') d = new Date(d);
+  return `${displayDate(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
 // YYMMDD 포맷 유틸
 function toYYMMDD(dateStr) {
   if (!dateStr) return '000000';
@@ -951,7 +965,7 @@ Screens.dashboard = async () => {
   const isAdmin = role === 'admin';
   const today = new Date();
 
-  renderHeader('메이투투 스마트팩토리', `${isAdmin ? '관리자' : '작업자'} · ${formatDate(today).replace(/-/g,'.')} (${dayOfWeek(today)})`,
+  renderHeader('메이투투 스마트팩토리', `${isAdmin ? '관리자' : '작업자'} · ${displayDate(today)} (${dayOfWeek(today)})`,
     { right: `<div style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer" onclick="Router.go('settings')">👤</div>` });
 
   // Load data for dashboard
@@ -1010,8 +1024,8 @@ Screens.dashboard = async () => {
         toast(`🔔 새 승인요청 ${newRequests.length}건이 있습니다`, 'warn');
       }
     } else {
-      // 작업자: 승인완료 알림
-      const myApproved = woData.filter(r => r[8] === State.user?.email && r[12] === '승인완료' && r[16] > lastCheck);
+      // 작업자: 승인완료 알림 (승인완료 또는 냉동보관중 = 승인됨)
+      const myApproved = woData.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12] === '냉동보관중') && r[16] > lastCheck);
       if (myApproved.length > 0) {
         toast(`🔔 작업지시서 ${myApproved.length}건이 승인완료 되었습니다`, 'suc');
       }
@@ -1074,7 +1088,7 @@ Screens.dashboard = async () => {
         let notifHtml = '';
         if (myPending.length > 0) {
           notifHtml += '<div class="fs-14 fw-7 mb-8">⏳ 승인 대기 중</div>' +
-            myPending.map(wo => '<div class="card bl-warn"><div class="row between"><div><div class="fs-14 fw-6">' + (wo[4]||'') + ' ' + (wo[5]||'') + 'kg</div><div class="fs-12 c-txt-l">' + wo[0] + ' · 승인 대기 중</div></div><span class="badge badge-warn">대기중</span></div></div>').join('');
+            myPending.map(wo => '<div class="card bl-warn"><div class="row between"><div><div class="fs-14 fw-6">' + (wo[4]||'') + ' ' + (wo[5]||'') + 'kg</div><div class="fs-12 c-txt-l">' + wo[0] + ' · 승인 대기 중</div></div><span class="badge badge-warn">승인 대기</span></div></div>').join('');
         }
         if (myRecent.length > 0) {
           notifHtml += '<div class="fs-14 fw-7 mb-8 mt-8">🔔 최근 승인 결과</div>' +
@@ -1210,7 +1224,7 @@ function renderProductionContent(activeTab, isAdmin) {
   }
 
   else if (activeTab === '완료된 작업') {
-    const allDone = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12] === '냉동보관중' || r[12] === '출하가능' || r[12]?.startsWith('거부')));
+    const allDone = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '승인완료' || r[12] === '냉동보관중' || r[12] === '출하가능' || r[12] === '출하완료' || r[12]?.startsWith('거부')));
 
     // Date range filter
     const today = new Date();
@@ -1243,7 +1257,7 @@ function renderProductionContent(activeTab, isAdmin) {
           <div class="card">
             <div class="row between mb-4">
               <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-              <span class="badge badge-${wo[12]==='승인완료'||wo[12]==='출하가능'?'suc':wo[12]==='냉동보관중'?'warn':'err'}">${wo[12]}</span>
+              <span class="badge badge-${wo[12]==='승인완료'||wo[12]==='출하가능'||wo[12]==='출하완료'?'suc':wo[12]==='냉동보관중'?'warn':'err'}">${wo[12]}</span>
             </div>
             <div class="fs-11 c-txt-l">${wo[0]} · ${(wo[16]||'').substring(0,16)}</div>
           </div>
@@ -1417,12 +1431,13 @@ Screens.inventory = async () => {
   renderHeader('재고관리');
 
   try {
+    const _warnLoad = (tab) => (e) => { console.warn(`${tab} 로드 실패:`, e); return []; };
     const [rmItems, rmLots, fgLots, spLots, rcvRecords] = await Promise.all([
-      SheetsAPI.getAll('원재료품목').catch(() => []),
-      SheetsAPI.getAll('원재료LOT').catch(() => []),
-      SheetsAPI.getAll('완제품LOT').catch(() => []),
-      SheetsAPI.getAll('소모품LOT').catch(() => []),
-      SheetsAPI.getAll('입고기록').catch(() => []),
+      SheetsAPI.getAll('원재료품목').catch(_warnLoad('원재료품목')),
+      SheetsAPI.getAll('원재료LOT').catch(_warnLoad('원재료LOT')),
+      SheetsAPI.getAll('완제품LOT').catch(_warnLoad('완제품LOT')),
+      SheetsAPI.getAll('소모품LOT').catch(_warnLoad('소모품LOT')),
+      SheetsAPI.getAll('입고기록').catch(_warnLoad('입고기록')),
     ]);
     State.rawMaterialItems = rmItems;
     State.rawMaterialLots = rmLots;
@@ -1495,7 +1510,7 @@ async function renderInventoryContent(activeTab) {
     // 개별 항목도 함께 로드하여 정확한 재고 카운트
     let fgIndivs = [];
     try { fgIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []); } catch(e) {}
-    const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+    const activeStatuses = ['냉동보관중','출하가능'];
 
     const fgLots = (State.finishedGoodsLots || []).filter(l => l[9] !== '폐기' && l[9] !== '소진' && l[9] !== '출하완료');
     // Group by itemCode
@@ -1517,7 +1532,7 @@ async function renderInventoryContent(activeTab) {
       Object.entries(grouped).forEach(([code, g]) => {
         // 품목 헤더
         const freezingCount = g.lots.filter(l => (l[9]||'') === '냉동보관중').length;
-        const readyCount = g.lots.filter(l => (l[9]||'') === '출하가능' || (l[9]||'') === '정상').length;
+        const readyCount = g.lots.filter(l => (l[9]||'') === '출하가능').length;
         html += `
           <div class="card info-box suc" style="margin-bottom:8px">
             <div class="row between">
@@ -1535,8 +1550,8 @@ async function renderInventoryContent(activeTab) {
         // LOT별 카드
         g.lots.forEach(l => {
           const lotId = l[0];
-          const status = l[9] || '정상';
-          const stColor = status === '출하가능' || status === '정상' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
+          const status = l[9] || '냉동보관중';
+          const stColor = status === '출하가능' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
           const activeCount = l._activeCount || 0;
           const totalCount = parseFloat(l[10]) || parseFloat(l[3]) || 0;
           const mfgDate = (l[5] || '').substring(0,10);
@@ -1631,7 +1646,7 @@ Screens['lot-detail'] = async (params = {}) => {
   // 완제품: 출하완료 제외한 실제 재고 카운트
   let totalRemain;
   if (isFG) {
-    const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+    const activeStatuses = ['냉동보관중','출하가능'];
     totalRemain = indivs.filter(iv => lots.some(l => l[0] === iv[1]) && activeStatuses.includes(iv[3])).length;
   } else {
     totalRemain = lots.reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
@@ -1655,15 +1670,15 @@ Screens['lot-detail'] = async (params = {}) => {
 
       <div class="fs-13 fw-7 mb-8">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></div>
       ${displayLots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : displayLots.map(l => {
-        const status = l[9] || '정상';
+        const status = isFG ? (l[9] || '냉동보관중') : (l[9] || '미사용');
         const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
 
         if (isFG) {
           // 완제품 LOT: 개별 기반 카운트
-          const activeStatuses = ['냉동보관중','출하가능','정상','미출하'];
+          const activeStatuses = ['냉동보관중','출하가능'];
           const activeIndivs = lotIndivs.filter(iv => activeStatuses.includes(iv[3]));
           const totalIndivs = lotIndivs.length;
-          const stColor = status === '출하가능' || status === '정상' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
+          const stColor = status === '출하가능' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
           const canPrint = activeIndivs.length > 0;
           return `
             <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','fg')">
@@ -1685,9 +1700,9 @@ Screens['lot-detail'] = async (params = {}) => {
         // 원재료/소모품 LOT (기존 로직)
         const remain = parseFloat(l[8]) || 0;
         const qty = parseFloat(l[4]) || 1;
-        const stColor = status === '정상' || status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
-        const canPrint = ['미사용','사용중','정상'].includes(status);
-        const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중','정상','미출하'].includes(iv[3]));
+        const stColor = status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
+        const canPrint = ['미사용','사용중'].includes(status);
+        const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중'].includes(iv[3]));
         return `
           <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">
             <div class="row between mb-4">
@@ -1747,11 +1762,11 @@ async function showLotIndividuals(lotId, itemName, type) {
       <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
         <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (재고 ${activeIndivs.length}건 / 전체 ${indivs.length}건)</div>
         ${activeIndivs.map(iv => {
-          const st = iv[3] || '미사용';
-          const canPrint = ['미사용','사용중','정상','미출하','냉동보관중','출하가능'].includes(st);
-          const canShip = isFG && (st === '출하가능' || st === '정상');
+          const st = iv[3] || (isFG ? '냉동보관중' : '미사용');
+          const canPrint = ['미사용','사용중','냉동보관중','출하가능'].includes(st);
+          const canShip = isFG && st === '출하가능';
           const isFreezing = st === '냉동보관중';
-          const stColor = st === '출하가능' || st === '정상' || st === '미출하' ? 'suc' : st === '냉동보관중' ? 'warn' : st === '사용중' ? 'info' : 'gray';
+          const stColor = st === '출하가능' ? 'suc' : st === '냉동보관중' ? 'warn' : st === '사용중' ? 'info' : st === '미사용' ? 'suc' : 'gray';
           return `
             <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:center">
               <div style="flex:1;min-width:0">
@@ -1795,7 +1810,7 @@ async function printLotLabels(lotId, itemName, type) {
 
     const indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
     const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
-    const printable = indivs.filter(iv => ['미사용','사용중','정상','미출하','냉동보관중','출하가능'].includes(iv[3]));
+    const printable = indivs.filter(iv => ['미사용','사용중','냉동보관중','출하가능'].includes(iv[3]));
 
     if (printable.length === 0) { toast('인쇄 가능한 개별 항목이 없습니다', 'warn'); hideLoading(); return; }
 
@@ -1812,10 +1827,9 @@ async function printLotLabels(lotId, itemName, type) {
       storage: storageTemp ? `보관: ${storageTemp}` : '',
     }));
 
-    hideLoading();
     // 라벨 인쇄 화면으로 이동 — fromInventory 모드로 폼 숨기고 바로 라벨 표시
     Router.go('label-print', { fromInventory: true, preLabels: labels, srcLotId: lotId, srcItemName: itemName, srcType: type });
-  } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
+  } catch(e) { toast('오류: ' + e.message, 'err'); } finally { hideLoading(); }
 }
 
 // ── 개별 1매 라벨 인쇄 ──
@@ -1831,7 +1845,6 @@ async function printSingleLabel(indivId, itemName, lotId, type) {
     const storageTemp = isFG ? (lot?.[11] || '냉동 -18°C') : isSP ? '' : (lot?.[11] || '');
     const inDate = isFG ? (lot?.[5] || formatDate()) : isSP ? (lot?.[5] || formatDate()) : (lot?.[6] || formatDate());
 
-    hideLoading();
     Router.go('label-print', {
       fromInventory: true,
       preLabels: [{
@@ -1846,7 +1859,7 @@ async function printSingleLabel(indivId, itemName, lotId, type) {
       srcItemName: itemName,
       srcType: type
     });
-  } catch(e) { hideLoading(); toast('오류: ' + e.message, 'err'); }
+  } catch(e) { toast('오류: ' + e.message, 'err'); } finally { hideLoading(); }
 }
 
 // ─── RECEIVE FORM ───
@@ -2175,7 +2188,7 @@ async function onQRScanSuccess(decodedText) {
     let shipBtn = '';
     if (type === '완제품') {
       const fgStatus = data.status || '';
-      const canShip = fgStatus === '출하가능' || fgStatus === '정상';
+      const canShip = fgStatus === '출하가능';
       if (canShip) {
         shipBtn = `<button class="btn btn-suc flex-1" onclick="processShipment('${data.id}','${data.lotId}','${data.itemName}')">출하처리</button>`;
       } else if (fgStatus === '냉동보관중') {
@@ -2190,7 +2203,7 @@ async function onQRScanSuccess(decodedText) {
       <div class="card bl-info">
         <div class="fs-14 fw-6">${data.id}</div>
         <div class="fs-12 c-txt-l mt-4">${data.itemName} · ${data.remain ? data.remain + 'kg' : ''} · 소비기한 ${(data.exp||'').substring(0,10)}</div>
-        <div class="fs-11 ${data.status === '냉동보관중' ? 'c-warn' : 'c-suc'} mt-4">상태: ${data.status || '정상'}</div>
+        <div class="fs-11 ${data.status === '냉동보관중' ? 'c-warn' : 'c-suc'} mt-4">상태: ${data.status || '냉동보관중'}</div>
       </div>
       <div class="row mt-12" style="gap:8px">
         ${shipBtn}
@@ -2612,7 +2625,7 @@ async function loadReprintIndivs(type, lotId, itemName) {
     window._reprintType = type;
 
     const statusBadge = (s) => {
-      const map = { '미사용': { bg: 'var(--suc-bg)', c: 'var(--suc)' }, '사용중': { bg: 'var(--pri-bg)', c: 'var(--pri)' }, '사용완료': { bg: '#f5f5f5', c: 'var(--gray)' } };
+      const map = { '미사용': { bg: 'var(--suc-bg)', c: 'var(--suc)' }, '사용중': { bg: 'var(--pri-bg)', c: 'var(--pri)' }, '소진': { bg: '#f5f5f5', c: 'var(--gray)' } };
       const st = map[s] || map['미사용'];
       return `<span class="badge" style="background:${st.bg};color:${st.c};font-size:10px">${s || '미사용'}</span>`;
     };
@@ -4204,18 +4217,23 @@ async function completeStep() {
       const consumedQty = parseFloat(qtyInput?.value) || 0;
 
       for (const item of scannedItems) {
-        // 개별 상태 변경: '미사용' → '사용완료'
-        await SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '사용완료' });
+        // 개별 상태 변경: '미사용' → '소진'
+        await SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '소진' });
 
-        // LOT 잔량 차감
+        // LOT 잔량 차감 + 개별 수 기준 소진 판정 (CON-009 통일)
         if (item.lotId) {
-          const lots = await SheetsAPI.getAll('원재료LOT');
+          SheetsAPI.invalidateCache('원재료LOT');
+          SheetsAPI.invalidateCache('원재료개별');
+          const lots = await SheetsAPI.getAll('원재료LOT', false);
           const lot = lots.find(l => l[0] === item.lotId);
           if (lot) {
             const prevRemain = parseFloat(lot[8]) || 0;
             const qtyPerIndiv = scannedItems.length > 0 ? consumedQty / scannedItems.length : consumedQty;
             const newRemain = Math.max(0, prevRemain - qtyPerIndiv);
-            const newStatus = newRemain <= 0 ? '소진' : '사용중';
+            // 개별 수 기준으로 소진 판정 (잔량이 아닌 활성 개별 수로 판단)
+            const allIndivs = await SheetsAPI.getAll('원재료개별');
+            const activeIndivs = allIndivs.filter(iv => iv[1] === item.lotId && !['폐기','소진'].includes(iv[3]));
+            const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
             await SheetsAPI.updateRow('원재료LOT', 0, item.lotId, {
               8: String(newRemain.toFixed(2)),
               9: newStatus,
@@ -4590,14 +4608,16 @@ async function approveWO(woId) {
       const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
       const freezeStart = formatDateTime(); // 냉동 입고 시점 = 승인 시점
 
-      // 1. Update WO — 상태를 '냉동보관중'으로 (출하 승인 전 단계)
+      // 1. Update WO — 먼저 '승인완료' 기록 후 '냉동보관중' 전환 (2단계 전이)
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
         11: freezeStart,        // freezeStartTime
-        12: '냉동보관중',        // status: 공정완료 승인됨, 냉동 중
+        12: '승인완료',          // status: 1단계 — 공정완료 승인됨 (알림용)
         14: fgLotId,
         15: State.user?.email,
         16: formatDateTime(),
       });
+      // 2단계 — 즉시 냉동보관 상태로 전환 (승인완료 기록 후)
+      await SheetsAPI.updateCell('작업지시서', 0, woId, 12, '냉동보관중');
 
       // 2. Create FG LOT — status '냉동보관중'
       await SheetsAPI.append('완제품LOT', [
@@ -4704,9 +4724,33 @@ async function rejectWO(woId, action) {
 
 // ─── 폐기 처리 (스캔 후) ───
 async function processDisposal(itemId, lotId, type, itemName) {
-  // 폐기 사유 입력 모달
-  const reason = prompt(`폐기 사유를 입력하세요\n\n${itemId} · ${itemName}`);
-  if (!reason || !reason.trim()) { toast('폐기 사유를 입력해야 합니다', 'err'); return; }
+  // 폐기 사유 입력 — 커스텀 모달 (CON-013: prompt() 대체)
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:340px">
+      <div class="d-title">폐기 사유 입력</div>
+      <div class="d-msg">${itemId} · ${itemName}</div>
+      <div class="input-group" style="margin-bottom:12px">
+        <textarea id="disposal-reason" rows="3" placeholder="폐기 사유를 입력하세요" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></textarea>
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="disposal-cancel">취소</button>
+        <button class="btn btn-sm btn-err" id="disposal-ok">폐기 진행</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#disposal-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#disposal-ok').onclick = () => {
+    const reason = overlay.querySelector('#disposal-reason').value?.trim();
+    if (!reason) { toast('폐기 사유를 입력해야 합니다', 'err'); return; }
+    overlay.remove();
+    _executeDisposal(itemId, lotId, type, itemName, reason);
+  };
+}
+
+async function _executeDisposal(itemId, lotId, type, itemName, reason) {
 
   confirm('폐기 처리', `${itemId}\n${itemName}\n사유: ${reason}\n\n정말 폐기하시겠습니까?`, async () => {
     try {
@@ -4719,21 +4763,23 @@ async function processDisposal(itemId, lotId, type, itemName) {
       if (isFG) {
         await SheetsAPI.updateRow('완제품개별', 0, itemId, { 3: '폐기', 4: formatDateTime(), 5: `폐기:${reason}` });
       } else if (isRM) {
-        await SheetsAPI.updateRow('원재료개별', 0, itemId, { 3: '폐기', 5: `폐기:${reason}` });
+        await SheetsAPI.updateRow('원재료개별', 0, itemId, { 3: '폐기', 4: formatDateTime(), 5: `폐기:${reason}` });
       } else if (isSP && lotId) {
         // 소모품은 LOT 단위
         await SheetsAPI.updateRow('소모품LOT', 0, lotId, { 7: '폐기' });
       }
 
-      // LOT 잔량 업데이트 (개별 폐기 시)
+      // LOT 잔량 업데이트 (개별 폐기 시) — 캐시 무효화 후 fresh 데이터 (CON-014)
       if ((isRM || isFG) && lotId) {
         const lotTab = isFG ? '완제품LOT' : '원재료LOT';
         const indivTab = isFG ? '완제품개별' : '원재료개별';
-        const lots = await SheetsAPI.getAll(lotTab);
+        SheetsAPI.invalidateCache(indivTab);
+        SheetsAPI.invalidateCache(lotTab);
+        const lots = await SheetsAPI.getAll(lotTab, false);
         const lot = lots.find(l => l[0] === lotId);
         if (lot) {
-          const indivs = await SheetsAPI.getAll(indivTab);
-          const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','사용완료','출하완료'].includes(iv[3]));
+          const indivs = await SheetsAPI.getAll(indivTab, false);
+          const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','소진','출하완료'].includes(iv[3]));
           if (activeIndivs.length === 0) {
             const statusCol = isFG ? 9 : 9;
             await SheetsAPI.updateRow(lotTab, 0, lotId, { [statusCol]: '소진' });
@@ -4820,6 +4866,17 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
         lotBatch.push({ range: `완제품LOT!J${lotRowIdx}`, values: [['출하완료']] });
       }
       await SheetsAPI.batchUpdate(lotBatch);
+    }
+
+    // 5. LOT 전체 출하 시 WO 상태도 '출하완료'로 전환 (CON-010)
+    if (activeCount === 0) {
+      try {
+        const wos = await SheetsAPI.getAll('작업지시서');
+        const wo = wos.find(w => w[14] === lotId && (w[12] === '출하가능' || w[12] === '냉동보관중'));
+        if (wo) {
+          await SheetsAPI.updateCell('작업지시서', 0, wo[0], 12, '출하완료');
+        }
+      } catch (e) { console.warn('WO 상태 전환 실패:', e); }
     }
 
     toast(`출하 완료: ${indivId} → ${customerName}`, 'suc');
