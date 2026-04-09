@@ -408,14 +408,21 @@ function qrImageFormula(cellRef) {
    GOOGLE OAUTH 2.0
    ═══════════════════════════════════════════════ */
 const Auth = {
+  _tokenExpiry: 0,        // 토큰 만료 시각 (ms)
+  _refreshTimer: null,    // 자동 갱신 타이머
+
   init() {
     // Check for token in URL hash (OAuth redirect)
     const hash = window.location.hash;
     if (hash && hash.includes('access_token')) {
       const params = new URLSearchParams(hash.substring(1));
       State.token = params.get('access_token');
+      const expiresIn = parseInt(params.get('expires_in')) || 3600;
+      this._tokenExpiry = Date.now() + expiresIn * 1000;
       localStorage.setItem('mt_token', State.token);
+      localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
       window.location.hash = '';
+      this._scheduleRefresh(expiresIn);
       this.loadUserInfo();
       return true;
     }
@@ -423,13 +430,74 @@ const Auth = {
     const saved = localStorage.getItem('mt_token');
     if (saved) {
       State.token = saved;
+      this._tokenExpiry = parseInt(localStorage.getItem('mt_token_expiry')) || 0;
+      // 남은 시간 계산 후 갱신 스케줄
+      const remaining = Math.max(0, Math.floor((this._tokenExpiry - Date.now()) / 1000));
+      if (remaining > 60) {
+        this._scheduleRefresh(remaining);
+      }
       return true;
     }
     return false;
   },
 
+  // 토큰 만료 5분 전에 자동 갱신 (silent refresh via hidden iframe)
+  _scheduleRefresh(expiresInSec) {
+    if (this._refreshTimer) clearTimeout(this._refreshTimer);
+    // 만료 5분 전 또는 최소 30초 후에 갱신
+    const refreshIn = Math.max(30, expiresInSec - 300) * 1000;
+    this._refreshTimer = setTimeout(() => this._silentRefresh(), refreshIn);
+    console.log(`Token refresh scheduled in ${Math.round(refreshIn/1000)}s`);
+  },
+
+  _silentRefresh() {
+    // 숨겨진 iframe으로 토큰 자동 갱신 (prompt=none)
+    let redirect = window.location.origin + window.location.pathname;
+    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=none`;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    let handled = false;
+
+    const cleanup = () => {
+      if (handled) return;
+      handled = true;
+      try { document.body.removeChild(iframe); } catch(e) {}
+    };
+
+    iframe.onload = () => {
+      try {
+        const iframeHash = iframe.contentWindow.location.hash;
+        if (iframeHash && iframeHash.includes('access_token')) {
+          const params = new URLSearchParams(iframeHash.substring(1));
+          State.token = params.get('access_token');
+          const expiresIn = parseInt(params.get('expires_in')) || 3600;
+          this._tokenExpiry = Date.now() + expiresIn * 1000;
+          localStorage.setItem('mt_token', State.token);
+          localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
+          this._scheduleRefresh(expiresIn);
+          console.log('Token silently refreshed');
+        }
+      } catch (e) {
+        // cross-origin 차단 — 팝업 방식 폴백
+        console.warn('Silent refresh blocked, will prompt on next 401');
+      }
+      cleanup();
+    };
+
+    // 10초 타임아웃
+    setTimeout(cleanup, 10000);
+    document.body.appendChild(iframe);
+  },
+
+  // 토큰 유효 여부 빠른 체크 (API 호출 없이)
+  isTokenFresh() {
+    return this._tokenExpiry > Date.now() + 60000; // 1분 이상 남았으면 유효
+  },
+
   login() {
-    // Always use clean base URL (without index.html or query params)
     let redirect = window.location.origin + window.location.pathname;
     redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
     const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=select_account`;
@@ -437,10 +505,14 @@ const Auth = {
   },
 
   logout() {
+    if (this._refreshTimer) clearTimeout(this._refreshTimer);
     State.token = null;
     State.user = null;
+    this._tokenExpiry = 0;
     localStorage.removeItem('mt_token');
+    localStorage.removeItem('mt_token_expiry');
     localStorage.removeItem('mt_user');
+    SheetsAPI.invalidateAllCache();
     Router.go('login');
   },
 
@@ -453,7 +525,6 @@ const Auth = {
       const data = await res.json();
       State.user = { email: data.email, name: data.name, picture: data.picture, role: 'worker' };
       localStorage.setItem('mt_user', JSON.stringify(State.user));
-      // Check role from users sheet
       await this.checkRole();
     } catch (e) {
       console.error('Auth error:', e);
@@ -466,10 +537,9 @@ const Auth = {
       const users = await SheetsAPI.getAll('사용자');
       const u = users.find(r => r[0] === State.user.email);
       if (u) {
-        State.user.role = u[2] || 'worker'; // col C = role
+        State.user.role = u[2] || 'worker';
         State.user.name = u[1] || State.user.name;
       } else {
-        // Not registered — show error
         toast('등록되지 않은 계정입니다. 관리자에게 문의하세요.', 'err');
         this.logout();
         return;
@@ -482,9 +552,20 @@ const Auth = {
 
   async validateToken() {
     if (!State.token) return false;
+    // 빠른 로컬 체크 먼저
+    if (this.isTokenFresh()) return true;
+    // 만료 임박하면 서버에 확인
     try {
       const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${State.token}`);
-      return res.ok;
+      if (res.ok) {
+        const data = await res.json();
+        const expiresIn = parseInt(data.expires_in) || 0;
+        this._tokenExpiry = Date.now() + expiresIn * 1000;
+        localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
+        if (expiresIn > 60) this._scheduleRefresh(expiresIn);
+        return true;
+      }
+      return false;
     } catch { return false; }
   },
 };
@@ -501,35 +582,95 @@ const SheetsAPI = {
     return { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/json' };
   },
 
-  // 401 handler — token expired → re-login
-  async _fetch(url, opts = {}) {
-    const res = await fetch(url, { ...opts, headers: { ...this.headers(), ...(opts.headers || {}) } });
-    if (res.status === 401) {
-      toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
-      localStorage.removeItem('mt_token');
-      setTimeout(() => Auth.login(), 1500);
-      throw new Error('토큰 만료 — 재로그인 필요');
-    }
-    return res;
+  // ── 캐시 레이어 (TTL 기반) ──
+  _cache: {},
+  _cacheTTL: 30000, // 30초 캐시
+  _getCached(key) {
+    const entry = this._cache[key];
+    if (entry && Date.now() - entry.ts < this._cacheTTL) return entry.data;
+    return null;
+  },
+  _setCache(key, data) {
+    this._cache[key] = { data, ts: Date.now() };
+  },
+  invalidateCache(tab) {
+    // 특정 탭 캐시 무효화
+    Object.keys(this._cache).forEach(k => { if (k.startsWith(tab)) delete this._cache[k]; });
+  },
+  invalidateAllCache() {
+    this._cache = {};
   },
 
-  // Get all rows from a tab (returns 2D array, first row = header)
-  async getAll(tab) {
+  // ── Retry + 401/429 처리 ──
+  async _fetch(url, opts = {}, retries = 3) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(url, { ...opts, headers: { ...this.headers(), ...(opts.headers || {}) } });
+        // 401: 토큰 만료 → 재로그인
+        if (res.status === 401) {
+          toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+          localStorage.removeItem('mt_token');
+          setTimeout(() => Auth.login(), 1500);
+          throw new Error('토큰 만료 — 재로그인 필요');
+        }
+        // 429: Rate Limit → 지수 백오프 후 재시도
+        if (res.status === 429 && attempt < retries) {
+          const wait = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 10000);
+          console.warn(`Rate limited (429), retry ${attempt + 1}/${retries} in ${Math.round(wait)}ms`);
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        // 5xx: 서버 오류 → 재시도
+        if (res.status >= 500 && attempt < retries) {
+          const wait = 1000 * Math.pow(2, attempt);
+          console.warn(`Server error (${res.status}), retry ${attempt + 1}/${retries} in ${wait}ms`);
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        return res;
+      } catch (e) {
+        // 네트워크 에러 (오프라인 등) → 재시도
+        if (e.message === '토큰 만료 — 재로그인 필요') throw e;
+        if (attempt < retries) {
+          const wait = 1000 * Math.pow(2, attempt);
+          console.warn(`Network error, retry ${attempt + 1}/${retries} in ${wait}ms:`, e.message);
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        throw new Error(`네트워크 오류: ${e.message}`);
+      }
+    }
+  },
+
+  // Get all rows (캐시 적용)
+  async getAll(tab, useCache = true) {
+    if (useCache) {
+      const cached = this._getCached(`getAll:${tab}`);
+      if (cached) return JSON.parse(JSON.stringify(cached)); // deep copy
+    }
     const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}`);
     if (!res.ok) throw new Error(`Sheets GET ${tab}: ${res.status}`);
     const data = await res.json();
-    return data.values ? data.values.slice(1) : []; // Skip header row
+    const rows = data.values ? data.values.slice(1) : [];
+    this._setCache(`getAll:${tab}`, rows);
+    return rows;
   },
 
-  // Get specific range
-  async getRange(range) {
+  // Get specific range (캐시 적용)
+  async getRange(range, useCache = true) {
+    if (useCache) {
+      const cached = this._getCached(`getRange:${range}`);
+      if (cached) return JSON.parse(JSON.stringify(cached));
+    }
     const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(range)}`);
     if (!res.ok) throw new Error(`Sheets GET ${range}: ${res.status}`);
     const data = await res.json();
-    return data.values || [];
+    const rows = data.values || [];
+    this._setCache(`getRange:${range}`, rows);
+    return rows;
   },
 
-  // Append rows to a tab
+  // Append rows
   async append(tab, rows) {
     const body = { values: Array.isArray(rows[0]) ? rows : [rows] };
     const res = await this._fetch(
@@ -537,6 +678,7 @@ const SheetsAPI = {
       { method: 'POST', body: JSON.stringify(body) }
     );
     if (!res.ok) throw new Error(`Sheets APPEND ${tab}: ${res.status}`);
+    this.invalidateCache(tab); // 쓰기 후 캐시 무효화
     return res.json();
   },
 
@@ -548,22 +690,30 @@ const SheetsAPI = {
       { method: 'PUT', body: JSON.stringify(body) }
     );
     if (!res.ok) throw new Error(`Sheets UPDATE ${range}: ${res.status}`);
+    const tab = range.split('!')[0];
+    this.invalidateCache(tab);
     return res.json();
   },
 
-  // Batch update multiple ranges at once (avoids rate limiting)
+  // Batch update (청크 분할 내장)
   async batchUpdate(data) {
-    // data: [{ range: 'Sheet!A2', values: [['val']] }, ...]
-    const body = { valueInputOption: 'USER_ENTERED', data };
-    const res = await this._fetch(
-      `${this.baseUrl()}/values:batchUpdate`,
-      { method: 'POST', body: JSON.stringify(body) }
-    );
-    if (!res.ok) throw new Error(`Sheets BATCHUPDATE: ${res.status}`);
-    return res.json();
+    if (data.length === 0) return;
+    const CHUNK = 50;
+    for (let i = 0; i < data.length; i += CHUNK) {
+      const chunk = data.slice(i, i + CHUNK);
+      const body = { valueInputOption: 'USER_ENTERED', data: chunk };
+      const res = await this._fetch(
+        `${this.baseUrl()}/values:batchUpdate`,
+        { method: 'POST', body: JSON.stringify(body) }
+      );
+      if (!res.ok) throw new Error(`Sheets BATCHUPDATE: ${res.status}`);
+    }
+    // 관련 탭 캐시 무효화
+    const tabs = [...new Set(data.map(d => d.range.split('!')[0]))];
+    tabs.forEach(t => this.invalidateCache(t));
   },
 
-  // Batch get multiple ranges
+  // Batch get
   async batchGet(ranges) {
     const params = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
     const res = await this._fetch(`${this.baseUrl()}/values:batchGet?${params}`);
@@ -572,31 +722,32 @@ const SheetsAPI = {
     return data.valueRanges || [];
   },
 
-  // Find row index by value in column (1-based, including header)
+  // Find row index (캐시 활용)
   async findRowIndex(tab, colIndex, value) {
     const all = await this.getRange(tab);
-    for (let i = 1; i < all.length; i++) { // skip header
-      if (all[i] && all[i][colIndex] === value) return i + 1; // Sheets is 1-based
+    for (let i = 1; i < all.length; i++) {
+      if (all[i] && all[i][colIndex] === value) return i + 1;
     }
     return -1;
   },
 
-  // Update a specific cell by finding row
+  // Update a specific cell — batchUpdate 활용 (API 1회)
   async updateCell(tab, searchCol, searchVal, updateCol, newVal) {
     const rowIdx = await this.findRowIndex(tab, searchCol, searchVal);
     if (rowIdx === -1) throw new Error(`Row not found: ${searchVal}`);
-    const colLetter = String.fromCharCode(65 + updateCol); // A=0, B=1, ...
-    await this.update(`${tab}!${colLetter}${rowIdx}`, [[newVal]]);
+    const colLetter = String.fromCharCode(65 + updateCol);
+    await this.batchUpdate([{ range: `${tab}!${colLetter}${rowIdx}`, values: [[newVal]] }]);
   },
 
-  // Update multiple cells in the same row
+  // Update multiple cells in ONE batch call (기존: 열 개수만큼 API → 개선: 1회)
   async updateRow(tab, searchCol, searchVal, updates) {
     const rowIdx = await this.findRowIndex(tab, searchCol, searchVal);
     if (rowIdx === -1) throw new Error(`Row not found: ${searchVal}`);
-    for (const [col, val] of Object.entries(updates)) {
-      const colLetter = String.fromCharCode(65 + parseInt(col));
-      await this.update(`${tab}!${colLetter}${rowIdx}`, [[val]]);
-    }
+    const data = Object.entries(updates).map(([col, val]) => ({
+      range: `${tab}!${String.fromCharCode(65 + parseInt(col))}${rowIdx}`,
+      values: [[val]]
+    }));
+    await this.batchUpdate(data);
   },
 };
 
@@ -4637,32 +4788,41 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     showLoading();
     const shipTime = formatDateTime();
 
-    // 1. 완제품개별 상태 업데이트
-    await SheetsAPI.updateRow('완제품개별', 0, indivId, {
-      3: '출하완료',
-      4: shipTime,
-      5: State.user?.email,
-    });
-
-    // 2. 출하기록 시트에 기록 저장
+    // 1. 완제품개별 상태 + 출하기록을 병렬로 처리
     const shipId = await generateSeqId('SHP', '출하기록');
-    await SheetsAPI.append('출하기록', [
-      shipId, lotId, indivId, customerName, '1', 'ea', shipTime, State.user?.email
+    const [indivRowIdx] = await Promise.all([
+      SheetsAPI.findRowIndex('완제품개별', 0, indivId),
+      SheetsAPI.append('출하기록', [
+        shipId, lotId, indivId, customerName, '1', 'ea', shipTime, State.user?.email
+      ])
     ]);
 
-    // 3. LOT 잔량 업데이트 — 출하완료 아닌 개별 수 세기
-    const allIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []);
+    // 2. 개별 상태 업데이트 (batchUpdate)
+    if (indivRowIdx > 0) {
+      await SheetsAPI.batchUpdate([
+        { range: `완제품개별!D${indivRowIdx}`, values: [['출하완료']] },
+        { range: `완제품개별!E${indivRowIdx}`, values: [[shipTime]] },
+        { range: `완제품개별!F${indivRowIdx}`, values: [[State.user?.email || '']] },
+      ]);
+    }
+
+    // 3. LOT 잔량 업데이트 (캐시 무효화 후 fresh 데이터)
+    SheetsAPI.invalidateCache('완제품개별');
+    const allIndivs = await SheetsAPI.getAll('완제품개별', false);
     const lotIndivs = allIndivs.filter(iv => iv[1] === lotId);
     const activeCount = lotIndivs.filter(iv => !['출하완료','폐기'].includes(iv[3])).length;
-    await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 8: String(activeCount) });
 
-    // 4. 모든 개별이 출하/폐기면 LOT 상태도 출하완료
-    if (activeCount === 0) {
-      await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 9: '출하완료' });
+    // 4. LOT remain + 상태를 한 번에 업데이트
+    const lotRowIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+    if (lotRowIdx > 0) {
+      const lotBatch = [{ range: `완제품LOT!I${lotRowIdx}`, values: [[String(activeCount)]] }];
+      if (activeCount === 0) {
+        lotBatch.push({ range: `완제품LOT!J${lotRowIdx}`, values: [['출하완료']] });
+      }
+      await SheetsAPI.batchUpdate(lotBatch);
     }
 
     toast(`출하 완료: ${indivId} → ${customerName}`, 'suc');
-    // 현재 화면 새로고침
     if (State.currentScreen === 'qr-scan') {
       setTimeout(() => Router.go('qr-scan'), 1000);
     } else {
@@ -4680,29 +4840,48 @@ async function processShipment(indivId, lotId, itemName) {
   showShipmentPopup(indivId, lotId, itemName);
 }
 
-// ─── 냉동 12h 경과 체크 & 출하가능 전환 ───
+// ─── 냉동 12h 경과 체크 & 출하가능 전환 (batchUpdate 최적화) ───
 async function checkFreezeAndUpdateStatus() {
   try {
     const wos = await SheetsAPI.getAll('작업지시서');
     const freezing = wos.filter(w => w[12] === '냉동보관중' && w[11]);
-    let updated = 0;
-    for (const wo of freezing) {
-      const freezeStart = new Date(wo[11]);
-      const hours = (Date.now() - freezeStart.getTime()) / (1000 * 60 * 60);
-      if (hours >= 12) {
-        await SheetsAPI.updateRow('작업지시서', 0, wo[0], { 12: '출하가능' });
-        if (wo[14]) {
-          await SheetsAPI.updateRow('완제품LOT', 0, wo[14], { 9: '출하가능' });
-          const indivs = await SheetsAPI.getAll('완제품개별');
-          const lotIndivs = indivs.filter(r => r[1] === wo[14] && r[3] === '냉동보관중');
-          for (const ind of lotIndivs) {
-            await SheetsAPI.updateRow('완제품개별', 0, ind[0], { 3: '출하가능' });
-          }
+    if (freezing.length === 0) return;
+
+    // 전환 대상 WO 수집
+    const readyWOs = freezing.filter(wo => {
+      const hours = (Date.now() - new Date(wo[11]).getTime()) / (1000 * 60 * 60);
+      return hours >= 12;
+    });
+    if (readyWOs.length === 0) return;
+
+    // 완제품개별 한 번만 로드
+    const indivs = await SheetsAPI.getAll('완제품개별');
+    const batchData = [];
+
+    for (const wo of readyWOs) {
+      // WO 상태 업데이트 준비
+      const woIdx = await SheetsAPI.findRowIndex('작업지시서', 0, wo[0]);
+      if (woIdx > 0) batchData.push({ range: `작업지시서!M${woIdx}`, values: [['출하가능']] });
+
+      if (wo[14]) {
+        // LOT 상태 업데이트 준비
+        const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, wo[14]);
+        if (lotIdx > 0) batchData.push({ range: `완제품LOT!J${lotIdx}`, values: [['출하가능']] });
+
+        // 개별 항목 상태 업데이트 준비
+        const lotIndivs = indivs.filter(r => r[1] === wo[14] && r[3] === '냉동보관중');
+        for (const ind of lotIndivs) {
+          const indIdx = await SheetsAPI.findRowIndex('완제품개별', 0, ind[0]);
+          if (indIdx > 0) batchData.push({ range: `완제품개별!D${indIdx}`, values: [['출하가능']] });
         }
-        updated++;
       }
     }
-    if (updated > 0) toast(`${updated}건 출하 가능 상태로 전환됨`, 'suc');
+
+    // 한 번의 batchUpdate로 전체 처리
+    if (batchData.length > 0) {
+      await SheetsAPI.batchUpdate(batchData);
+      toast(`${readyWOs.length}건 출하 가능 상태로 전환됨`, 'suc');
+    }
   } catch (e) { console.error('Freeze check error:', e); }
 }
 setInterval(checkFreezeAndUpdateStatus, 5 * 60 * 1000);
@@ -4772,161 +4951,9 @@ async function initApp() {
     // 냉동 상태 체크 (12h 경과 시 출하가능으로 전환)
     checkFreezeAndUpdateStatus();
 
-    // ── 일회성 데이터 마이그레이션 ──
-    // (1) 공정2 "수온 확인" → "불순물 확인"
-    if (!localStorage.getItem('mt_migr_step2_check')) {
-      try {
-        const steps = await SheetsAPI.getAll('SOP공정단계');
-        const target = steps.find(r => r[1] === '2' && (r[6] || '').includes('수온 확인'));
-        if (target) {
-          const newVal = target[6].replace('수온 확인', '불순물 확인');
-          await SheetsAPI.updateCell('SOP공정단계', 1, '2', 6, newVal);
-          toast('공정2 체크항목 수정 완료 ✅', 'suc');
-        }
-        localStorage.setItem('mt_migr_step2_check', '1');
-      } catch(e) { console.warn('Migration skip:', e); }
-    }
-
-    // (2) QR 이미지 URL → ID 텍스트 변환 (quickchart.io 제거)
-    if (!localStorage.getItem('mt_migr_qr_url_cleanup')) {
-      try {
-        const INDIV_SHEETS = ['원재료개별', '완제품개별', '소모품개별'];
-        let totalFixed = 0;
-        for (const sheet of INDIV_SHEETS) {
-          const rows = await SheetsAPI.getAll(sheet).catch(() => []);
-          for (const row of rows) {
-            // 6번 열(G열)에 quickchart.io URL이 있으면 ID 텍스트로 변환
-            if (row[6] && row[6].includes('quickchart.io')) {
-              // URL에서 text 파라미터 추출
-              try {
-                const url = new URL(row[6]);
-                const idText = url.searchParams.get('text') || row[0];
-                await SheetsAPI.updateCell(sheet, 0, row[0], 6, idText);
-                totalFixed++;
-              } catch(e2) {
-                // URL 파싱 실패 시 개별ID(0열)로 대체
-                await SheetsAPI.updateCell(sheet, 0, row[0], 6, row[0]);
-                totalFixed++;
-              }
-            }
-          }
-        }
-        if (totalFixed > 0) toast(`QR 데이터 정리: ${totalFixed}건 변환 완료 ✅`, 'suc');
-        localStorage.setItem('mt_migr_qr_url_cleanup', '1');
-      } catch(e) { console.warn('QR migration skip:', e); }
-    }
-
-    // (3) 개별 레코드가 없는 LOT에 대해 자동 생성
-    if (!localStorage.getItem('mt_migr_gen_indiv_v2')) {
-      try {
-        const SHEETS = [
-          { lot: '원재료LOT', indiv: '원재료개별', qtyCol: 4, unitCol: 5, statusCol: 9, indivCountCol: 10 },
-          { lot: '완제품LOT', indiv: '완제품개별', qtyCol: 3, unitCol: 4, statusCol: 9, indivCountCol: 10 },
-          { lot: '소모품LOT', indiv: '소모품개별', qtyCol: 3, unitCol: 4, statusCol: 7, indivCountCol: null },
-        ];
-        let totalCreated = 0;
-        for (const cfg of SHEETS) {
-          const lots = await SheetsAPI.getAll(cfg.lot).catch(() => []);
-          const existingIndivs = await SheetsAPI.getAll(cfg.indiv).catch(() => []);
-          for (const lot of lots) {
-            const lotId = lot[0];
-            const status = lot[cfg.statusCol] || '미사용';
-            // 폐기/소진 LOT는 건너뜀
-            if (['폐기','소진','삭제'].includes(status)) continue;
-            // 이미 개별 레코드가 있으면 건너뜀
-            const existing = existingIndivs.filter(iv => iv[1] === lotId);
-            if (existing.length > 0) continue;
-            // 개별 수량 결정: LOT의 indivCount 열 또는 기본 1
-            const indivCount = cfg.indivCountCol ? (parseInt(lot[cfg.indivCountCol]) || 1) : 1;
-            const qty = parseFloat(lot[cfg.qtyCol]) || 0;
-            const perUnit = indivCount > 0 ? qty / indivCount : qty;
-            const itemCode = lot[1] || '';
-            const newRows = [];
-            for (let i = 1; i <= indivCount; i++) {
-              const indivId = `${lotId}-${String(i).padStart(2, '0')}`;
-              newRows.push([indivId, lotId, itemCode, status === '사용중' ? '사용중' : '미사용', String(perUnit), '', indivId]);
-            }
-            if (newRows.length > 0) {
-              await SheetsAPI.append(cfg.indiv, newRows);
-              totalCreated += newRows.length;
-            }
-          }
-        }
-        if (totalCreated > 0) toast(`개별 QR 레코드 ${totalCreated}건 자동 생성 ✅`, 'suc');
-        localStorage.setItem('mt_migr_gen_indiv_v2', '1');
-      } catch(e) { console.warn('Indiv gen migration skip:', e); localStorage.setItem('mt_migr_gen_indiv_v2', '1'); }
-    }
-
-    // (4) LOT ID 포맷 통일: 구 포맷(RM-YYYYMMDD-NNN) → 신 포맷(RM-품목번호-YYMMDD-YYMMDD-NNN)
-    //     batchUpdate로 API 호출 최소화 (429 Rate Limit 방지)
-    if (!localStorage.getItem('mt_migr_lot_id_v1')) {
-      try {
-        const OLD_LOT_RE = /^(RM|FG|SP)-(\d{8})-(\d{3})$/;
-        const toYY = (d) => d ? d.replace(/-/g, '').substring(2) : '000000';
-        const iNum = (code) => (code || '').replace(/[A-Za-z]/g, '').padStart(3, '0');
-        const LOT_CONFIGS = [
-          { tab: '원재료LOT', indivTab: '원재료개별', inDateCol: 6, expCol: 7 },
-          { tab: '완제품LOT', indivTab: '완제품개별', inDateCol: 5, expCol: 6 },
-        ];
-
-        let totalMigrated = 0;
-        const idMap = {}; // oldId → newId
-        const batchData = []; // 모든 업데이트를 모아서 한번에 전송
-
-        // Phase 1: LOT 테이블 매핑 생성 + 업데이트 준비
-        for (const cfg of LOT_CONFIGS) {
-          const allRows = await SheetsAPI.getRange(cfg.tab).catch(() => []);
-          const seqMap = {};
-          for (let i = 1; i < allRows.length; i++) {
-            const row = allRows[i];
-            if (!row?.[0]?.match(OLD_LOT_RE)) continue;
-            const m = row[0].match(OLD_LOT_RE);
-            const prefix = m[1];
-            const num = iNum(row[1]);
-            const inYM = toYY(row[cfg.inDateCol]);
-            const expYM = toYY(row[cfg.expCol]);
-            const seqKey = `${prefix}-${num}-${inYM}`;
-            seqMap[seqKey] = (seqMap[seqKey] || 0) + 1;
-            const newId = `${prefix}-${num}-${inYM}-${expYM}-${String(seqMap[seqKey]).padStart(3, '0')}`;
-            idMap[row[0]] = newId;
-            batchData.push({ range: `${cfg.tab}!A${i + 1}`, values: [[newId]] });
-            totalMigrated++;
-          }
-
-          // Phase 2: 개별 테이블 업데이트 준비
-          const indivRows = await SheetsAPI.getRange(cfg.indivTab).catch(() => []);
-          for (let i = 1; i < indivRows.length; i++) {
-            const row = indivRows[i];
-            if (!row?.[1] || !idMap[row[1]]) continue;
-            const oldParent = row[1];
-            const newLot = idMap[oldParent];
-            const suffix = row[0].substring(oldParent.length);
-            batchData.push({ range: `${cfg.indivTab}!A${i + 1}`, values: [[newLot + suffix]] });
-            batchData.push({ range: `${cfg.indivTab}!B${i + 1}`, values: [[newLot]] });
-            if (row[6] && row[6].includes(oldParent)) {
-              batchData.push({ range: `${cfg.indivTab}!G${i + 1}`, values: [[row[6].replace(oldParent, newLot)]] });
-            }
-          }
-        }
-
-        // Phase 3: 입고기록 업데이트 준비
-        const rcvRows = await SheetsAPI.getRange('입고기록').catch(() => []);
-        for (let i = 1; i < rcvRows.length; i++) {
-          if (rcvRows[i]?.[5] && idMap[rcvRows[i][5]]) {
-            batchData.push({ range: `입고기록!F${i + 1}`, values: [[idMap[rcvRows[i][5]]]] });
-          }
-        }
-
-        // Phase 4: 배치 전송 (50개씩 분할하여 안전하게)
-        for (let j = 0; j < batchData.length; j += 50) {
-          const chunk = batchData.slice(j, j + 50);
-          await SheetsAPI.batchUpdate(chunk);
-        }
-
-        if (totalMigrated > 0) toast(`LOT ID 포맷 통일: ${totalMigrated}건 변환 완료 ✅`, 'suc');
-        localStorage.setItem('mt_migr_lot_id_v1', '1');
-      } catch(e) { console.warn('LOT ID migration skip:', e); localStorage.setItem('mt_migr_lot_id_v1', '1'); }
-    }
+    // ── 완료된 마이그레이션 플래그 설정 (더 이상 실행 불필요) ──
+    ['mt_migr_step2_check','mt_migr_qr_url_cleanup','mt_migr_gen_indiv_v2','mt_migr_lot_id_v1']
+      .forEach(k => { if (!localStorage.getItem(k)) localStorage.setItem(k, '1'); });
 
   } else {
     Router.go('login');
