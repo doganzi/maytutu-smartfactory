@@ -3690,8 +3690,8 @@ function renderWOExecute() {
     <!-- Step dots -->
     <div class="step-nav">
       ${steps.map((s, i) => `
-        <div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : ''}"
-             onclick="goToStep(${i})">${i + 1}</div>
+        <div class="step-dot ${i < currentStep ? 'done' : i === currentStep ? 'current' : 'locked'}"
+             onclick="goToStep(${i})" ${i > currentStep ? 'style="opacity:0.3;cursor:not-allowed"' : ''}>${i + 1}</div>
       `).join('')}
     </div>
 
@@ -3844,7 +3844,7 @@ function renderStepContent(step, stepType) {
       checks.forEach((c, i) => {
         html += `
           <div class="check-item">
-            <div class="check-box" id="check-${stepNo}-${i}" onclick="toggleCheck(this)">${''}</div>
+            <div class="check-box" id="check-${stepNo}-${i}" onclick="toggleCheck(this);validateStepInputs(${stepNo})">${''}</div>
             <span>${c.trim()}</span>
           </div>
         `;
@@ -3853,7 +3853,7 @@ function renderStepContent(step, stepType) {
 
     html += `
       <div class="photo-upload mt-8" onclick="this.querySelector('input').click()">
-        <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo})">
+        <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
         <div class="photo-label">📷 믹싱 후 상태 사진 <span class="c-err">*필수</span></div>
         <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
@@ -3870,9 +3870,9 @@ function renderStepContent(step, stepType) {
         <div class="fs-20 fw-8 mt-4">${packTarget}개 (${unitSize}kg × ${packTarget})</div>
       </div>
       <div class="input-group">
-        <label>실제 생산 수량</label>
+        <label>실제 생산 수량 <span class="c-err">*필수</span></label>
         <div class="input-suffix">
-          <input type="number" id="pack-qty-${stepNo}" placeholder="포장 수" value="${packTarget}">
+          <input type="number" id="pack-qty-${stepNo}" placeholder="포장 수" value="${packTarget}" oninput="validateStepInputs(${stepNo})">
           <span>개</span>
         </div>
       </div>
@@ -3892,11 +3892,11 @@ function renderStepContent(step, stepType) {
             </div>
             <div style="flex:1">
               <div class="fs-11 c-txt-l mb-4">실제 무게</div>
-              <input type="number" id="sample-wt-${stepNo}-${n}" placeholder="kg" step="0.01" style="padding:6px 8px;border-radius:4px;border:1px solid var(--gray-l);font-size:12px;width:100%">
+              <input type="number" id="sample-wt-${stepNo}-${n}" placeholder="kg" step="0.01" style="padding:6px 8px;border-radius:4px;border:1px solid var(--gray-l);font-size:12px;width:100%" oninput="validateStepInputs(${stepNo})">
             </div>
           </div>
           <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
-            <input type="file" accept="image/*" onchange="previewStepPhoto(this, '${stepNo}-s${n}')">
+            <input type="file" accept="image/*" onchange="previewStepPhoto(this, '${stepNo}-s${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 샘플 #${n} 사진 *필수</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-s${n}"></div>
           </div>
@@ -3914,8 +3914,8 @@ function renderStepContent(step, stepType) {
         <div class="fs-11 c-txt-l mt-4">포장 밀봉 후 라벨 부착 상태를 확인하고, 무작위 3개 샘플 사진을 첨부하세요.</div>
       </div>
       <div class="fs-12 fw-6 c-txt-l mb-4 mt-8" style="border-top:1px solid var(--gray-l);padding-top:10px">체크항목</div>
-      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-0" onclick="toggleCheck(this)"></div><span>제품 라벨 부착 확인</span></div>
-      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-1" onclick="toggleCheck(this)"></div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>
+      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-0" onclick="toggleCheck(this);validateStepInputs(${stepNo})"></div><span>제품 라벨 부착 확인</span></div>
+      <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-1" onclick="toggleCheck(this);validateStepInputs(${stepNo})"></div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>
       <div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 사진 촬영 <span class="c-err">*필수</span></div>
     `;
     for (let n = 1; n <= 3; n++) {
@@ -3923,7 +3923,7 @@ function renderStepContent(step, stepType) {
         <div class="card" style="padding:10px;border-left:3px solid #7c3aed">
           <div class="fs-13 fw-6 mb-8">샘플 #${n}</div>
           <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
-            <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}')">
+            <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 제품 #${n} 사진 *필수</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-seal${n}"></div>
           </div>
@@ -3934,7 +3934,7 @@ function renderStepContent(step, stepType) {
       <div class="input-group mt-12">
         <label>최종 완제품 수량 <span class="c-err">*필수</span></label>
         <div class="input-suffix">
-          <input type="number" id="seal-qty-${stepNo}" placeholder="밀봉 완료 수량" value="${packTarget || ''}">
+          <input type="number" id="seal-qty-${stepNo}" placeholder="밀봉 완료 수량" value="${packTarget || ''}" oninput="validateStepInputs(${stepNo})">
           <span>개</span>
         </div>
         <div class="input-hint">이 수량이 최종 재고 인정 수량으로 처리됩니다</div>
@@ -4027,9 +4027,9 @@ function renderStepContent(step, stepType) {
     html += `
       <div class="card bl-teal" style="padding:10px">
         <div class="fs-13 fw-6 mb-8">Step 7. 기계 스크린 촬영</div>
-        <div class="input-group"><label>총 검사 수량</label><div class="input-suffix"><input type="number" id="ccp-total" placeholder="수량 입력"><span>개</span></div></div>
+        <div class="input-group"><label>총 검사 수량</label><div class="input-suffix"><input type="number" id="ccp-total" placeholder="수량 입력" oninput="validateStepInputs(${stepNo})"><span>개</span></div></div>
         <div class="photo-upload" onclick="this.querySelector('input').click()">
-          <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, '${stepNo}-ccp7')">
+          <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, '${stepNo}-ccp7');validateStepInputs(${stepNo})">
           <div class="photo-label">📷 검출기 기계 화면 사진 <span class="c-err">*필수</span></div>
           <div class="photo-preview" id="photo-preview-${stepNo}-ccp7"></div>
         </div>
@@ -4044,7 +4044,7 @@ function renderStepContent(step, stepType) {
         <div class="fs-20 fw-8 c-teal mt-4">${step[5] || '-18°C 이하 · 최소 12시간'}</div>
       </div>
       <div class="photo-upload" onclick="this.querySelector('input').click()">
-        <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo})">
+        <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
         <div class="photo-label">📷 냉동고 온도계 사진 <span class="c-err">*필수</span></div>
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
       </div>
@@ -4110,6 +4110,11 @@ function previewStepPhoto(input, stepNo) {
 
 function goToStep(idx) {
   if (idx < 0 || idx >= State.woExec.steps.length) return;
+  // 뒤로 가기는 자유, 앞으로 가기는 현재 공정까지만 허용
+  if (idx > State.woExec.currentStep) {
+    toast('현재 공정의 모든 자료를 완결한 후 다음으로 이동할 수 있습니다', 'err', 3000);
+    return;
+  }
   State.woExec.currentStep = idx;
   renderWOExecute();
 }
@@ -4169,6 +4174,56 @@ function handleCompleteStep(isFinal = false) {
     }
   }
 
+  if (stepType === 'process') {
+    // 체크항목 전부 체크 확인
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    const isMixing = (step[2]||'').includes('믹싱');
+    const allChecks = [...checks];
+    if (isMixing) {
+      if (!allChecks.includes('RPM 확인')) allChecks.push('RPM 확인');
+      if (!allChecks.includes('믹싱 시간 확인')) allChecks.push('믹싱 시간 확인');
+    }
+    let unchecked = 0;
+    allChecks.forEach((_, i) => {
+      const cb = $id(`check-${stepNo}-${i}`);
+      if (cb && cb.textContent !== '✓') unchecked++;
+    });
+    if (unchecked > 0) missing.push(`체크항목 (${unchecked}건 미체크)`);
+    // 사진 필수
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) missing.push('공정 사진');
+  }
+
+  if (stepType === 'inspect') {
+    // CCP 금속검출 — 총 검사 수량, 기계 사진 필수
+    const ccpTotal = parseInt($id('ccp-total')?.value);
+    if (!ccpTotal || ccpTotal <= 0) missing.push('총 검사 수량');
+    const ccpPhoto = $id(`photo-preview-${stepNo}-ccp7`);
+    if (!ccpPhoto || !ccpPhoto.innerHTML.trim()) missing.push('검출기 기계 화면 사진');
+    // 시간 입력 확인
+    if (!$id('ccp-time-1')?.value) missing.push('Step1 시작 시간');
+  }
+
+  if (stepType === 'pack') {
+    // 실제 생산 수량
+    const packQty = parseInt($id(`pack-qty-${stepNo}`)?.value);
+    if (!packQty || packQty <= 0) missing.push('실제 생산 수량');
+    // 3개 샘플 사진
+    let photoCount = 0;
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-s${n}`);
+      if (prev && prev.innerHTML.trim()) photoCount++;
+    }
+    if (photoCount < 3) missing.push(`샘플 사진 (${3-photoCount}건 미촬영)`);
+    // 3개 샘플 무게
+    let weightCount = 0;
+    for (let n = 1; n <= 3; n++) {
+      const wt = parseFloat($id(`sample-wt-${stepNo}-${n}`)?.value);
+      if (wt && wt > 0) weightCount++;
+    }
+    if (weightCount < 3) missing.push(`샘플 무게 (${3-weightCount}건 미입력)`);
+  }
+
   if (stepType === 'seal') {
     // 밀봉 체크항목 확인
     const sealCheck0 = $id(`check-seal-${stepNo}-0`);
@@ -4186,6 +4241,12 @@ function handleCompleteStep(isFinal = false) {
     const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
     if (!sealQty || sealQty <= 0) missing.push('최종 완제품 수량');
     else State.woExec.packCount = sealQty; // 최종 재고 인정 수량 반영
+  }
+
+  if (stepType === 'store') {
+    // 냉동고 온도계 사진 필수
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) missing.push('냉동고 온도계 사진');
   }
 
   if (missing.length > 0) {
@@ -4516,6 +4577,64 @@ function validateStepInputs(stepNo) {
       const scanned = State.woExec._scannedLots?.[stepNo]?.length || 0;
       if (scanned === 0) allValid = false;
     }
+  }
+
+  // process 타입 검증
+  if (stepType === 'process') {
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    const isMixing = (step[2]||'').includes('믹싱');
+    const allChecks = [...checks];
+    if (isMixing) {
+      if (!allChecks.includes('RPM 확인')) allChecks.push('RPM 확인');
+      if (!allChecks.includes('믹싱 시간 확인')) allChecks.push('믹싱 시간 확인');
+    }
+    allChecks.forEach((_, i) => {
+      const cb = $id(`check-${stepNo}-${i}`);
+      if (cb && cb.textContent !== '✓') allValid = false;
+    });
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) allValid = false;
+  }
+
+  // inspect 타입 검증 (CCP)
+  if (stepType === 'inspect') {
+    const ccpTotal = parseInt($id('ccp-total')?.value);
+    if (!ccpTotal || ccpTotal <= 0) allValid = false;
+    const ccpPhoto = $id(`photo-preview-${stepNo}-ccp7`);
+    if (!ccpPhoto || !ccpPhoto.innerHTML.trim()) allValid = false;
+    if (!$id('ccp-time-1')?.value) allValid = false;
+  }
+
+  // pack 타입 검증
+  if (stepType === 'pack') {
+    const packQty = parseInt($id(`pack-qty-${stepNo}`)?.value);
+    if (!packQty || packQty <= 0) allValid = false;
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-s${n}`);
+      if (!prev || !prev.innerHTML.trim()) allValid = false;
+      const wt = parseFloat($id(`sample-wt-${stepNo}-${n}`)?.value);
+      if (!wt || wt <= 0) allValid = false;
+    }
+  }
+
+  // seal 타입 검증
+  if (stepType === 'seal') {
+    const sealCheck0 = $id(`check-seal-${stepNo}-0`);
+    const sealCheck1 = $id(`check-seal-${stepNo}-1`);
+    if (!sealCheck0 || sealCheck0.textContent !== '✓') allValid = false;
+    if (!sealCheck1 || sealCheck1.textContent !== '✓') allValid = false;
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-seal${n}`);
+      if (!prev || !prev.innerHTML.trim()) allValid = false;
+    }
+    const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
+    if (!sealQty || sealQty <= 0) allValid = false;
+  }
+
+  // store 타입 검증
+  if (stepType === 'store') {
+    const photoPreview = $id(`photo-preview-${stepNo}`);
+    if (!photoPreview || !photoPreview.innerHTML.trim()) allValid = false;
   }
 
   // Enable/disable next button
