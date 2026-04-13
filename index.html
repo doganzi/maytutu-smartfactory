@@ -3581,7 +3581,7 @@ function updateWOCalc() {
         return `
           <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--gray-l)">
             <span class="fs-13">${r[2]||''} (${r[1]||''})</span>
-            <span class="fs-13 fw-7 c-suc">${target.toFixed(2)} kg${eggCnt > 0 ? ' <span style="background:#fff8e1;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:11px;color:#e65100">🥚${eggCnt}알</span>' : ''}</span>
+            <span class="fs-13 fw-7 c-suc">${target.toFixed(2)} kg${eggCnt > 0 ? ' <span style="background:#fff8e1;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:11px;color:#e65100">🥚' + eggCnt + '알</span>' : ''}</span>
           </div>
         `;
       }).join('')}
