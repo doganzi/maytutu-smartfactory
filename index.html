@@ -3578,10 +3578,13 @@ function updateWOCalc() {
         const target = (parseFloat(r[3]) || 0) * totalKg * 1.01;
         const isEgg = (r[1]||'') === 'RM001';
         const eggCnt = isEgg ? Math.ceil(target * 1000 / 50) : 0;
+        const eggPan = Math.floor(eggCnt / 30);
+        const eggAl = eggCnt % 30;
+        const eggTxt = eggCnt > 0 ? (eggPan > 0 && eggAl > 0 ? eggPan + '판 ' + eggAl + '알' : eggPan > 0 ? eggPan + '판' : eggAl + '알') : '';
         return `
           <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--gray-l)">
             <span class="fs-13">${r[2]||''} (${r[1]||''})</span>
-            <span class="fs-13 fw-7 c-suc">${target.toFixed(2)} kg${eggCnt > 0 ? ' <span style="background:#fff8e1;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:11px;color:#e65100">🥚' + eggCnt + '알</span>' : ''}</span>
+            <span class="fs-13 fw-7 c-suc">${target.toFixed(2)} kg${eggTxt ? ' <span style="background:#fff8e1;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:11px;color:#e65100">🥚 ' + eggTxt + '</span>' : ''}</span>
           </div>
         `;
       }).join('')}
@@ -3748,10 +3751,13 @@ function renderStepContent(step, stepType) {
 
     // ① 투입 목표량
     const eggCount = rmCode === 'RM001' ? Math.ceil(parseFloat(target) * 1000 / 50) : 0;
+    const eggP = Math.floor(eggCount / 30);
+    const eggA = eggCount % 30;
+    const eggLabel = eggCount > 0 ? (eggP > 0 && eggA > 0 ? `${eggP}판 ${eggA}알` : eggP > 0 ? `${eggP}판` : `${eggA}알`) : '';
     html += `
       <div class="info-box suc">
         <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetQty}kg × 1.01)</div>
-        <div class="fs-20 fw-8 c-suc mt-4">${target} kg${eggCount > 0 ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:2px 8px;font-size:13px;color:#e65100;font-weight:700;margin-left:8px;vertical-align:middle">🥚 ${eggCount}알</span>` : ''}</div>
+        <div class="fs-20 fw-8 c-suc mt-4">${target} kg${eggLabel ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:2px 8px;font-size:13px;color:#e65100;font-weight:700;margin-left:8px;vertical-align:middle">🥚 ${eggLabel}</span>` : ''}</div>
       </div>
     `;
 
