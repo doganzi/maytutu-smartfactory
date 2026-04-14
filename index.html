@@ -1001,7 +1001,18 @@ Screens.dashboard = async () => {
       const totalRemain = rmLots.filter(l => l[1] === code && l[9] !== '폐기').reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
       if (totalRemain < minStock) {
         lowStock++;
-        lowStockItems.push({ name: item[1], code, remain: totalRemain, min: minStock });
+        const sku = item[3] || '';
+        const skuM = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
+        let remainDisp = totalRemain + 'kg', minDisp = minStock + 'kg';
+        if (skuM) {
+          const pu = parseFloat(skuM[1]), un = skuM[2];
+          if (pu > 0) {
+            const sr = Math.floor(totalRemain / pu), srr = Math.round(totalRemain % pu * 10) / 10;
+            remainDisp = srr > 0 ? sr + un + ' ' + srr + 'kg' : sr + un;
+            minDisp = Math.round(minStock / pu) + un;
+          }
+        }
+        lowStockItems.push({ name: item[1], code, remain: totalRemain, min: minStock, remainDisp, minDisp });
       }
     });
 
@@ -1104,7 +1115,7 @@ Screens.dashboard = async () => {
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6 c-err">${item.name} 재고 부족</div>
-                <div class="fs-12 c-txt-l">현재고 ${item.remain}kg / 안전재고 ${item.min}kg</div>
+                <div class="fs-12 c-txt-l">현재고 ${item.remainDisp || item.remain+'kg'} / 안전재고 ${item.minDisp || item.min+'kg'}</div>
               </div>
               <span class="badge badge-err">부족</span>
             </div>
@@ -1468,6 +1479,7 @@ async function renderInventoryContent(activeTab) {
     } else {
       listEl.innerHTML = items.map(item => {
         const code = item[0], name = item[1], minStock = parseFloat(item[6]) || 0;
+        const sku = item[3] || '';
         const storageTemp = item[8] || '실온';
         const isWater = code === 'RM002';
 
@@ -1485,6 +1497,21 @@ async function renderInventoryContent(activeTab) {
           return !min || l[7] < min ? l[7] : min;
         }, null);
 
+        // Unit conversion for display (통, 판 etc.)
+        let stockDisp = totalRemain + 'kg', safeDisp = minStock + 'kg';
+        const skuMatch = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
+        if (skuMatch && !isWater && typeof totalRemain === 'number') {
+          const perUnit = parseFloat(skuMatch[1]);
+          const unitName = skuMatch[2];
+          if (perUnit > 0) {
+            const stockUnits = Math.floor(totalRemain / perUnit);
+            const stockRem = Math.round(totalRemain % perUnit * 10) / 10;
+            stockDisp = stockRem > 0 ? stockUnits + unitName + ' ' + stockRem + 'kg' : stockUnits + unitName;
+            const safeUnits = Math.round(minStock / perUnit);
+            safeDisp = safeUnits + unitName;
+          }
+        }
+
         return `
           <div class="card ${isWater ? '' : 'clickable'}" ${isWater ? '' : `onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${name}'})"`}>
             <div class="row between">
@@ -1493,8 +1520,8 @@ async function renderInventoryContent(activeTab) {
                   ${name} <span class="fs-11 c-txt-l">${code}</span>
                   ${!isWater ? '<span class="fs-10 c-info" style="margin-left:4px">▸ LOT상세</span>' : ''}
                 </div>
-                <div class="fs-12 c-txt-l mt-4">현재고: ${isWater ? '-' : totalRemain + 'kg'}</div>
-                <div class="fs-11 ${isLow ? 'c-err fw-6' : 'c-txt-l'}">${isWater ? '관리대상 외' : `안전재고: ${minStock}kg`}</div>
+                <div class="fs-12 c-txt-l mt-4">현재고: ${isWater ? '-' : stockDisp}</div>
+                <div class="fs-11 ${isLow ? 'c-err fw-6' : 'c-txt-l'}">${isWater ? '관리대상 외' : `안전재고: ${safeDisp}`}</div>
                 <div class="fs-11 c-txt-l">소비기한: ${earliestExp ? earliestExp.substring(0,10) : '-'} · ${storageTemp}</div>
               </div>
               <span class="badge badge-${isWater ? 'gray' : isLow ? 'err' : 'suc'}">${isWater ? '-' : isLow ? '부족' : '정상'}</span>
@@ -1637,9 +1664,11 @@ Screens['lot-detail'] = async (params = {}) => {
   try {
     lots = (await SheetsAPI.getAll(lotTab).catch(() => [])).filter(l => l[1] === itemCode);
     indivs = await SheetsAPI.getAll(indivTab).catch(() => []);
+    let rmSku = '';
     if (!isFG && !isSP) {
       const item = State.rawMaterialItems?.find(i => i[0] === itemCode);
       minStock = parseFloat(item?.[6]) || 0;
+      rmSku = item?.[3] || '';
     }
   } catch (e) { console.warn(e); }
 
@@ -1653,6 +1682,20 @@ Screens['lot-detail'] = async (params = {}) => {
   }
   const isLow = minStock > 0 && totalRemain < minStock;
 
+  // Unit conversion for display
+  let lotStockDisp = totalRemain + (isFG ? '개' : 'kg'), lotSafeDisp = minStock + 'kg';
+  if (!isFG && !isSP) {
+    const skuM2 = rmSku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
+    if (skuM2) {
+      const pu2 = parseFloat(skuM2[1]), un2 = skuM2[2];
+      if (pu2 > 0) {
+        const su2 = Math.floor(totalRemain / pu2), sr2 = Math.round(totalRemain % pu2 * 10) / 10;
+        lotStockDisp = sr2 > 0 ? su2 + un2 + ' ' + sr2 + 'kg' : su2 + un2;
+        lotSafeDisp = Math.round(minStock / pu2) + un2;
+      }
+    }
+  }
+
   // 완제품: 출하완료 LOT 제외
   const displayLots = isFG ? lots.filter(l => l[9] !== '출하완료' && l[9] !== '폐기' && l[9] !== '소진') : lots;
 
@@ -1662,7 +1705,7 @@ Screens['lot-detail'] = async (params = {}) => {
         <div class="row between">
           <div>
             <div class="fs-16 fw-7">${itemName}</div>
-            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${totalRemain}${isFG ? '개' : 'kg'}${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${minStock}kg` : ''}</div>
+            <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${lotStockDisp}${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${lotSafeDisp}` : ''}</div>
           </div>
           ${!isFG && !isSP ? `<span class="badge badge-${isLow ? 'err' : 'suc'}">${isLow ? '부족' : '정상'}</span>` : ''}
         </div>
