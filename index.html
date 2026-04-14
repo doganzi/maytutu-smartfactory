@@ -1660,11 +1660,10 @@ Screens['lot-detail'] = async (params = {}) => {
   const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
   const indivTab = isFG ? '완제품개별' : isSP ? '소모품개별' : '원재료개별';
 
-  let lots = [], indivs = [], minStock = 0;
+  let lots = [], indivs = [], minStock = 0, rmSku = '';
   try {
     lots = (await SheetsAPI.getAll(lotTab).catch(() => [])).filter(l => l[1] === itemCode);
     indivs = await SheetsAPI.getAll(indivTab).catch(() => []);
-    let rmSku = '';
     if (!isFG && !isSP) {
       const item = State.rawMaterialItems?.find(i => i[0] === itemCode);
       minStock = parseFloat(item?.[6]) || 0;
