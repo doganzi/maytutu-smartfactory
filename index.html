@@ -1745,6 +1745,17 @@ Screens['lot-detail'] = async (params = {}) => {
         const stColor = status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
         const canPrint = ['미사용','사용중'].includes(status);
         const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중'].includes(iv[3]));
+        // SKU 단위 변환 for LOT display
+        let lotQtyDisp = qty + (l[5]||'kg'), lotRemDisp = remain + (l[5]||'kg');
+        if (!isSP && rmSku) {
+          const skuP = parseSkuUnit(rmSku);
+          if (skuP && skuP.perUnit > 0) {
+            const qU = Math.floor(qty / skuP.perUnit), qR = Math.round(qty % skuP.perUnit * 10) / 10;
+            lotQtyDisp = qR > 0 ? qU + skuP.unitName + ' ' + qR + 'kg' : qU + skuP.unitName;
+            const rU = Math.floor(remain / skuP.perUnit), rR = Math.round(remain % skuP.perUnit * 10) / 10;
+            lotRemDisp = rR > 0 ? rU + skuP.unitName + ' ' + rR + 'kg' : rU + skuP.unitName;
+          }
+        }
         return `
           <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">
             <div class="row between mb-4">
@@ -1755,7 +1766,7 @@ Screens['lot-detail'] = async (params = {}) => {
               </div>
             </div>
             <div class="fs-12 c-txt-l clickable">
-              입고: ${qty}${l[5]||'kg'} → 잔량: ${remain}${l[5]||'kg'} · 개별: ${printableIndivs.length}/${lotIndivs.length}건
+              입고: ${lotQtyDisp} → 잔량: ${lotRemDisp} · 개별: ${printableIndivs.length}/${lotIndivs.length}건
             </div>
             <div class="fs-11 c-txt-l">소비기한: ${(l[7]||'').substring(0,10)}</div>
             ${remain > 0 && qty > 0 ? `
@@ -1941,18 +1952,14 @@ Screens['receive-form'] = async () => {
       </div>
       <div class="input-group">
         <label>수량</label>
-        <input type="number" id="rcv-qty" placeholder="수량 입력">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="rcv-qty" placeholder="수량 입력" style="flex:1" oninput="updateReceiveConvert()">
+          <span id="rcv-sku-unit" style="background:var(--suc-l,#e8f5e9);border:1px solid #a5d6a7;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;color:var(--suc,#2e7d32);white-space:nowrap;min-width:50px;text-align:center">kg</span>
+        </div>
+        <div id="rcv-convert-info" style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:8px 10px;margin-top:6px;font-size:12px;color:#e65100;display:none">
+        </div>
       </div>
-      <div class="input-group">
-        <label>단위</label>
-        <select id="rcv-unit">
-          <option value="kg">kg</option>
-          <option value="판">판</option>
-          <option value="L">L</option>
-          <option value="개">개</option>
-          <option value="매">매</option>
-        </select>
-      </div>
+      <input type="hidden" id="rcv-unit" value="kg">
       <div class="input-group">
         <label>소비기한</label>
         <input type="date" id="rcv-exp">
@@ -1969,10 +1976,8 @@ Screens['receive-form'] = async () => {
         <label>검수자</label>
         <input type="text" id="rcv-inspector" value="${State.user?.name || ''}" readonly>
       </div>
-      <div class="input-group" id="rcv-indiv-group">
-        <label>개별 포장 수 (QR 라벨 수)</label>
-        <input type="number" id="rcv-indiv-count" placeholder="포장 수" value="1">
-        <div class="input-hint" id="rcv-indiv-hint"></div>
+      <div class="input-group" id="rcv-indiv-group" style="display:none">
+        <input type="hidden" id="rcv-indiv-count" value="1">
       </div>
       <div class="photo-upload" onclick="$id('rcv-photo-input').click()">
         <input type="file" id="rcv-photo-input" accept="image/*" multiple onchange="previewReceivePhoto(this)">
@@ -2001,39 +2006,87 @@ function updateReceiveItems() {
   const sel = $id('rcv-item');
   if (type === '원재료') {
     sel.innerHTML = (window._rcvRmItems || []).filter(i => i[0] !== 'RM002')
-      .map(i => `<option value="${i[0]}" data-unit="${i[4]||'kg'}">${i[0]} ${i[1]}</option>`).join('');
+      .map(i => `<option value="${i[0]}" data-unit="${i[4]||'kg'}" data-sku="${i[3]||'kg'}">${i[0]} ${i[1]}</option>`).join('');
   } else {
     sel.innerHTML = (window._rcvSpItems || [])
-      .map(i => `<option value="${i[0]}" data-unit="${i[3]||'개'}">${i[0]} ${i[1]}</option>`).join('');
+      .map(i => `<option value="${i[0]}" data-unit="${i[3]||'개'}" data-sku="">${i[0]} ${i[1]}</option>`).join('');
   }
   // 소모품은 개별 QR 불필요 → 필드 숨김
   const indivGroup = $id('rcv-indiv-group');
   if (indivGroup) indivGroup.style.display = type === '소모품' ? 'none' : '';
 }
 
+function parseSkuUnit(sku) {
+  // "10kg/포대" → { perUnit: 10, unitName: '포대', raw: 'kg' }
+  // "18L/통"   → { perUnit: 18, unitName: '통', raw: 'L' }
+  // "30알/판"  → { perUnit: 1.5, unitName: '판', raw: '알', isEgg: true }  (30알=1.5kg)
+  const m = sku?.match(/^(\d+)(kg|L|알)\/(통|판|포대|봉)/);
+  if (!m) return null;
+  const num = parseFloat(m[1]);
+  const raw = m[2];
+  const unitName = m[3];
+  if (raw === '알') return { perUnit: num * 0.05, unitName, raw, isEgg: true, eggPerTray: num };
+  if (raw === 'L') return { perUnit: num, unitName, raw };
+  return { perUnit: num, unitName, raw };
+}
+
 function updateReceiveUnit() {
   const sel = $id('rcv-item');
   const opt = sel?.selectedOptions[0];
-  if (opt) {
-    const unit = opt.dataset.unit || 'kg';
-    $id('rcv-unit').value = unit;
-  }
+  const sku = opt?.dataset?.sku || '';
+  const parsed = parseSkuUnit(sku);
+
+  // SKU 단위 뱃지 업데이트
+  const unitEl = $id('rcv-sku-unit');
+  if (unitEl) unitEl.textContent = parsed ? parsed.unitName : 'kg';
+
+  // hidden unit 값 세팅
+  const unitInput = $id('rcv-unit');
+  if (unitInput) unitInput.value = parsed ? parsed.unitName : 'kg';
+
+  // 변환 정보 초기화
+  updateReceiveConvert();
+
   // 소비기한·보관온도 자동 세팅
   const type = $id('rcv-type')?.value;
   const code = sel?.value;
   const items = type === '원재료' ? (window._rcvRmItems || []) : (window._rcvSpItems || []);
   const item = items.find(i => i[0] === code);
   if (item) {
-    // 소비기한 = 오늘 + shelfLife days (col 7)
     const days = parseInt(item[7]) || 90;
     $id('rcv-exp').value = formatDate(new Date(Date.now() + days * 86400000));
-    // 보관온도 (col 8)
     const temp = item[8] || '상온 15~25℃';
     const tempSel = $id('rcv-temp');
     if (tempSel) {
       for (const o of tempSel.options) { if (o.value === temp) { tempSel.value = temp; break; } }
     }
   }
+}
+
+function updateReceiveConvert() {
+  const sel = $id('rcv-item');
+  const opt = sel?.selectedOptions[0];
+  const sku = opt?.dataset?.sku || '';
+  const parsed = parseSkuUnit(sku);
+  const qty = parseInt($id('rcv-qty')?.value) || 0;
+  const infoEl = $id('rcv-convert-info');
+  const indivEl = $id('rcv-indiv-count');
+
+  if (!parsed || qty <= 0) {
+    if (infoEl) infoEl.style.display = 'none';
+    if (indivEl) indivEl.value = qty > 0 ? qty : 1;
+    return;
+  }
+
+  const totalKg = Math.round(qty * parsed.perUnit * 100) / 100;
+  const icon = parsed.isEgg ? '🥚' : parsed.raw === 'L' ? '🛢️' : '📦';
+  const perLabel = parsed.isEgg ? parsed.perUnit + 'kg(' + parsed.eggPerTray + '알)' : parsed.perUnit + 'kg';
+
+  if (infoEl) {
+    infoEl.style.display = '';
+    infoEl.innerHTML = `${icon} <strong>${qty}${parsed.unitName}</strong> × ${perLabel} = <strong style="font-size:13px">${totalKg}kg</strong> 저장 · QR 라벨 <strong>${qty}</strong>매 자동 생성`;
+  }
+  if (indivEl) indivEl.value = qty;
 }
 
 function previewReceivePhoto(input) {
@@ -2050,19 +2103,25 @@ async function submitReceiving() {
   const type = $id('rcv-type')?.value;
   const itemCode = $id('rcv-item')?.value;
   const itemName = $id('rcv-item')?.selectedOptions[0]?.textContent?.split(' ').slice(1).join(' ') || '';
+  const sku = $id('rcv-item')?.selectedOptions[0]?.dataset?.sku || '';
   const supplier = $id('rcv-supplier')?.value;
-  const qty = $id('rcv-qty')?.value;
-  const unit = $id('rcv-unit')?.value;
+  const inputQty = parseFloat($id('rcv-qty')?.value) || 0;
   const exp = $id('rcv-exp')?.value;
   const temp = $id('rcv-temp')?.value;
-  const indivCount = parseInt($id('rcv-indiv-count')?.value) || 1;
   const photoInput = $id('rcv-photo-input');
+
+  // SKU → kg 변환
+  const parsed = parseSkuUnit(sku);
+  const qtyKg = parsed ? Math.round(inputQty * parsed.perUnit * 100) / 100 : inputQty;
+  const unit = 'kg';
+  const indivCount = parsed ? inputQty : (parseInt($id('rcv-indiv-count')?.value) || 1);
+  const qty = String(qtyKg);
 
   // 필수 필드 검증
   const missing = [];
   if (!itemCode) missing.push('품목');
   if (!supplier?.trim()) missing.push('공급업체');
-  if (!qty || parseFloat(qty) <= 0) missing.push('수량');
+  if (!inputQty || inputQty <= 0) missing.push('수량');
   if (!exp) missing.push('소비기한');
   if (!photoInput?.files?.length) missing.push('입고 사진');
   if (missing.length > 0) { toast('미입력 항목: ' + missing.join(', '), 'err'); return; }
