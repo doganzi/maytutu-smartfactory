@@ -970,7 +970,7 @@ Screens.dashboard = async () => {
 
   // Load data for dashboard
   let pendingApproval = 0, inProgress = 0, lowStock = 0, upcomingChecks = 0;
-  let lowStockItems = [], pendingWOs = [], recentActivity = [];
+  let lowStockItems = [], pendingWOs = [], recentActivity = [], calAlerts = [];
 
   try {
     const [woData, rmItems, rmLots, eqData] = await Promise.all([
@@ -1024,7 +1024,7 @@ Screens.dashboard = async () => {
     }).length;
 
     // 검교정 알람: 30일 이내 도래 또는 만료
-    const calAlerts = [];
+    calAlerts.length = 0;
     eqData.forEach(e => {
       if (!e[6]) return;
       const next = new Date(e[6]);
