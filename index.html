@@ -1023,6 +1023,20 @@ Screens.dashboard = async () => {
       return diff <= 7 && diff >= 0;
     }).length;
 
+    // 검교정 알람: 30일 이내 도래 또는 만료
+    const calAlerts = [];
+    eqData.forEach(e => {
+      if (!e[6]) return;
+      const next = new Date(e[6]);
+      const diff = Math.ceil((next - today) / (1000*60*60*24));
+      if (diff < 0) {
+        calAlerts.push({ code: e[0], name: e[1], type: e[2], nextDate: e[6], diff, status: '만료', badge: 'err' });
+      } else if (diff <= 30) {
+        calAlerts.push({ code: e[0], name: e[1], type: e[2], nextDate: e[6], diff, status: diff === 0 ? '오늘' : diff + '일 후', badge: diff <= 7 ? 'warn' : 'info' });
+      }
+    });
+    calAlerts.sort((a, b) => a.diff - b.diff);
+
     pendingWOs = woData.filter(r => r[12] === '승인대기').slice(0, 3);
 
     // ── 알림 체크 ──
@@ -1046,6 +1060,18 @@ Screens.dashboard = async () => {
         toast(`🔔 작업지시서 ${myRejected.length}건이 거부되었습니다`, 'err');
       }
     }
+    // 검교정 알림 토스트 (관리자 + 작업자 모두)
+    if (calAlerts.length > 0) {
+      const overdue = calAlerts.filter(a => a.badge === 'err');
+      const upcoming = calAlerts.filter(a => a.badge !== 'err');
+      if (overdue.length > 0) {
+        toast(`🔧 검교정 만료 ${overdue.length}건: ${overdue.map(a=>a.name).join(', ')}`, 'err');
+      }
+      if (upcoming.length > 0) {
+        toast(`🔧 검교정 임박 ${upcoming.length}건: ${upcoming.map(a=>a.name).join(', ')}`, 'warn');
+      }
+    }
+
     localStorage.setItem('lastNotifCheck', now);
   } catch (e) {
     console.warn('Dashboard data load error:', e);
@@ -1070,10 +1096,10 @@ Screens.dashboard = async () => {
           <div class="fs-20 fw-8 c-err" style="margin:4px 0">${lowStock}건</div>
           <div class="fs-11 c-txt-l">재고 부족</div>
         </div>
-        <div class="card" style="text-align:center;padding:12px;opacity:0.5">
-          <div style="font-size:20px">🔩</div>
-          <div class="fs-16 fw-7 c-gray-d" style="margin:4px 0">준비 중</div>
-          <div class="fs-11 c-txt-l">기기 점검</div>
+        <div class="card clickable" style="text-align:center;padding:12px" onclick="Router.go('equip')">
+          <div style="font-size:20px">🔧</div>
+          <div class="fs-20 fw-8 ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}" style="margin:4px 0">${calAlerts.length}건</div>
+          <div class="fs-11 c-txt-l">검교정 알림</div>
         </div>
       </div>
 
@@ -1118,6 +1144,21 @@ Screens.dashboard = async () => {
                 <div class="fs-12 c-txt-l">현재고 ${item.remainDisp || item.remain+'kg'} / 안전재고 ${item.minDisp || item.min+'kg'}</div>
               </div>
               <span class="badge badge-err">부족</span>
+            </div>
+          </div>
+        `).join('')}
+      ` : ''}
+
+      ${calAlerts.length > 0 ? `
+        <div class="fs-14 fw-7 mb-8 mt-8">🔧 검교정 알림</div>
+        ${calAlerts.map(a => `
+          <div class="card clickable" onclick="Router.go('equip')" style="border-left:3px solid ${a.badge==='err'?'var(--err,#c62828)':a.badge==='warn'?'var(--warn,#e65100)':'var(--info,#1565c0)'}">
+            <div class="row between">
+              <div>
+                <div class="fs-14 fw-6" style="color:${a.badge==='err'?'var(--err,#c62828)':a.badge==='warn'?'var(--warn,#e65100)':'var(--txt,#222)'}">${a.name}</div>
+                <div class="fs-12 c-txt-l">${a.code} · ${a.type || ''} · 다음 검교정: ${a.nextDate}</div>
+              </div>
+              <span class="badge badge-${a.badge}">${a.status}</span>
             </div>
           </div>
         `).join('')}
