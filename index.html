@@ -996,11 +996,11 @@ Screens.dashboard = async () => {
     State.equipment = eqData;
 
     if (isAdmin) {
-      pendingApproval = woData.filter(r => r[12] === '승인대기').length;
+      pendingApproval = woData.filter(r => r[12] === '냉동보관중' || r[12] === '승인대기').length;
       inProgress = woData.filter(r => r[12] === '진행중').length;
     } else {
       const myEmail = State.user?.email;
-      pendingApproval = woData.filter(r => r[8] === myEmail && r[12] === '승인대기').length;
+      pendingApproval = woData.filter(r => r[8] === myEmail && (r[12] === '냉동보관중' || r[12] === '승인대기')).length;
       inProgress = woData.filter(r => r[8] === myEmail && r[12] === '진행중').length;
     }
 
@@ -1047,14 +1047,14 @@ Screens.dashboard = async () => {
     });
     calAlerts.sort((a, b) => a.diff - b.diff);
 
-    pendingWOs = woData.filter(r => r[12] === '승인대기').slice(0, 3);
+    pendingWOs = woData.filter(r => r[12] === '냉동보관중' || r[12] === '승인대기').slice(0, 3);
 
     // ── 알림 체크 ──
     const lastCheck = localStorage.getItem('lastNotifCheck') || '2000-01-01';
     const now = new Date().toISOString();
     if (isAdmin) {
       // 관리자: 새 승인요청 알림
-      const newRequests = woData.filter(r => r[12] === '승인대기' && r[10] > lastCheck);
+      const newRequests = woData.filter(r => (r[12] === '냉동보관중' || r[12] === '승인대기') && r[10] > lastCheck);
       if (newRequests.length > 0) {
         toast(`🔔 새 승인요청 ${newRequests.length}건이 있습니다`, 'warn');
       }
@@ -1114,23 +1114,27 @@ Screens.dashboard = async () => {
       </div>
 
       ${isAdmin && pendingWOs.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8">🔔 승인 대기</div>
-        ${pendingWOs.map(wo => `
+        <div class="fs-14 fw-7 mb-8">🔔 냉동보관 · 출하승인</div>
+        ${pendingWOs.map(wo => {
+          const fs = wo[11] ? new Date(wo[11]) : null;
+          const fh = fs ? ((Date.now() - fs.getTime()) / (1000*60*60)).toFixed(1) : 0;
+          const ca = fh >= 12;
+          return `
           <div class="card clickable" onclick="Router.go('approval-detail', {woId:'${wo[0]}'})">
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6">${wo[4] || '호두과자 반죽'} ${wo[5] || ''}kg</div>
-                <div class="fs-12 c-txt-l">${wo[0]} · ${wo[8] || ''}</div>
+                <div class="fs-12 c-txt-l">${wo[0]} · ${wo[8] || ''} · 냉동 ${fh}h/12h</div>
               </div>
-              <span class="badge badge-warn">승인대기</span>
+              <span class="badge badge-${ca ? 'suc' : 'warn'}">${ca ? '출하승인 가능' : '냉동보관중'}</span>
             </div>
           </div>
-        `).join('')}
+        `}).join('')}
       ` : ''}
 
       ${!isAdmin ? (() => {
         const myEmail = State.user?.email;
-        const myPending = State.workOrders.filter(r => r[8] === myEmail && r[12] === '승인대기');
+        const myPending = State.workOrders.filter(r => r[8] === myEmail && (r[12] === '냉동보관중' || r[12] === '승인대기'));
         const myRecent = State.workOrders.filter(r => r[8] === myEmail && (r[12] === '승인완료' || r[12]?.startsWith('거부'))).slice(0, 3);
         let notifHtml = '';
         if (myPending.length > 0) {
@@ -1225,21 +1229,22 @@ function renderProductionContent(activeTab, isAdmin) {
   }
 
   else if (activeTab === '승인대기') {
-    const pending = State.workOrders.filter(r => r[12] === '승인대기');
+    const pending = State.workOrders.filter(r => r[12] === '냉동보관중' || r[12] === '승인대기');
     if (pending.length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">✅</div><div class="es-title">승인 대기 없음</div></div>`;
     } else {
       listEl.innerHTML = pending.map(wo => {
         const freezeStart = wo[11] ? new Date(wo[11]) : null;
         const elapsed = freezeStart ? ((Date.now() - freezeStart.getTime()) / (1000*60*60)).toFixed(1) : 0;
+        const canApprove = elapsed >= 12;
         return `
           <div class="card clickable" onclick="Router.go('approval-detail', {woId:'${wo[0]}'})">
             <div class="row between mb-4">
               <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-              <span class="badge badge-warn">승인대기</span>
+              <span class="badge badge-${canApprove ? 'suc' : 'warn'}">${canApprove ? '출하승인 가능' : '냉동보관중'}</span>
             </div>
-            <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · 전공정완료</div>
-            ${freezeStart ? `<div class="fs-11 c-teal mt-4">냉동 시작: ${formatTime(freezeStart)} · 경과 ${elapsed}시간 / 12시간</div>` : ''}
+            <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · 포장 ${wo[7]||'-'}개</div>
+            ${freezeStart ? `<div class="fs-11 ${canApprove ? 'c-suc fw-6' : 'c-warn'} mt-4">냉동: ${(wo[11]||'').substring(11,16)} · 경과 ${elapsed}시간 / 12시간 ${canApprove ? '✅' : ''}</div>` : ''}
           </div>
         `;
       }).join('');
@@ -1247,7 +1252,7 @@ function renderProductionContent(activeTab, isAdmin) {
   }
 
   else if (activeTab === '작업 현황') {
-    const myWO = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '진행중' || r[12] === '승인대기'));
+    const myWO = State.workOrders.filter(r => r[8] === State.user?.email && (r[12] === '진행중' || r[12] === '냉동보관중' || r[12] === '승인대기'));
     if (myWO.length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🔧</div><div class="es-title">진행 중인 작업 없음</div><div class="es-desc">"새 작업" 탭에서 작업을 시작하세요</div></div>`;
     } else {
@@ -3866,7 +3871,7 @@ function renderWOExecute() {
                 onclick="handleCompleteStep()">공정 완료 · 다음 →</button>
       ` : `
         <button class="btn btn-sm btn-suc flex-1" style="white-space:nowrap"
-                onclick="handleCompleteStep(true)">전체 완료 · 승인요청</button>
+                onclick="handleCompleteStep(true)">전체 완료 · 냉동보관 시작</button>
       `}
     </div>
   `;
@@ -4198,6 +4203,34 @@ function renderStepContent(step, stepType) {
     `;
   }
 
+  else if (stepType === 'qr-label') {
+    // QR 라벨 출력 공정 — 밀봉 수량 기반 자동 생성
+    const sealQty = State.woExec.packCount || 0;
+    html += `
+      <div class="info-box" style="background:rgba(21,101,192,0.1)">
+        <div class="fs-12 fw-6 c-info">QR 라벨 출력</div>
+        <div class="fs-11 c-txt-l mt-4">포장 완료된 제품에 QR 라벨을 부착합니다. 포장 공정에서 입력한 수량(${sealQty}개)만큼 라벨이 생성됩니다.</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center;margin-top:12px">
+        <div class="fs-11 c-txt-l">생성될 QR 라벨 수</div>
+        <div class="fs-28 fw-8 c-info" style="margin:8px 0">${sealQty}매</div>
+        <div class="fs-11 c-txt-l">냉동보관 후 관리자 출하승인 시 완제품 재고로 등록됩니다</div>
+      </div>
+      <div class="input-group mt-12">
+        <label>라벨 수량 확인 <span class="c-err">*필수</span></label>
+        <div class="input-suffix">
+          <input type="number" id="qr-label-qty-${stepNo}" value="${sealQty}" oninput="validateStepInputs(${stepNo})">
+          <span>매</span>
+        </div>
+        <div class="input-hint">포장 수량과 다른 경우 수정 가능</div>
+      </div>
+      <button class="btn btn-info mt-8" onclick="previewQRLabels(${stepNo})" style="width:100%">
+        🏷️ QR 라벨 미리보기
+      </button>
+      <div id="qr-label-preview-${stepNo}" style="margin-top:12px"></div>
+    `;
+  }
+
   else if (stepType === 'store') {
     html += `
       <div class="info-box teal">
@@ -4212,7 +4245,7 @@ function renderStepContent(step, stepType) {
       <div class="input-group mt-12">
         <label>보관 시작 시간</label>
         <input type="text" id="freeze-start" value="${formatDateTime()} (자동)" readonly>
-        <div class="input-hint">현재 시간 자동 기록 — 이 시점부터 12시간 이후 승인 가능</div>
+        <div class="input-hint">현재 시간 자동 기록 — 이 시점부터 12시간 이후 출하승인 가능</div>
       </div>
     `;
   }
@@ -4267,6 +4300,30 @@ function previewStepPhoto(input, stepNo) {
   });
   // Change upload appearance
   input.closest('.photo-upload')?.classList.add('has-photo');
+}
+
+function previewQRLabels(stepNo) {
+  const qty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || 0;
+  if (qty <= 0) { toast('라벨 수량을 입력하세요', 'err'); return; }
+  const { woId } = State.woExec;
+  const wo = State.workOrders.find(w => w[0] === woId && w[12] !== '삭제');
+  const productName = wo ? wo[4] : '';
+  const unitWeight = wo ? wo[6] : '';
+  const container = $id(`qr-label-preview-${stepNo}`);
+  if (!container) return;
+  let html = `<div class="fs-12 fw-6 mb-8">라벨 미리보기 (${qty}매)</div>`;
+  const maxShow = Math.min(qty, 3);
+  for (let i = 1; i <= maxShow; i++) {
+    html += `
+      <div class="card" style="padding:10px;margin-bottom:6px;border-left:3px solid var(--info)">
+        <div class="fs-11 c-txt-l">라벨 #${i} / ${qty}</div>
+        <div class="fs-13 fw-6">${productName} ${unitWeight}</div>
+        <div class="fs-11 c-txt-l">${woId} · 냉동보관 후 출하승인 시 재고등록</div>
+      </div>`;
+  }
+  if (qty > 3) html += `<div class="fs-11 c-txt-l" style="text-align:center">... 외 ${qty - 3}매</div>`;
+  container.innerHTML = html;
+  toast(`QR 라벨 ${qty}매 미리보기`, 'info');
 }
 
 function goToStep(idx) {
@@ -4404,6 +4461,11 @@ function handleCompleteStep(isFinal = false) {
     else State.woExec.packCount = sealQty; // 최종 재고 인정 수량 반영
   }
 
+  if (stepType === 'qr-label') {
+    const qrQty = parseInt($id(`qr-label-qty-${stepNo}`)?.value);
+    if (!qrQty || qrQty <= 0) missing.push('QR 라벨 수량');
+  }
+
   if (stepType === 'store') {
     // 냉동고 온도계 사진 필수
     const photoPreview = $id(`photo-preview-${stepNo}`);
@@ -4466,6 +4528,15 @@ async function completeStep() {
       usedLotIds = scannedItems.map(s => s.lotId).filter(Boolean).join(',');
     }
 
+    // qr-label step: QR 라벨 수량 저장
+    if (stepType === 'qr-label') {
+      const qrQty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || State.woExec.packCount || 0;
+      if (qrQty > 0) {
+        await SheetsAPI.updateCell('작업지시서', 0, woId, 7, String(qrQty));
+        State.woExec.packCount = qrQty;
+      }
+    }
+
     // seal step: 최종 완제품 수량 반영
     if (stepType === 'seal') {
       const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
@@ -4493,7 +4564,7 @@ async function completeStep() {
 }
 
 async function submitForApproval() {
-  confirm('승인요청', '모든 공정이 완료되었습니다. 관리자에게 승인을 요청하시겠습니까?', async () => {
+  confirm('냉동보관 시작', '모든 공정이 완료되었습니다. 냉동보관을 시작하시겠습니까?\n12시간 이후 관리자가 출하승인하면 완제품 재고로 등록됩니다.', async () => {
     try {
       showLoading();
       const { woId } = State.woExec;
@@ -4505,18 +4576,18 @@ async function submitForApproval() {
         woId, step[1], step[2], step[3], '', '', '', '', '', '', '', formatDateTime(), State.user?.email
       ]);
 
-      // Update WO status
+      // Update WO status → 냉동보관중
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
         10: formatDateTime(),   // endTime
         11: freezeStart,        // freezeStartTime
-        12: '승인대기',          // status
+        12: '냉동보관중',        // status
         13: String(State.woExec.steps.length), // lastSavedStep
       });
 
-      toast('승인요청 완료!', 'suc');
+      toast('냉동보관이 시작되었습니다. 12시간 후 출하승인 가능합니다.', 'suc');
       Router.go('production');
     } catch (e) {
-      toast('승인요청 실패: ' + e.message, 'err');
+      toast('냉동보관 시작 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
     }
@@ -4792,6 +4863,12 @@ function validateStepInputs(stepNo) {
     if (!sealQty || sealQty <= 0) allValid = false;
   }
 
+  // qr-label 타입 검증
+  if (stepType === 'qr-label') {
+    const qrQty = parseInt($id(`qr-label-qty-${stepNo}`)?.value);
+    if (!qrQty || qrQty <= 0) allValid = false;
+  }
+
   // store 타입 검증
   if (stepType === 'store') {
     const photoPreview = $id(`photo-preview-${stepNo}`);
@@ -4819,29 +4896,40 @@ Screens['approval-detail'] = async (params = {}) => {
 
   try {
     const wos = await SheetsAPI.getAll('작업지시서');
-    const wo = wos.find(w => w[0] === woId) || wos.find(w => w[12] === '승인대기');
+    const wo = wos.find(w => w[0] === woId && w[12] !== '삭제') || wos.find(w => w[12] === '냉동보관중' && w[12] !== '삭제');
     if (!wo) { toast('작업지시서를 찾을 수 없습니다', 'err'); hideLoading(); Router.go('production'); return; }
 
     const records = (await SheetsAPI.getAll('공정기록').catch(() => [])).filter(r => r[0] === wo[0]);
     const woStatus = wo[12] || '';
+    const freezeStart = wo[11] ? new Date(wo[11]) : null;
+    const now = new Date();
+    const freezeHours = freezeStart ? Math.round((now - freezeStart) / (1000*60*60) * 10) / 10 : 0;
+    const canApprove = freezeHours >= 12;
 
-    renderHeader('공정 완료 승인', wo[0], { back: 'production' });
+    renderHeader('출하 승인', wo[0], { back: 'production' });
 
     $id('content').innerHTML = `
       <div style="padding:16px">
         <div class="card">
           <div class="row between mb-8">
             <span class="fs-16 fw-7">${wo[4]||''} ${wo[5]||''}kg</span>
-            <span class="badge badge-warn">승인대기</span>
+            <span class="badge badge-${woStatus === '냉동보관중' ? 'warn' : 'info'}">${woStatus}</span>
           </div>
           <div class="fs-12 c-txt-l">작업자: ${wo[8]||''} · ${wo[1]||''}</div>
           <div class="fs-12 c-txt-l">시작: ${(wo[9]||'').substring(11,16)} → 완료: ${(wo[10]||'').substring(11,16)}</div>
+          <div class="fs-12 c-txt-l">포장 수량: ${wo[7]||'-'}개</div>
         </div>
 
-        <div class="card bl-info" style="background:#e3f2fd">
-          <div class="fs-13 fw-7 c-pri">1단계: 공정 완료 승인</div>
-          <div class="fs-12 c-txt-l mt-4">승인 시 재고로 인정되고 QR 코드가 생성됩니다.</div>
-          <div class="fs-12 c-txt-l mt-2">냉동 입고 시간이 자동 기록되며, 12시간 이후 출하 가능 상태가 됩니다.</div>
+        <div class="card bl-${canApprove ? 'suc' : 'warn'}" style="background:${canApprove ? '#e8f5e9' : '#fff8e1'}">
+          <div class="fs-13 fw-7 ${canApprove ? 'c-suc' : 'c-warn'}">
+            ${canApprove ? '✅ 출하승인 가능' : '⏳ 냉동보관 진행 중'}
+          </div>
+          <div class="fs-12 c-txt-l mt-4">냉동 시작: ${wo[11] || '-'}</div>
+          <div class="fs-16 fw-8 mt-4" style="color:${canApprove ? 'var(--suc)' : 'var(--warn)'}">
+            경과 ${freezeHours}시간 / 12시간
+          </div>
+          ${!canApprove ? `<div class="fs-12 c-err mt-4">냉동 12시간 이상 경과해야 출하승인이 가능합니다</div>` : ''}
+          ${canApprove ? `<div class="fs-12 c-suc mt-4">출하승인 시 완제품 재고로 등록됩니다</div>` : ''}
         </div>
 
         <div class="fs-14 fw-7 mb-8">공정 기록 타임라인</div>
@@ -4860,8 +4948,8 @@ Screens['approval-detail'] = async (params = {}) => {
 
       <div style="display:flex;gap:10px;padding:12px 16px;background:var(--white);border-top:1px solid var(--gray-l)">
         <button class="btn btn-outline btn-err flex-1" onclick="Router.go('reject-modal', {woId:'${wo[0]}'})">거부</button>
-        <button class="btn btn-suc" style="flex:2" onclick="approveWO('${wo[0]}')">
-          공정 완료 승인 · QR 생성
+        <button class="btn btn-suc" style="flex:2;${canApprove ? '' : 'opacity:0.4;pointer-events:none'}" onclick="approveWO('${wo[0]}')">
+          ${canApprove ? '출하승인 · 완제품 재고 등록' : `출하승인 불가 (${(12 - freezeHours).toFixed(1)}시간 남음)`}
         </button>
       </div>
     `;
@@ -4874,49 +4962,51 @@ Screens['approval-detail'] = async (params = {}) => {
 };
 
 async function approveWO(woId) {
-  confirm('공정 완료 승인', '공정 완료를 승인하시겠습니까?\n재고로 인정되고 QR 코드가 생성됩니다.\n냉동 입고가 시작됩니다.', async () => {
+  confirm('출하승인', '냉동 12시간이 경과되었습니다.\n출하승인하시겠습니까? 완제품 재고로 등록됩니다.', async () => {
     try {
       showLoading();
       const wos = await SheetsAPI.getAll('작업지시서');
-      const wo = wos.find(w => w[0] === woId);
+      const wo = wos.find(w => w[0] === woId && w[12] !== '삭제');
       if (!wo) throw new Error('WO not found');
+
+      // 12시간 재검증
+      const freezeStart = wo[11] ? new Date(wo[11]) : null;
+      const freezeHours = freezeStart ? (new Date() - freezeStart) / (1000*60*60) : 0;
+      if (freezeHours < 12) {
+        toast(`냉동 ${freezeHours.toFixed(1)}시간 경과. 12시간 이후 승인 가능합니다.`, 'err');
+        hideLoading();
+        return;
+      }
 
       const packCount = parseInt(wo[7]) || 50;
       const qty = parseFloat(wo[5]) || 50;
       const fgItemCode = wo[3] || 'FG001';
-      const expDate = formatDate(new Date(Date.now() + 180*86400000)); // +6개월 (제조일로부터)
+      const expDate = formatDate(new Date(Date.now() + 180*86400000)); // +6개월
       const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
-      const freezeStart = formatDateTime(); // 냉동 입고 시점 = 승인 시점
 
-      // 1. Update WO — 먼저 '승인완료' 기록 후 '냉동보관중' 전환 (2단계 전이)
+      // 1. Update WO — 출하가능 상태로
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
-        11: freezeStart,        // freezeStartTime
-        12: '승인완료',          // status: 1단계 — 공정완료 승인됨 (알림용)
+        12: '출하가능',
         14: fgLotId,
         15: State.user?.email,
         16: formatDateTime(),
       });
-      // 2단계 — 즉시 냉동보관 상태로 전환 (승인완료 기록 후)
-      await SheetsAPI.updateCell('작업지시서', 0, woId, 12, '냉동보관중');
 
-      // 2. Create FG LOT — status '냉동보관중'
+      // 2. Create FG LOT — status '출하가능'
       await SheetsAPI.append('완제품LOT', [
         fgLotId, fgItemCode, wo[4] || '호두과자 반죽', qty, wo[6] || '1kg',
-        formatDate(), expDate, woId, qty, '냉동보관중', packCount, '냉동 -18°C'
+        formatDate(), expDate, woId, qty, '출하가능', packCount, '냉동 -18°C'
       ]);
 
       // 3. Create FG individual QR records
       const indivRows = [];
       for (let i = 1; i <= packCount; i++) {
         const fgIndivId = `${fgLotId}-${String(i).padStart(2,'0')}`;
-        indivRows.push([fgIndivId, fgLotId, fgItemCode, '냉동보관중', '', '', qrImageUrl(fgIndivId)]);
+        indivRows.push([fgIndivId, fgLotId, fgItemCode, '출하가능', '', '', qrImageUrl(fgIndivId)]);
       }
       await SheetsAPI.append('완제품개별', indivRows);
 
-      toast(`공정 승인 완료! ${fgLotId} 재고 인정 (QR ${packCount}개)\n냉동 입고 시작 — 12시간 후 출하 가능`, 'suc', 5000);
-
-      // 냉동 입고 알림
-      showFreezeNotification(woId, fgLotId, wo[4], freezeStart);
+      toast(`출하승인 완료! ${fgLotId} 완제품 재고 등록 (QR ${packCount}개)`, 'suc', 5000);
 
       confirm('라벨 인쇄', `완제품 QR 라벨 ${packCount}매를 인쇄하시겠습니까?`, () => {
         Router.go('label-print', { lotId: fgLotId, count: packCount, itemName: wo[4], type: 'fg' });
@@ -4930,27 +5020,6 @@ async function approveWO(woId) {
       hideLoading();
     }
   });
-}
-
-// 냉동 입고 알림
-function showFreezeNotification(woId, lotId, itemName, freezeStart) {
-  // Show a persistent notification card
-  const notifEl = document.createElement('div');
-  notifEl.id = 'freeze-notif';
-  notifEl.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:468px;z-index:100;';
-  notifEl.innerHTML = `
-    <div class="card bl-info" style="background:#e3f2fd;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
-      <div class="row between mb-4">
-        <span class="fs-13 fw-7 c-pri">냉동 입고 완료</span>
-        <span style="cursor:pointer;font-size:18px;color:var(--txt-l)" onclick="this.closest('#freeze-notif').remove()">×</span>
-      </div>
-      <div class="fs-12 c-txt">${itemName} (${lotId})</div>
-      <div class="fs-12 c-txt-l mt-4">냉동 입고 시간: ${freezeStart}</div>
-      <div class="fs-12 c-pri fw-6 mt-4">12시간 후 출하 가능 상태로 전환됩니다</div>
-    </div>
-  `;
-  document.body.appendChild(notifEl);
-  setTimeout(() => notifEl.remove(), 10000);
 }
 
 // ─── REJECT MODAL ───
