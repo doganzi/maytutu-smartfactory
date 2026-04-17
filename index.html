@@ -1746,17 +1746,14 @@ Screens['lot-detail'] = async (params = {}) => {
   }
   const isLow = minStock > 0 && totalRemain < minStock;
 
-  // Unit conversion for display
+  // Unit conversion for display — parseSkuUnit 활용 (알/판 포함)
   let lotStockDisp = totalRemain + (isFG ? '개' : 'kg'), lotSafeDisp = minStock + 'kg';
-  if (!isFG && !isSP) {
-    const skuM2 = rmSku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
-    if (skuM2) {
-      const pu2 = parseFloat(skuM2[1]), un2 = skuM2[2];
-      if (pu2 > 0) {
-        const su2 = Math.floor(totalRemain / pu2), sr2 = Math.round(totalRemain % pu2 * 10) / 10;
-        lotStockDisp = sr2 > 0 ? su2 + un2 + ' ' + sr2 + 'kg' : su2 + un2;
-        lotSafeDisp = Math.round(minStock / pu2) + un2;
-      }
+  if (!isFG && !isSP && rmSku) {
+    const skuP2 = parseSkuUnit(rmSku);
+    if (skuP2 && skuP2.perUnit > 0) {
+      const su2 = Math.floor(totalRemain / skuP2.perUnit), sr2 = Math.round(totalRemain % skuP2.perUnit * 10) / 10;
+      lotStockDisp = sr2 > 0 ? su2 + skuP2.unitName + ' ' + sr2 + 'kg' : su2 + skuP2.unitName;
+      if (minStock > 0) lotSafeDisp = Math.round(minStock / skuP2.perUnit) + skuP2.unitName;
     }
   }
 
@@ -1810,9 +1807,10 @@ Screens['lot-detail'] = async (params = {}) => {
         const stColor = status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
         const canPrint = ['미사용','사용중'].includes(status);
         const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중'].includes(iv[3]));
-        // SKU 단위 변환 for LOT display
-        let lotQtyDisp = qty + (l[5]||'kg'), lotRemDisp = remain + (l[5]||'kg');
-        if (!isSP && rmSku) {
+        // SKU 단위 변환 for LOT display — unit이 이미 비-kg 단위이면 이중 변환 방지
+        const lotUnit = (l[5]||'kg').trim();
+        let lotQtyDisp = qty + lotUnit, lotRemDisp = remain + lotUnit;
+        if (!isSP && rmSku && lotUnit === 'kg') {
           const skuP = parseSkuUnit(rmSku);
           if (skuP && skuP.perUnit > 0) {
             const qU = Math.floor(qty / skuP.perUnit), qR = Math.round(qty % skuP.perUnit * 10) / 10;
