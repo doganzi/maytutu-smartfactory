@@ -4255,7 +4255,7 @@ function renderStepContent(step, stepType) {
   }
 
   else if (stepType === 'qr-label') {
-    // QR 라벨 출력 공정 — 밀봉 수량 기반 자동 생성
+    // QR 라벨 출력 공정 — 밀봉 수량 기반 자동 생성 (기존 라벨 시스템 통일)
     const sealQty = State.woExec.packCount || 0;
     html += `
       <div class="info-box" style="background:rgba(21,101,192,0.1)">
@@ -4278,10 +4278,10 @@ function renderStepContent(step, stepType) {
       <button class="btn btn-info mt-8" onclick="previewQRLabels(${stepNo})" style="width:100%">
         🏷️ QR 라벨 미리보기
       </button>
-      <button class="btn mt-8" onclick="printQRLabels(${stepNo})" style="width:100%;background:var(--gray-d);color:#fff">
-        🖨️ QR 라벨 출력
+      <button class="btn btn-suc mt-8" id="btn-wo-print-${stepNo}" style="width:100%;display:none;font-size:15px;padding:14px" onclick="printLabels()">
+        🖨️ 라벨 프린터기로 인쇄
       </button>
-      <div id="qr-label-preview-${stepNo}" style="margin-top:12px"></div>
+      <div id="label-preview" class="mt-12"></div>
     `;
   }
 
@@ -4601,63 +4601,37 @@ function previewStepPhoto(input, stepNo) {
 function previewQRLabels(stepNo) {
   const qty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || 0;
   if (qty <= 0) { toast('라벨 수량을 입력하세요', 'err'); return; }
-  const { woId } = State.woExec;
-  const wo = State.workOrders.find(w => w[0] === woId && w[12] !== '삭제');
-  const productName = wo ? wo[4] : '';
-  const unitWeight = wo ? wo[6] : '';
-  const container = $id(`qr-label-preview-${stepNo}`);
-  if (!container) return;
-  let html = `<div class="fs-12 fw-6 mb-8">라벨 미리보기 (${qty}매)</div>`;
-  const maxShow = Math.min(qty, 3);
-  for (let i = 1; i <= maxShow; i++) {
-    html += `
-      <div class="card" style="padding:10px;margin-bottom:6px;border-left:3px solid var(--info)">
-        <div class="fs-11 c-txt-l">라벨 #${i} / ${qty}</div>
-        <div class="fs-13 fw-6">${productName} ${unitWeight}</div>
-        <div class="fs-11 c-txt-l">${woId} · 냉동보관 후 출하승인 시 재고등록</div>
-      </div>`;
-  }
-  if (qty > 3) html += `<div class="fs-11 c-txt-l" style="text-align:center">... 외 ${qty - 3}매</div>`;
-  container.innerHTML = html;
-  toast(`QR 라벨 ${qty}매 미리보기`, 'info');
-}
+  if (qty > 200) { toast('라벨 수량이 너무 많습니다 (최대 200매)', 'err'); return; }
 
-function printQRLabels(stepNo) {
-  const qty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || 0;
-  if (qty <= 0) { toast('라벨 수량을 입력하세요', 'err'); return; }
   const { woId } = State.woExec;
   const wo = State.workOrders.find(w => w[0] === woId && w[12] !== '삭제');
   const productName = wo ? wo[4] : State.woExec.productName || '';
   const unitWeight = wo ? wo[6] : '';
-  const today = new Date().toISOString().split('T')[0];
+  const today = formatDate();
 
-  // Build print-optimized HTML
-  let labelsHtml = '';
+  // 기존 재고 라벨 시스템과 동일한 형식으로 라벨 데이터 생성
+  const labels = [];
   for (let i = 1; i <= qty; i++) {
-    labelsHtml += `
-      <div style="border:1px solid #333;border-radius:6px;padding:10px 14px;margin:4px;width:58mm;height:38mm;display:inline-flex;flex-direction:column;justify-content:center;page-break-inside:avoid;box-sizing:border-box">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${productName} ${unitWeight}</div>
-        <div style="font-size:10px;color:#555">WO: ${woId}</div>
-        <div style="font-size:10px;color:#555">#${i}/${qty} · ${today}</div>
-        <div style="font-size:9px;color:#888;margin-top:4px">냉동보관 후 출하승인 시 재고등록</div>
-      </div>`;
+    const indivId = `${woId}-${String(i).padStart(3, '0')}`;
+    labels.push({
+      indivId: indivId,
+      itemName: productName + (unitWeight ? ' ' + unitWeight : ''),
+      lotId: woId,
+      date: today,
+      exp: '',
+      storage: '보관: 냉동 -18°C',
+    });
   }
 
-  const printWindow = window.open('', '_blank', 'width=800,height=600');
-  printWindow.document.write(`<!DOCTYPE html><html><head><title>QR 라벨 출력 - ${woId}</title>
-    <style>
-      @media print { body { margin:0; } @page { margin:5mm; } }
-      body { font-family: -apple-system, sans-serif; padding:10px; }
-      .header { text-align:center; margin-bottom:12px; font-size:14px; font-weight:700; }
-      .labels { display:flex; flex-wrap:wrap; justify-content:center; }
-    </style>
-  </head><body>
-    <div class="header">${productName} QR 라벨 (${qty}매)</div>
-    <div class="labels">${labelsHtml}</div>
-    <script>window.onload=function(){window.print();}<\/script>
-  </body></html>`);
-  printWindow.document.close();
-  toast(`QR 라벨 ${qty}매 출력 중...`, 'info');
+  // renderLabelCards 사용 (기존 라벨 시스템과 동일한 QR 미리보기)
+  applyPrintCSS();
+  renderLabelCards(labels);
+
+  // 인쇄 버튼 표시
+  const btnPrint = $id(`btn-wo-print-${stepNo}`);
+  if (btnPrint) btnPrint.style.display = '';
+
+  toast(`QR 라벨 ${qty}매 미리보기 생성 완료`, 'suc');
 }
 
 function goToStep(idx) {
