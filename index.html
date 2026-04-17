@@ -3963,21 +3963,9 @@ function renderStepContent(step, stepType) {
       `;
     }
 
-    // ④ 실제 투입량
+    // ④ 저울 계량값 사진 첨부 (카메라 / 갤러리 분리)
     html += `
-      <div class="input-group mt-12">
-        <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
-        <div class="input-suffix">
-          <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01"
-                 data-target="${target}" oninput="validateStepInputs(${stepNo})">
-          <span>kg</span>
-        </div>
-      </div>
-    `;
-
-    // ⑤ 사진 촬영 (카메라 / 갤러리 분리)
-    html += `
-      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">투입 후 사용한 포대 사진 촬영 <span class="c-err">*필수</span></div>
+      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 계량값 사진 첨부 <span class="c-err">*필수</span></div>
       <div class="row mb-8" style="gap:8px">
         <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="document.getElementById('photo-camera-${stepNo}').click()">📷 카메라 촬영</button>
         <button class="btn btn-sm btn-outline btn-gray flex-1" onclick="document.getElementById('photo-gallery-${stepNo}').click()">🖼️ 갤러리 선택</button>
@@ -3987,6 +3975,18 @@ function renderStepContent(step, stepType) {
       <input type="file" accept="image/*" multiple id="photo-gallery-${stepNo}" style="display:none"
              onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
       <div class="photo-preview" id="photo-preview-${stepNo}" style="min-height:20px"></div>
+    `;
+
+    // ⑤ 실제 투입량
+    html += `
+      <div class="input-group mt-12">
+        <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
+        <div class="input-suffix">
+          <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01"
+                 data-target="${target}" oninput="validateStepInputs(${stepNo})">
+          <span>kg</span>
+        </div>
+      </div>
     `;
   }
 
