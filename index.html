@@ -2992,7 +2992,7 @@ function renderLabelCards(labels) {
         ${lb.date ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.date}</div>` : ''}
         ${lb.exp ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.exp}</div>` : ''}
         ${lb.storage ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.storage}</div>` : ''}
-        <div style="font-size:9px;font-weight:700;color:#333">메이투투</div>
+        ${lb.company !== '' ? `<div style="font-size:9px;font-weight:700;color:#333">${lb.company || '메이투투'}</div>` : ''}
       </div>
       <div style="position:absolute;top:2px;right:5px;font-size:8px;color:#bbb">${idx}/${labels.length}</div>
     `;
@@ -3016,7 +3016,7 @@ function renderLabelCards(labels) {
     if (lb.date) lines.push(lb.date);
     if (lb.exp) lines.push(lb.exp);
     if (lb.storage) lines.push(lb.storage);
-    lines.push('메이투투');
+    if (lb.company !== '') lines.push(lb.company || '메이투투');
 
     const label = document.createElement('div');
     label.className = 'label';
@@ -3186,9 +3186,11 @@ function renderLabelToCanvas(lb) {
         y += lineH;
       }
 
-      // 회사명
-      ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      drawCondensed(ctx, '메이투투', textX, y + mm(2), cScale);
+      // 회사명 (company가 빈 문자열이면 숨김, undefined이면 '메이투투')
+      if (lb.company !== '') {
+        ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+        drawCondensed(ctx, lb.company || '메이투투', textX, y + mm(2), cScale);
+      }
 
       resolve(canvas.toDataURL('image/png'));
     }, 300);
@@ -4609,17 +4611,24 @@ function previewQRLabels(stepNo) {
   const unitWeight = wo ? wo[6] : '';
   const today = formatDate();
 
+  // 소비기한 자동계산 (생산날짜 + 6개월)
+  const prodDate = new Date();
+  const expDate = new Date(prodDate);
+  expDate.setMonth(expDate.getMonth() + 6);
+  const expStr = expDate.toISOString().split('T')[0];
+
   // 기존 재고 라벨 시스템과 동일한 형식으로 라벨 데이터 생성
   const labels = [];
   for (let i = 1; i <= qty; i++) {
     const indivId = `${woId}-${String(i).padStart(3, '0')}`;
     labels.push({
       indivId: indivId,
-      itemName: productName + (unitWeight ? ' ' + unitWeight : ''),
-      lotId: woId,
-      date: today,
-      exp: '',
-      storage: '보관: 냉동 -18°C',
+      itemName: productName,
+      lotId: '',
+      date: `생산날짜: ${today}`,
+      exp: `소비기한: ${expStr}까지`,
+      storage: '',
+      company: '',
     });
   }
 
