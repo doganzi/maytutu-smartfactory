@@ -4123,7 +4123,7 @@ function renderStepContent(step, stepType) {
           <span class="fs-12 c-txt-l">시작 시간:</span>
           <input type="time" id="ccp-time-1" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${formatTime()}" onchange="validateStepInputs(${stepNo})">
         </div>
-        <div class="fs-10 c-txt-l mt-4" style="opacity:0.7">※ 기계 전원 ON 후 작동 시작 시간을 직접 입력하세요</div>
+        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:8px">※ 기계 전원 ON 후 작동 시작 시간을 직접 입력하세요</div>
       </div>
     `;
 
@@ -4186,7 +4186,7 @@ function renderStepContent(step, stepType) {
           <span class="fs-12 c-txt-l">시작 시간:</span>
           <input type="time" id="ccp-time-4" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" onchange="ccpCalcStep5Time(${stepNo});validateStepInputs(${stepNo})">
         </div>
-        <div class="fs-10 c-txt-l mt-4" style="opacity:0.7">※ 생산 라인 통과 시작 시간을 입력하면 Step5 검증 시간이 자동 계산됩니다</div>
+        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:8px">※ 생산 라인 통과 시작 시간을 입력하면 Step5 검증 시간이 자동 계산됩니다</div>
       </div>
     `;
 
@@ -4277,6 +4277,9 @@ function renderStepContent(step, stepType) {
       </div>
       <button class="btn btn-info mt-8" onclick="previewQRLabels(${stepNo})" style="width:100%">
         🏷️ QR 라벨 미리보기
+      </button>
+      <button class="btn mt-8" onclick="printQRLabels(${stepNo})" style="width:100%;background:var(--gray-d);color:#fff">
+        🖨️ QR 라벨 출력
       </button>
       <div id="qr-label-preview-${stepNo}" style="margin-top:12px"></div>
     `;
@@ -4617,6 +4620,44 @@ function previewQRLabels(stepNo) {
   if (qty > 3) html += `<div class="fs-11 c-txt-l" style="text-align:center">... 외 ${qty - 3}매</div>`;
   container.innerHTML = html;
   toast(`QR 라벨 ${qty}매 미리보기`, 'info');
+}
+
+function printQRLabels(stepNo) {
+  const qty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || 0;
+  if (qty <= 0) { toast('라벨 수량을 입력하세요', 'err'); return; }
+  const { woId } = State.woExec;
+  const wo = State.workOrders.find(w => w[0] === woId && w[12] !== '삭제');
+  const productName = wo ? wo[4] : State.woExec.productName || '';
+  const unitWeight = wo ? wo[6] : '';
+  const today = new Date().toISOString().split('T')[0];
+
+  // Build print-optimized HTML
+  let labelsHtml = '';
+  for (let i = 1; i <= qty; i++) {
+    labelsHtml += `
+      <div style="border:1px solid #333;border-radius:6px;padding:10px 14px;margin:4px;width:58mm;height:38mm;display:inline-flex;flex-direction:column;justify-content:center;page-break-inside:avoid;box-sizing:border-box">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${productName} ${unitWeight}</div>
+        <div style="font-size:10px;color:#555">WO: ${woId}</div>
+        <div style="font-size:10px;color:#555">#${i}/${qty} · ${today}</div>
+        <div style="font-size:9px;color:#888;margin-top:4px">냉동보관 후 출하승인 시 재고등록</div>
+      </div>`;
+  }
+
+  const printWindow = window.open('', '_blank', 'width=800,height=600');
+  printWindow.document.write(`<!DOCTYPE html><html><head><title>QR 라벨 출력 - ${woId}</title>
+    <style>
+      @media print { body { margin:0; } @page { margin:5mm; } }
+      body { font-family: -apple-system, sans-serif; padding:10px; }
+      .header { text-align:center; margin-bottom:12px; font-size:14px; font-weight:700; }
+      .labels { display:flex; flex-wrap:wrap; justify-content:center; }
+    </style>
+  </head><body>
+    <div class="header">${productName} QR 라벨 (${qty}매)</div>
+    <div class="labels">${labelsHtml}</div>
+    <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  printWindow.document.close();
+  toast(`QR 라벨 ${qty}매 출력 중...`, 'info');
 }
 
 function goToStep(idx) {
