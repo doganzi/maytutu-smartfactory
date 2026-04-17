@@ -3918,7 +3918,9 @@ function renderStepContent(step, stepType) {
     const eggP = Math.floor(eggCount / 30);
     const eggA = eggCount % 30;
     const eggLabel = eggCount > 0 ? (eggP > 0 && eggA > 0 ? `${eggP}판 ${eggA}알` : eggP > 0 ? `${eggP}판` : `${eggA}알`) : '';
+    let inputStepNum = 1;
     html += `
+      <div class="fs-14 fw-7" style="color:#111;margin-bottom:6px">Step ${inputStepNum++}. 투입 목표량 확인</div>
       <div class="info-box suc">
         <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetQty}kg × 1.01)</div>
         <div class="fs-20 fw-8 c-suc mt-4">${target} kg${eggLabel ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:2px 8px;font-size:13px;color:#e65100;font-weight:700;margin-left:8px;vertical-align:middle">🥚 ${eggLabel}</span>` : ''}</div>
@@ -3941,7 +3943,7 @@ function renderStepContent(step, stepType) {
     // ③ QR 스캔 (카메라 직접 실행)
     if (!isWater) {
       html += `
-        <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">원재료 LOT 확인</div>
+        <div class="fs-14 fw-7 mt-12" style="color:#111;margin-bottom:6px">Step ${inputStepNum++}. 원재료 LOT 확인</div>
         <div id="qr-camera-area-${stepNo}" style="width:100%;border-radius:8px;overflow:hidden;margin-bottom:8px"></div>
         <button class="btn btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">📷 QR 스캔 시작</button>
         <div id="scanned-list-${stepNo}"></div>
@@ -3960,7 +3962,7 @@ function renderStepContent(step, stepType) {
 
     // ④ 저울 계량값 사진 첨부 (카메라 / 갤러리 분리)
     html += `
-      <div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 계량값 사진 첨부 <span class="c-err">*필수</span></div>
+      <div class="fs-14 fw-7 mt-12" style="color:#111;margin-bottom:6px">Step ${inputStepNum++}. 저울 계량값 사진 첨부 <span class="c-err">*필수</span></div>
       <div class="row mb-8" style="gap:8px">
         <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="document.getElementById('photo-camera-${stepNo}').click()">📷 카메라 촬영</button>
         <button class="btn btn-sm btn-outline btn-gray flex-1" onclick="document.getElementById('photo-gallery-${stepNo}').click()">🖼️ 갤러리 선택</button>
@@ -3974,7 +3976,8 @@ function renderStepContent(step, stepType) {
 
     // ⑤ 실제 투입량
     html += `
-      <div class="input-group mt-12">
+      <div class="fs-14 fw-7 mt-12" style="color:#111;margin-bottom:6px">Step ${inputStepNum++}. 실제 투입량 입력</div>
+      <div class="input-group">
         <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
         <div class="input-suffix">
           <input type="number" id="input-qty-${stepNo}" placeholder="투입량 입력" step="0.01"
