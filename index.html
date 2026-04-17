@@ -4107,7 +4107,7 @@ function renderStepContent(step, stepType) {
   }
 
   else if (stepType === 'inspect') {
-    // CCP Metal Detection - 7 steps
+    // CCP Metal Detection - 7 steps (interactive)
     html += `
       <div class="info-box warn">
         <div class="fs-13 fw-7 c-warn">CCP 금속검출 — 7단계 체크시트</div>
@@ -4115,79 +4115,132 @@ function renderStepContent(step, stepType) {
       </div>
     `;
 
-    // Step 1
+    // Step 1 — 기계 작동 확인
     html += `
       <div class="card bl-warn" style="padding:10px">
         <div class="row mb-8" style="gap:8px"><span class="fs-13 fw-6">Step 1. 기계 작동 확인</span></div>
         <div class="row" style="gap:8px;align-items:center">
           <span class="fs-12 c-txt-l">시작 시간:</span>
-          <input type="time" id="ccp-time-1" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${formatTime()}">
+          <input type="time" id="ccp-time-1" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${formatTime()}" onchange="validateStepInputs(${stepNo})">
         </div>
+        <div class="fs-10 c-txt-l mt-4" style="opacity:0.7">※ 기계 전원 ON 후 작동 시작 시간을 직접 입력하세요</div>
       </div>
     `;
-    // Step 2
+
+    // Step 2 — 시편 사전 테스트 (Fe / SUS304 각각 합격/불합격 토글)
     html += `
       <div class="card bl-warn" style="padding:10px">
         <div class="row mb-8" style="gap:8px"><span class="fs-13 fw-6">Step 2. 시편 사전 테스트</span></div>
         <div class="row mb-8" style="gap:8px">
-          <div style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center">
+          <div id="ccp2-fe" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
             <div class="fs-11 c-txt-l">Fe 시편 검출</div>
-            <div class="row mt-4" style="gap:6px"><button class="btn btn-sm btn-suc flex-1" style="padding:4px 6px;font-size:11px">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" style="padding:4px 6px;font-size:11px">불합격</button></div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp2-fe','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp2-fe','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp2-fe-time" style="display:none">⏱ <span></span></div>
           </div>
-          <div style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center">
+          <div id="ccp2-sus" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
             <div class="fs-11 c-txt-l">SUS304 시편 검출</div>
-            <div class="row mt-4" style="gap:6px"><button class="btn btn-sm btn-suc flex-1" style="padding:4px 6px;font-size:11px">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" style="padding:4px 6px;font-size:11px">불합격</button></div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp2-sus','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp2-sus','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp2-sus-time" style="display:none">⏱ <span></span></div>
           </div>
-        </div>
-        <div class="row" style="gap:8px;align-items:center">
-          <span class="fs-12 c-txt-l">테스트 시간:</span>
-          <input type="time" id="ccp-time-2" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px">
         </div>
       </div>
     `;
-    // Step 3
+
+    // Step 3 — 초회 검증 (Fe / SUS304 각각)
     html += `
       <div class="card bl-warn" style="padding:10px">
-        <div class="fs-13 fw-6 mb-8">Step 3. 초회 검증</div>
+        <div class="fs-13 fw-6 mb-4">Step 3. 초회 검증</div>
         <div class="fs-12 c-txt-l mb-8">최초 완제품 + 시편 함께 통과</div>
-        <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1">합격</button><button class="btn btn-sm btn-outline btn-err flex-1">불합격</button></div>
-        <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검증 시간:</span><input type="time" id="ccp-time-3" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"></div>
+        <div class="row mb-8" style="gap:8px">
+          <div id="ccp3-fe" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
+            <div class="fs-11 c-txt-l">Fe 시편</div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp3-fe','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp3-fe','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp3-fe-time" style="display:none">⏱ <span></span></div>
+          </div>
+          <div id="ccp3-sus" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
+            <div class="fs-11 c-txt-l">SUS304 시편</div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp3-sus','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp3-sus','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp3-sus-time" style="display:none">⏱ <span></span></div>
+          </div>
+        </div>
       </div>
     `;
-    // Step 4
+
+    // Step 4 — 생산 통과 시작 (수동 시간)
     html += `
       <div class="card bl-info" style="padding:10px">
         <div class="fs-13 fw-6 mb-8">Step 4. 생산 통과 시작</div>
-        <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">시작 시간:</span><input type="time" id="ccp-time-4" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"></div>
+        <div class="row" style="gap:8px;align-items:center">
+          <span class="fs-12 c-txt-l">시작 시간:</span>
+          <input type="time" id="ccp-time-4" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" onchange="ccpCalcStep5Time(${stepNo});validateStepInputs(${stepNo})">
+        </div>
+        <div class="fs-10 c-txt-l mt-4" style="opacity:0.7">※ 생산 라인 통과 시작 시간을 입력하면 Step5 검증 시간이 자동 계산됩니다</div>
       </div>
     `;
-    // Step 5
+
+    // Step 5 — 2시간 주기 검증
     html += `
       <div class="card bl-warn" style="padding:10px">
         <div class="fs-13 fw-6 mb-8">Step 5. 2시간 주기 검증</div>
         <div class="info-box warn" style="padding:8px">
-          <div class="fs-12 fw-6 c-warn">다음 검증 예정: Step4 시작 + 2시간</div>
+          <div class="fs-12 fw-6 c-warn">검증 시간은 Step4 시작 시간 기준 +2시간 자동 계산</div>
         </div>
         <div id="ccp5-records-${stepNo}">
-          <div class="ccp5-record" style="border:1px solid var(--gray-l);border-radius:8px;padding:8px;margin-bottom:6px">
+          <div class="ccp5-record" data-result="" style="border:1px solid var(--gray-l);border-radius:8px;padding:8px;margin-bottom:6px">
             <div class="fs-11 fw-6 c-txt-l mb-4">검증 #1</div>
-            <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1" onclick="this.parentElement.parentElement.dataset.result='합격';this.classList.add('active');this.nextElementSibling.classList.remove('active')" style="opacity:0.6">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" onclick="this.parentElement.parentElement.dataset.result='불합격';this.classList.add('active');this.previousElementSibling.classList.remove('active')" style="opacity:0.6">불합격</button></div>
-            <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검사 시간:</span><input type="time" class="ccp5-time" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"><span class="fs-11 c-txt-l">(직접 입력)</span></div>
+            <div class="row mb-8" style="gap:8px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle5(this.closest('.ccp5-record'),'합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle5(this.closest('.ccp5-record'),'불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="row" style="gap:8px;align-items:center">
+              <span class="fs-12 c-txt-l">검사 시간:</span>
+              <span class="ccp5-time-display fs-13 fw-6" style="color:var(--info)">Step4 입력 대기...</span>
+            </div>
           </div>
         </div>
         <button class="btn btn-sm btn-outline btn-warn btn-full" onclick="addCCP5Record('${stepNo}')">+ 추가 2시간 검증 기록</button>
       </div>
     `;
-    // Step 6
+
+    // Step 6 — 최종 시편 단독 통과 (Fe / SUS304 각각, Step 2와 동일 로직)
     html += `
       <div class="card bl-teal" style="padding:10px">
-        <div class="fs-13 fw-6 mb-8">Step 6. 최종 시편 단독 통과</div>
+        <div class="fs-13 fw-6 mb-4">Step 6. 최종 시편 단독 통과</div>
         <div class="fs-12 c-txt-l mb-8">최종 완제품 통과 후 시편만 단독 통과</div>
-        <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1">합격</button><button class="btn btn-sm btn-outline btn-err flex-1">불합격</button></div>
-        <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검사 시간:</span><input type="time" id="ccp-time-6" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px"></div>
+        <div class="row mb-8" style="gap:8px">
+          <div id="ccp6-fe" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
+            <div class="fs-11 c-txt-l">Fe 시편 검출</div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp6-fe','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp6-fe','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp6-fe-time" style="display:none">⏱ <span></span></div>
+          </div>
+          <div id="ccp6-sus" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--gray-l);text-align:center" data-result="">
+            <div class="fs-11 c-txt-l">SUS304 시편 검출</div>
+            <div class="row mt-4" style="gap:6px">
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp6-sus','합격',${stepNo})">합격</button>
+              <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle('ccp6-sus','불합격',${stepNo})">불합격</button>
+            </div>
+            <div class="fs-10 c-txt-l mt-4" id="ccp6-sus-time" style="display:none">⏱ <span></span></div>
+          </div>
+        </div>
       </div>
     `;
-    // Step 7
+
+    // Step 7 — 기계 스크린 촬영 (unchanged)
     html += `
       <div class="card bl-teal" style="padding:10px">
         <div class="fs-13 fw-6 mb-8">Step 7. 기계 스크린 촬영</div>
@@ -4263,20 +4316,121 @@ function renderStepContent(step, stepType) {
   el.innerHTML = html;
 }
 
+// ── CCP 합격/불합격 토글 (Step 2,3,6 공용) ──
+function ccpToggle(boxId, result, stepNo) {
+  const box = $id(boxId);
+  if (!box) return;
+  const btns = box.querySelectorAll('button');
+  const timeEl = $id(boxId + '-time');
+
+  box.dataset.result = result;
+  if (result === '합격') {
+    btns[0].style.background = 'var(--suc)';
+    btns[0].style.color = '#fff';
+    btns[1].style.background = 'var(--gray-l)';
+    btns[1].style.color = 'var(--txt)';
+    box.style.borderColor = 'var(--suc)';
+    // Auto-record time
+    const now = new Date().toTimeString().substring(0, 5);
+    if (timeEl) {
+      timeEl.style.display = 'block';
+      timeEl.querySelector('span').textContent = now;
+      timeEl.dataset.time = now;
+    }
+  } else {
+    btns[1].style.background = 'var(--err)';
+    btns[1].style.color = '#fff';
+    btns[0].style.background = 'var(--gray-l)';
+    btns[0].style.color = 'var(--txt)';
+    box.style.borderColor = 'var(--err)';
+    // 불합격 — no time recorded
+    if (timeEl) {
+      timeEl.style.display = 'block';
+      timeEl.querySelector('span').textContent = '불합격 — 시간 미기록';
+      timeEl.dataset.time = '';
+    }
+  }
+  validateStepInputs(stepNo);
+}
+
+// ── CCP Step5 합격/불합격 토글 ──
+function ccpToggle5(recordEl, result, stepNo) {
+  if (!recordEl) return;
+  const btns = recordEl.querySelectorAll('button');
+  recordEl.dataset.result = result;
+  if (result === '합격') {
+    btns[0].style.background = 'var(--suc)';
+    btns[0].style.color = '#fff';
+    btns[1].style.background = 'var(--gray-l)';
+    btns[1].style.color = 'var(--txt)';
+    recordEl.style.borderColor = 'var(--suc)';
+  } else {
+    btns[1].style.background = 'var(--err)';
+    btns[1].style.color = '#fff';
+    btns[0].style.background = 'var(--gray-l)';
+    btns[0].style.color = 'var(--txt)';
+    recordEl.style.borderColor = 'var(--err)';
+  }
+  validateStepInputs(stepNo);
+}
+
+// ── Step4 시간 변경 시 Step5 검증 시간 자동 계산 ──
+function ccpCalcStep5Time(stepNo) {
+  const t4 = $id('ccp-time-4')?.value;
+  if (!t4) return;
+  const container = $id('ccp5-records-' + stepNo);
+  if (!container) return;
+  const records = container.querySelectorAll('.ccp5-record');
+  records.forEach((rec, i) => {
+    const display = rec.querySelector('.ccp5-time-display');
+    if (display) {
+      const calcTime = addHoursToTime(t4, (i + 1) * 2);
+      display.textContent = calcTime;
+      display.dataset.time = calcTime;
+    }
+  });
+}
+
+// ── 시간 문자열에 N시간 더하기 ──
+function addHoursToTime(timeStr, hours) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const totalMin = h * 60 + m + hours * 60;
+  const nh = Math.floor(totalMin / 60) % 24;
+  const nm = totalMin % 60;
+  return String(nh).padStart(2, '0') + ':' + String(nm).padStart(2, '0');
+}
+
 function addCCP5Record(stepNo) {
   const container = $id('ccp5-records-' + stepNo);
   if (!container) return;
   const count = container.querySelectorAll('.ccp5-record').length + 1;
+
+  // Calculate time: Step4 start + (count * 2h)
+  const t4 = $id('ccp-time-4')?.value;
+  let calcTime = '';
+  let calcDisplay = 'Step4 입력 대기...';
+  if (t4) {
+    calcTime = addHoursToTime(t4, count * 2);
+    calcDisplay = calcTime;
+  }
+
   const div = document.createElement('div');
   div.className = 'ccp5-record';
+  div.dataset.result = '';
   div.style.cssText = 'border:1px solid var(--gray-l);border-radius:8px;padding:8px;margin-bottom:6px';
   div.innerHTML = `
     <div class="fs-11 fw-6 c-txt-l mb-4">검증 #${count}</div>
-    <div class="row mb-8" style="gap:8px"><button class="btn btn-sm btn-suc flex-1" onclick="this.parentElement.parentElement.dataset.result='합격';this.classList.add('active');this.nextElementSibling.classList.remove('active')" style="opacity:0.6">합격</button><button class="btn btn-sm btn-outline btn-err flex-1" onclick="this.parentElement.parentElement.dataset.result='불합격';this.classList.add('active');this.previousElementSibling.classList.remove('active')" style="opacity:0.6">불합격</button></div>
-    <div class="row" style="gap:8px;align-items:center"><span class="fs-12 c-txt-l">검사 시간:</span><input type="time" class="ccp5-time" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${new Date().toTimeString().substring(0,5)}"><span class="fs-11 c-txt-l">(직접 입력)</span></div>
+    <div class="row mb-8" style="gap:8px">
+      <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle5(this.closest('.ccp5-record'),'합격',${stepNo})">합격</button>
+      <button class="btn btn-sm flex-1" style="padding:4px 6px;font-size:11px;background:var(--gray-l);color:var(--txt)" onclick="ccpToggle5(this.closest('.ccp5-record'),'불합격',${stepNo})">불합격</button>
+    </div>
+    <div class="row" style="gap:8px;align-items:center">
+      <span class="fs-12 c-txt-l">검사 시간:</span>
+      <span class="ccp5-time-display fs-13 fw-6" style="color:var(--info)" data-time="${calcTime}">${calcDisplay}</span>
+    </div>
   `;
   container.appendChild(div);
-  toast(`검증 #${count} 추가됨`, 'suc');
+  toast(`검증 #${count} 추가됨 (예정: ${calcDisplay})`, 'suc');
 }
 
 // ── 공정 사진 수집 (File 객체 배열 리턴) ──
@@ -4362,11 +4516,38 @@ function collectStepData(stepNo, stepType, step) {
   }
   else if (stepType === 'inspect') {
     data.ccpTotal = $id('ccp-total')?.value || '';
-    data.times = {};
-    for (let t = 1; t <= 6; t++) {
-      const tv = $id(`ccp-time-${t}`)?.value;
-      if (tv) data.times[`step${t}`] = tv;
+    // Step 1 time
+    data.step1Time = $id('ccp-time-1')?.value || '';
+    // Step 2 results (Fe / SUS304)
+    data.step2 = {
+      fe: { result: $id('ccp2-fe')?.dataset?.result || '', time: $id('ccp2-fe-time')?.dataset?.time || '' },
+      sus: { result: $id('ccp2-sus')?.dataset?.result || '', time: $id('ccp2-sus-time')?.dataset?.time || '' }
+    };
+    // Step 3 results (Fe / SUS304)
+    data.step3 = {
+      fe: { result: $id('ccp3-fe')?.dataset?.result || '', time: $id('ccp3-fe-time')?.dataset?.time || '' },
+      sus: { result: $id('ccp3-sus')?.dataset?.result || '', time: $id('ccp3-sus-time')?.dataset?.time || '' }
+    };
+    // Step 4 time
+    data.step4Time = $id('ccp-time-4')?.value || '';
+    // Step 5 periodic records
+    const step5Container = document.getElementById('ccp5-records-' + stepNo);
+    data.step5 = [];
+    if (step5Container) {
+      step5Container.querySelectorAll('.ccp5-record').forEach((rec, i) => {
+        const timeDisp = rec.querySelector('.ccp5-time-display');
+        data.step5.push({
+          num: i + 1,
+          result: rec.dataset?.result || '',
+          time: timeDisp?.dataset?.time || ''
+        });
+      });
     }
+    // Step 6 results (Fe / SUS304)
+    data.step6 = {
+      fe: { result: $id('ccp6-fe')?.dataset?.result || '', time: $id('ccp6-fe-time')?.dataset?.time || '' },
+      sus: { result: $id('ccp6-sus')?.dataset?.result || '', time: $id('ccp6-sus-time')?.dataset?.time || '' }
+    };
   }
   else if (stepType === 'qr-label') {
     data.qrQty = $id(`qr-label-qty-${stepNo}`)?.value || '';
@@ -4563,13 +4744,31 @@ function handleCompleteStep(isFinal = false) {
   }
 
   if (stepType === 'inspect') {
-    // CCP 금속검출 — 총 검사 수량, 기계 사진 필수
+    // CCP 금속검출 — 전체 검증
+    if (!$id('ccp-time-1')?.value) missing.push('Step1 시작 시간');
+    // Step 2 합격 필수
+    if ($id('ccp2-fe')?.dataset?.result !== '합격') missing.push('Step2 Fe 시편 합격');
+    if ($id('ccp2-sus')?.dataset?.result !== '합격') missing.push('Step2 SUS304 시편 합격');
+    // Step 3 합격 필수
+    if ($id('ccp3-fe')?.dataset?.result !== '합격') missing.push('Step3 Fe 초회검증 합격');
+    if ($id('ccp3-sus')?.dataset?.result !== '합격') missing.push('Step3 SUS304 초회검증 합격');
+    // Step 4 시간
+    if (!$id('ccp-time-4')?.value) missing.push('Step4 시작 시간');
+    // Step 5 — 모든 기록 합격 필수
+    const ccp5Container = document.getElementById('ccp5-records-' + stepNo);
+    if (ccp5Container) {
+      ccp5Container.querySelectorAll('.ccp5-record').forEach((rec, i) => {
+        if (rec.dataset?.result !== '합격') missing.push(`Step5 검증 #${i+1} 합격`);
+      });
+    }
+    // Step 6 합격 필수
+    if ($id('ccp6-fe')?.dataset?.result !== '합격') missing.push('Step6 Fe 최종 합격');
+    if ($id('ccp6-sus')?.dataset?.result !== '합격') missing.push('Step6 SUS304 최종 합격');
+    // Step 7 수량 + 사진
     const ccpTotal = parseInt($id('ccp-total')?.value);
     if (!ccpTotal || ccpTotal <= 0) missing.push('총 검사 수량');
     const ccpPhoto = $id(`photo-preview-${stepNo}-ccp7`);
     if (!ccpPhoto || !ccpPhoto.innerHTML.trim()) missing.push('검출기 기계 화면 사진');
-    // 시간 입력 확인
-    if (!$id('ccp-time-1')?.value) missing.push('Step1 시작 시간');
   }
 
   if (stepType === 'pack') {
@@ -5029,13 +5228,26 @@ function validateStepInputs(stepNo) {
     if (!photoPreview || !photoPreview.innerHTML.trim()) allValid = false;
   }
 
-  // inspect 타입 검증 (CCP)
+  // inspect 타입 검증 (CCP) — 전체 합격 + 시간 + 사진
   if (stepType === 'inspect') {
+    if (!$id('ccp-time-1')?.value) allValid = false;
+    if ($id('ccp2-fe')?.dataset?.result !== '합격') allValid = false;
+    if ($id('ccp2-sus')?.dataset?.result !== '합격') allValid = false;
+    if ($id('ccp3-fe')?.dataset?.result !== '합격') allValid = false;
+    if ($id('ccp3-sus')?.dataset?.result !== '합격') allValid = false;
+    if (!$id('ccp-time-4')?.value) allValid = false;
+    const ccp5c = document.getElementById('ccp5-records-' + stepNo);
+    if (ccp5c) {
+      ccp5c.querySelectorAll('.ccp5-record').forEach(rec => {
+        if (rec.dataset?.result !== '합격') allValid = false;
+      });
+    }
+    if ($id('ccp6-fe')?.dataset?.result !== '합격') allValid = false;
+    if ($id('ccp6-sus')?.dataset?.result !== '합격') allValid = false;
     const ccpTotal = parseInt($id('ccp-total')?.value);
     if (!ccpTotal || ccpTotal <= 0) allValid = false;
     const ccpPhoto = $id(`photo-preview-${stepNo}-ccp7`);
     if (!ccpPhoto || !ccpPhoto.innerHTML.trim()) allValid = false;
-    if (!$id('ccp-time-1')?.value) allValid = false;
   }
 
   // pack 타입 검증
