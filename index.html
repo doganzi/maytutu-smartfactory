@@ -739,10 +739,20 @@ const SheetsAPI = {
   // Find row index (캐시 활용)
   async findRowIndex(tab, colIndex, value) {
     const all = await this.getRange(tab);
+    // 삭제 상태가 아닌 행 우선 매칭 (중복 ID 문제 방지)
+    const statusCols = { '작업지시서': 12, '생산요청': 7 };
+    const statusCol = statusCols[tab];
+    let fallback = -1;
     for (let i = 1; i < all.length; i++) {
-      if (all[i] && all[i][colIndex] === value) return i + 1;
+      if (all[i] && all[i][colIndex] === value) {
+        if (statusCol !== undefined && all[i][statusCol] === '삭제') {
+          if (fallback === -1) fallback = i + 1;
+          continue;
+        }
+        return i + 1;
+      }
     }
-    return -1;
+    return fallback; // 삭제 상태만 있으면 그거라도 반환
   },
 
   // Update a specific cell — batchUpdate 활용 (API 1회)
