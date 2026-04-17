@@ -1091,12 +1091,12 @@ Screens.dashboard = async () => {
     <div style="padding:16px">
       <!-- Summary Cards -->
       <div class="grid-2 mb-12">
-        <div class="card" style="text-align:center;padding:12px">
+        <div class="card clickable" style="text-align:center;padding:12px" onclick="Router.go('production')">
           <div style="font-size:20px">🏭</div>
           <div class="fs-20 fw-8 c-info" style="margin:4px 0">${inProgress}건</div>
           <div class="fs-11 c-txt-l">생산 진행</div>
         </div>
-        <div class="card" style="text-align:center;padding:12px">
+        <div class="card clickable" style="text-align:center;padding:12px" onclick="Router.go('production')">
           <div style="font-size:20px">${isAdmin ? '📋' : '🔧'}</div>
           <div class="fs-20 fw-8 c-warn" style="margin:4px 0">${pendingApproval}건</div>
           <div class="fs-11 c-txt-l">${isAdmin ? '승인 대기' : '내 작업'}</div>
