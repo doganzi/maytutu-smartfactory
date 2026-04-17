@@ -1562,18 +1562,16 @@ async function renderInventoryContent(activeTab) {
           return !min || l[7] < min ? l[7] : min;
         }, null);
 
-        // Unit conversion for display (통, 판 etc.)
+        // Unit conversion for display — parseSkuUnit 활용 (알/판 포함)
         let stockDisp = totalRemain + 'kg', safeDisp = minStock + 'kg';
-        const skuMatch = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
-        if (skuMatch && !isWater && typeof totalRemain === 'number') {
-          const perUnit = parseFloat(skuMatch[1]);
-          const unitName = skuMatch[2];
-          if (perUnit > 0) {
-            const stockUnits = Math.floor(totalRemain / perUnit);
-            const stockRem = Math.round(totalRemain % perUnit * 10) / 10;
-            stockDisp = stockRem > 0 ? stockUnits + unitName + ' ' + stockRem + 'kg' : stockUnits + unitName;
-            const safeUnits = Math.round(minStock / perUnit);
-            safeDisp = safeUnits + unitName;
+        if (!isWater && sku && typeof totalRemain === 'number') {
+          const skuP = parseSkuUnit(sku);
+          if (skuP && skuP.perUnit > 0) {
+            const stockUnits = Math.floor(totalRemain / skuP.perUnit);
+            const stockRem = Math.round(totalRemain % skuP.perUnit * 10) / 10;
+            stockDisp = stockRem > 0 ? stockUnits + skuP.unitName + ' ' + stockRem + 'kg' : stockUnits + skuP.unitName;
+            const safeUnits = Math.round(minStock / skuP.perUnit);
+            safeDisp = safeUnits + skuP.unitName;
           }
         }
 
