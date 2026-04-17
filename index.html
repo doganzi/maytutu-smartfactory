@@ -763,6 +763,15 @@ const SheetsAPI = {
     await this.batchUpdate([{ range: `${tab}!${colLetter}${rowIdx}`, values: [[newVal]] }]);
   },
 
+  // Update row by direct row index (1-based Google Sheets row)
+  async updateRowByIndex(tab, rowIdx, updates) {
+    const data = Object.entries(updates).map(([col, val]) => ({
+      range: `${tab}!${String.fromCharCode(65 + parseInt(col))}${rowIdx}`,
+      values: [[val]]
+    }));
+    await this.batchUpdate(data);
+  },
+
   // Update multiple cells in ONE batch call (기존: 열 개수만큼 API → 개선: 1회)
   async updateRow(tab, searchCol, searchVal, updates) {
     const rowIdx = await this.findRowIndex(tab, searchCol, searchVal);
@@ -4281,6 +4290,120 @@ function addCCP5Record(stepNo) {
   toast(`검증 #${count} 추가됨`, 'suc');
 }
 
+// ── 공정 사진 수집 (File 객체 배열 리턴) ──
+function collectStepPhotos(stepNo, stepType) {
+  const files = [];
+  const addFilesFrom = (inputEl) => {
+    if (inputEl?.files) Array.from(inputEl.files).forEach(f => files.push(f));
+  };
+
+  if (stepType === 'input') {
+    addFilesFrom($id(`photo-camera-${stepNo}`));
+    addFilesFrom($id(`photo-gallery-${stepNo}`));
+  } else if (stepType === 'process' || stepType === 'store') {
+    const preview = $id(`photo-preview-${stepNo}`);
+    if (preview) {
+      const fileInput = preview.closest('.photo-upload')?.querySelector('input[type="file"]');
+      addFilesFrom(fileInput);
+    }
+  } else if (stepType === 'pack') {
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-s${n}`);
+      if (prev) {
+        const fi = prev.closest('.photo-upload')?.querySelector('input[type="file"]');
+        addFilesFrom(fi);
+      }
+    }
+  } else if (stepType === 'seal') {
+    for (let n = 1; n <= 3; n++) {
+      const prev = $id(`photo-preview-${stepNo}-seal${n}`);
+      if (prev) {
+        const fi = prev.closest('.photo-upload')?.querySelector('input[type="file"]');
+        addFilesFrom(fi);
+      }
+    }
+  } else if (stepType === 'inspect') {
+    const ccpPrev = $id(`photo-preview-${stepNo}-ccp7`);
+    if (ccpPrev) {
+      const fi = ccpPrev.closest('.photo-upload')?.querySelector('input[type="file"]');
+      addFilesFrom(fi);
+    }
+  }
+  return files;
+}
+
+// ── 공정 입력값 수집 (JSON string 리턴) ──
+function collectStepData(stepNo, stepType, step) {
+  const data = {};
+
+  if (stepType === 'input') {
+    data.inputQty = $id(`input-qty-${stepNo}`)?.value || '';
+    data.targetQty = $id(`input-qty-${stepNo}`)?.dataset?.target || '';
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    data.checks = checks.map((c, i) => ({
+      name: c.trim(),
+      checked: $id(`check-${stepNo}-${i}`)?.textContent === '✓'
+    }));
+  }
+  else if (stepType === 'process') {
+    const checks = (step[6] || '').split(',').filter(c => c.trim());
+    const isMixing = (step[2]||'').includes('믹싱');
+    if (isMixing) {
+      if (!checks.includes('RPM 확인')) checks.push('RPM 확인');
+      if (!checks.includes('믹싱 시간 확인')) checks.push('믹싱 시간 확인');
+    }
+    data.checks = checks.map((c, i) => ({
+      name: c.trim(),
+      checked: $id(`check-${stepNo}-${i}`)?.textContent === '✓'
+    }));
+  }
+  else if (stepType === 'pack') {
+    data.packQty = $id(`pack-qty-${stepNo}`)?.value || '';
+    data.samples = [];
+    for (let n = 1; n <= 3; n++) {
+      data.samples.push({
+        weight: $id(`sample-wt-${stepNo}-${n}`)?.value || ''
+      });
+    }
+  }
+  else if (stepType === 'seal') {
+    data.sealQty = $id(`seal-qty-${stepNo}`)?.value || '';
+    data.labelCheck = $id(`check-seal-${stepNo}-0`)?.textContent === '✓';
+    data.sealCheck = $id(`check-seal-${stepNo}-1`)?.textContent === '✓';
+  }
+  else if (stepType === 'inspect') {
+    data.ccpTotal = $id('ccp-total')?.value || '';
+    data.times = {};
+    for (let t = 1; t <= 6; t++) {
+      const tv = $id(`ccp-time-${t}`)?.value;
+      if (tv) data.times[`step${t}`] = tv;
+    }
+  }
+  else if (stepType === 'qr-label') {
+    data.qrQty = $id(`qr-label-qty-${stepNo}`)?.value || '';
+  }
+  else if (stepType === 'store') {
+    data.freezeStart = $id('freeze-start')?.value || '';
+  }
+
+  return JSON.stringify(data);
+}
+
+// ── 사진 일괄 업로드 → URL 배열 리턴 ──
+async function uploadStepPhotos(files) {
+  if (!files || files.length === 0) return '';
+  const urls = [];
+  for (const file of files) {
+    try {
+      const url = await DriveAPI.uploadPhoto(file);
+      urls.push(url);
+    } catch (e) {
+      console.error('Photo upload failed:', e);
+    }
+  }
+  return urls.join(' | ');
+}
+
 // Helper functions for WO execution
 function toggleCheck(el) {
   el.classList.toggle('checked');
@@ -4340,9 +4463,47 @@ function goToStep(idx) {
 async function tempSaveWO() {
   try {
     showLoading();
-    const { woId, currentStep } = State.woExec;
+    const { woId, currentStep, steps } = State.woExec;
+    const step = steps[currentStep];
+    const stepNo = parseInt(step[1]);
+    const stepType = step[3] || 'input';
+
+    // 사진 업로드
+    const photos = collectStepPhotos(stepNo, stepType);
+    let photoUrls = '';
+    if (photos.length > 0) {
+      toast('사진 업로드 중...', 'info', 2000);
+      photoUrls = await uploadStepPhotos(photos);
+    }
+
+    // 입력값 수집
+    const stepData = collectStepData(stepNo, stepType, step);
+    const usedLotIds = (stepType === 'input') ?
+      (State.woExec._scannedLots?.[stepNo] || []).map(s => s.lotId).filter(Boolean).join(',') : '';
+
+    // 공정기록 임시 저장 (기존 기록 있으면 덮어쓰기 위해 삭제 후 재작성)
+    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+    if (existingIdx >= 0) {
+      // 기존 임시 기록 덮어쓰기 — updateRow 사용
+      await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
+        0: woId, 1: String(stepNo), 2: step[2], 3: stepType,
+        4: usedLotIds, 5: stepData, 6: photoUrls,
+        7: '', 8: '', 9: '', 10: '임시저장',
+        11: formatDateTime(), 12: State.user?.email
+      });
+    } else {
+      await SheetsAPI.append('공정기록', [
+        woId, String(stepNo), step[2], stepType,
+        usedLotIds, stepData, photoUrls,
+        '', '', '', '임시저장',
+        formatDateTime(), State.user?.email
+      ]);
+    }
+    SheetsAPI.invalidateCache('공정기록');
+
     await SheetsAPI.updateCell('작업지시서', 0, woId, 13, String(currentStep));
-    toast('임시저장 완료', 'suc');
+    toast(`임시저장 완료${photos.length > 0 ? ` (사진 ${photos.length}장 업로드됨)` : ''}`, 'suc');
   } catch (e) {
     toast('임시저장 실패: ' + e.message, 'err');
   } finally {
@@ -4546,10 +4707,36 @@ async function completeStep() {
       }
     }
 
-    // Save process record (with used LOT IDs for input steps)
-    await SheetsAPI.append('공정기록', [
-      woId, step[1], step[2], step[3], usedLotIds, '', '', '', '', '', '', formatDateTime(), State.user?.email
-    ]);
+    // 사진 업로드
+    const photos = collectStepPhotos(stepNo, stepType);
+    let photoUrls = '';
+    if (photos.length > 0) {
+      toast('사진 업로드 중...', 'info', 2000);
+      photoUrls = await uploadStepPhotos(photos);
+    }
+
+    // 입력값 수집
+    const stepData = collectStepData(stepNo, stepType, step);
+
+    // 기존 임시저장 기록 있으면 덮어쓰기, 없으면 새로 추가
+    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+    if (existingIdx >= 0) {
+      await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
+        0: woId, 1: step[1], 2: step[2], 3: step[3],
+        4: usedLotIds, 5: stepData, 6: photoUrls,
+        7: '', 8: '', 9: '', 10: '완료',
+        11: formatDateTime(), 12: State.user?.email
+      });
+    } else {
+      await SheetsAPI.append('공정기록', [
+        woId, step[1], step[2], step[3],
+        usedLotIds, stepData, photoUrls,
+        '', '', '', '완료',
+        formatDateTime(), State.user?.email
+      ]);
+    }
+    SheetsAPI.invalidateCache('공정기록');
 
     // Update lastSavedStep
     await SheetsAPI.updateCell('작업지시서', 0, woId, 13, String(currentStep + 1));
@@ -4570,11 +4757,36 @@ async function submitForApproval() {
       const { woId } = State.woExec;
       const freezeStart = formatDateTime();
 
-      // Save last step record
+      // Save last step record with photos and data
       const step = State.woExec.steps[State.woExec.currentStep];
-      await SheetsAPI.append('공정기록', [
-        woId, step[1], step[2], step[3], '', '', '', '', '', '', '', formatDateTime(), State.user?.email
-      ]);
+      const stepNo = parseInt(step[1]);
+      const stepType = step[3] || 'store';
+      const photos = collectStepPhotos(stepNo, stepType);
+      let photoUrls = '';
+      if (photos.length > 0) {
+        toast('사진 업로드 중...', 'info', 2000);
+        photoUrls = await uploadStepPhotos(photos);
+      }
+      const stepData = collectStepData(stepNo, stepType, step);
+
+      const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+      const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+      if (existingIdx >= 0) {
+        await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
+          0: woId, 1: step[1], 2: step[2], 3: step[3],
+          4: '', 5: stepData, 6: photoUrls,
+          7: '', 8: '', 9: '', 10: '완료',
+          11: formatDateTime(), 12: State.user?.email
+        });
+      } else {
+        await SheetsAPI.append('공정기록', [
+          woId, step[1], step[2], step[3],
+          '', stepData, photoUrls,
+          '', '', '', '완료',
+          formatDateTime(), State.user?.email
+        ]);
+      }
+      SheetsAPI.invalidateCache('공정기록');
 
       // Update WO status → 냉동보관중
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
@@ -4939,16 +5151,61 @@ Screens['wo-detail'] = async (params = {}) => {
             const name = r[2] || '';
             const type = r[3] || '';
             const usedLots = r[4] || '';
+            const stepDataRaw = r[5] || '';
+            const photoUrlsRaw = r[6] || '';
+            const recordStatus = r[10] || '';
             const time = (r[11]||'').substring(11,16);
             const worker = r[12] || '';
-            const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관'}[type] || type;
-            const typeColor = {input:'#1565c0',process:'#7c3aed',seal:'#7c3aed',inspect:'#c62828','qr-label':'#1565c0',store:'#00695c'}[type] || '#666';
+            const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관',pack:'계량'}[type] || type;
+            const typeColor = {input:'#1565c0',process:'#7c3aed',seal:'#7c3aed',inspect:'#c62828','qr-label':'#1565c0',store:'#00695c',pack:'#e65100'}[type] || '#666';
             const lotList = usedLots ? usedLots.split(',').filter((v,i,a) => a.indexOf(v) === i) : [];
+            const photoUrls = photoUrlsRaw ? photoUrlsRaw.split(' | ').filter(u => u.trim()) : [];
+
+            // Parse step data JSON
+            let stepData = {};
+            try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
+
+            // Build detail HTML for step data
+            let dataHtml = '';
+            if (type === 'input' && stepData.inputQty) {
+              dataHtml += `<div class="fs-11 c-txt-l mt-4">투입량: <strong>${stepData.inputQty}kg</strong>${stepData.targetQty ? ` (목표: ${stepData.targetQty}kg)` : ''}</div>`;
+            }
+            if (stepData.checks && stepData.checks.length > 0) {
+              dataHtml += `<div class="fs-11 fw-6 mt-8 mb-4">체크항목</div>`;
+              dataHtml += stepData.checks.map(c => `<div class="fs-11" style="padding:1px 0">${c.checked?'✅':'⬜'} ${c.name}</div>`).join('');
+            }
+            if (type === 'pack' && stepData.packQty) {
+              dataHtml += `<div class="fs-11 c-txt-l mt-4">포장 수량: <strong>${stepData.packQty}개</strong></div>`;
+              if (stepData.samples) {
+                dataHtml += stepData.samples.map((s,i) => `<div class="fs-11 c-txt-l">샘플 #${i+1} 무게: ${s.weight||'-'}kg</div>`).join('');
+              }
+            }
+            if (type === 'seal' && stepData.sealQty) {
+              dataHtml += `<div class="fs-11 c-txt-l mt-4">최종 수량: <strong>${stepData.sealQty}개</strong></div>`;
+              dataHtml += `<div class="fs-11 c-txt-l">라벨: ${stepData.labelCheck?'✅':'⬜'} · 밀봉: ${stepData.sealCheck?'✅':'⬜'}</div>`;
+            }
+            if (type === 'inspect') {
+              if (stepData.ccpTotal) dataHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
+              if (stepData.times) {
+                const timeEntries = Object.entries(stepData.times);
+                if (timeEntries.length) dataHtml += `<div class="fs-11 c-txt-l">${timeEntries.map(([k,v])=>`${k}: ${v}`).join(' · ')}</div>`;
+              }
+            }
+            if (type === 'qr-label' && stepData.qrQty) {
+              dataHtml += `<div class="fs-11 c-txt-l mt-4">QR 라벨 수량: <strong>${stepData.qrQty}매</strong></div>`;
+            }
+            if (type === 'store' && stepData.freezeStart) {
+              dataHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
+            }
+
+            const statusIcon = recordStatus === '완료' ? '✓' : (recordStatus === '임시저장' ? '⏸' : '✓');
+            const statusBg = recordStatus === '임시저장' ? 'var(--warn)' : 'var(--suc)';
+
             return `
             <div class="card" style="padding:0;overflow:hidden;margin-bottom:6px">
               <div style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px"
                    onclick="const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.arrow').textContent=d.style.display==='none'?'▸':'▾'">
-                <div style="width:28px;height:28px;border-radius:14px;background:var(--suc);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">✓</div>
+                <div style="width:28px;height:28px;border-radius:14px;background:${statusBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${statusIcon}</div>
                 <div style="flex:1">
                   <div class="fs-13 fw-6">${stepNo}. ${name}</div>
                   <div class="fs-11 c-txt-l">${time} · ${worker.split('@')[0]}</div>
@@ -4957,15 +5214,21 @@ Screens['wo-detail'] = async (params = {}) => {
                 <span class="arrow" style="color:var(--txt-l);font-size:12px">▸</span>
               </div>
               <div style="display:none;padding:0 12px 10px;border-top:1px solid var(--gray-l)">
-                <div class="fs-11 c-txt-l mt-8">공정 유형: <strong>${type}</strong></div>
+                <div class="fs-11 c-txt-l mt-8">공정 유형: <strong>${type}</strong> ${recordStatus ? `<span style="background:${recordStatus==='완료'?'var(--suc)':'var(--warn)'}22;color:${recordStatus==='완료'?'var(--suc)':'var(--warn)'};padding:1px 4px;border-radius:3px;font-size:10px;margin-left:4px">${recordStatus}</span>` : ''}</div>
                 <div class="fs-11 c-txt-l">기록 시간: ${r[11]||'-'}</div>
                 <div class="fs-11 c-txt-l">작업자: ${worker}</div>
                 ${lotList.length > 0 ? `
                   <div class="fs-11 fw-6 mt-8 mb-4">사용 원재료 LOT (${lotList.length}건)</div>
                   ${lotList.map(lot => `<div class="fs-11 c-info" style="padding:2px 0">📦 ${lot}</div>`).join('')}
                 ` : ''}
-                ${type === 'seal' ? `<div class="fs-11 c-txt-l mt-4">최종 포장 수량: <strong>${wo[7]||'-'}개</strong></div>` : ''}
-                ${type === 'store' ? `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${wo[11]||'-'}</strong></div>` : ''}
+                ${dataHtml}
+                ${photoUrls.length > 0 ? `
+                  <div class="fs-11 fw-6 mt-8 mb-4">📷 촬영 사진 (${photoUrls.length}장)</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    ${photoUrls.map((url, pi) => `<a href="${url}" target="_blank" rel="noopener" style="display:block;width:64px;height:64px;border-radius:6px;background:#f0f0f0;border:1px solid var(--gray-l);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri);text-decoration:none">사진${pi+1}</a>`).join('')}
+                  </div>
+                ` : ''}
+                ${!dataHtml && photoUrls.length === 0 && lotList.length === 0 ? `<div class="fs-11 c-txt-l mt-4" style="font-style:italic">저장된 상세 기록 없음</div>` : ''}
               </div>
             </div>`;
           }).join('')}
