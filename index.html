@@ -3954,13 +3954,6 @@ function renderStepContent(step, stepType) {
           <button class="btn btn-sm btn-outline btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">+ 추가 LOT 스캔</button>
         </div>
       `;
-    } else {
-      html += `
-        <div class="info-box neutral mt-8">
-          <div class="fs-12 fw-6" style="color:var(--gray-d)">QR 스캔 없음 — 바로 계량</div>
-          <div class="fs-11 c-txt-l">물은 QR 관리 대상이 아닙니다</div>
-        </div>
-      `;
     }
 
     // ④ 저울 계량값 사진 첨부 (카메라 / 갤러리 분리)
