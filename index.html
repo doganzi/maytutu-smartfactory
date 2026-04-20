@@ -1132,7 +1132,7 @@ Screens.dashboard = async () => {
           <div class="card clickable" onclick="Router.go('approval-detail', {woId:'${wo[0]}'})">
             <div class="row between">
               <div>
-                <div class="fs-14 fw-6">${wo[4] || '호두과자 반죽'} ${wo[5] || ''}kg</div>
+                <div class="fs-14 fw-6">${wo[4] || '앙호두 (전용 반죽)'} ${wo[5] || ''}kg</div>
                 <div class="fs-12 c-txt-l">${wo[0]} · ${wo[8] || ''} · 냉동 ${fh}h/12h</div>
               </div>
               <span class="badge badge-${ca ? 'suc' : 'warn'}">${ca ? '출하승인 가능' : '냉동보관중'}</span>
@@ -1445,7 +1445,7 @@ Screens['req-form'] = async () => {
         <label>완제품</label>
         <select id="req-product">
           ${fgItems.map(i => `<option value="${i[0]}">${i[0]} ${i[1]}</option>`).join('')}
-          ${fgItems.length === 0 ? '<option value="FG001">FG001 호두과자 반죽</option>' : ''}
+          ${fgItems.length === 0 ? '<option value="FG001">FG001 앙호두 (전용 반죽)</option>' : ''}
         </select>
       </div>
       <div class="input-group">
@@ -1486,7 +1486,7 @@ async function submitProductionRequest() {
   try {
     showLoading();
     const reqId = await generateSeqId('REQ', '생산요청');
-    const productName = product?.includes(' ') ? product.split(' ').slice(1).join(' ') : '호두과자 반죽';
+    const productName = product?.includes(' ') ? product.split(' ').slice(1).join(' ') : '앙호두 (전용 반죽)';
     const productCode = product?.split(' ')[0] || 'FG001';
 
     await SheetsAPI.append('생산요청', [
@@ -2449,7 +2449,7 @@ Screens.settings = () => {
       <div class="card">
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
         <div class="fs-12 c-txt-l">메이투투 스마트팩토리 v1.0</div>
-        <div class="fs-12 c-txt-l">HACCP 기반 호두과자 반죽 생산관리</div>
+        <div class="fs-12 c-txt-l">HACCP 기반 생산공정 관리 시스템</div>
       </div>
       <button class="btn btn-outline btn-err btn-full mt-16" onclick="Auth.logout()">로그아웃</button>
     </div>
@@ -3780,7 +3780,7 @@ async function startWorkOrder() {
     const sop = State.sops.find(s => s[0] === _selectedSopId);
 
     await SheetsAPI.append('작업지시서', [
-      woId, _selectedSopId, reqId, sop?.[2] || 'FG001', sop?.[1]?.replace('제조','').trim() || '호두과자 반죽',
+      woId, _selectedSopId, reqId, sop?.[2] || 'FG001', sop?.[1]?.replace('제조','').trim() || '앙호두 (전용 반죽)',
       totalKg, `${unitSize}kg`, qty, State.user?.email,
       formatDateTime(), '', '', '진행중', '0', '', '', '', '', ''
     ]);
@@ -5580,7 +5580,7 @@ async function approveWO(woId) {
 
       // 2. Create FG LOT — status '출하가능'
       await SheetsAPI.append('완제품LOT', [
-        fgLotId, fgItemCode, wo[4] || '호두과자 반죽', qty, wo[6] || '1kg',
+        fgLotId, fgItemCode, wo[4] || '앙호두 (전용 반죽)', qty, wo[6] || '1kg',
         formatDate(), expDate, woId, qty, '출하가능', packCount, '냉동 -18°C'
       ]);
 
