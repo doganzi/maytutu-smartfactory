@@ -1000,7 +1000,7 @@ Screens.dashboard = async () => {
 
   // Load data for dashboard
   let pendingApproval = 0, inProgress = 0, lowStock = 0, upcomingChecks = 0;
-  let lowStockItems = [], pendingWOs = [], recentActivity = [], calAlerts = [];
+  let lowStockItems = [], reorderItems = [], pendingWOs = [], recentActivity = [], calAlerts = [];
 
   try {
     const [woData, rmItems, rmLots, eqData] = await Promise.all([
@@ -1024,25 +1024,31 @@ Screens.dashboard = async () => {
       inProgress = woData.filter(r => r[8] === myEmail && r[12] === '진행중').length;
     }
 
-    // Check low stock
+    // Check low stock & reorder point (3-level: 정상/발주필요/부족)
     rmItems.forEach(item => {
       const code = item[0], minStock = parseFloat(item[6]) || 0;
-      if (minStock <= 0) return;
+      const reorderPoint = parseFloat(item[9]) || 0;
+      const leadDays = parseFloat(item[10]) || 0;
+      const orderCycle = item[11] || '';
+      if (minStock <= 0 && reorderPoint <= 0) return;
       const totalRemain = rmLots.filter(l => l[1] === code && l[9] !== '폐기').reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
-      if (totalRemain < minStock) {
-        lowStock++;
-        const sku = item[3] || '';
-        const skuM = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
-        let remainDisp = totalRemain + 'kg', minDisp = minStock + 'kg';
-        if (skuM) {
-          const pu = parseFloat(skuM[1]), un = skuM[2];
-          if (pu > 0) {
-            const sr = Math.floor(totalRemain / pu), srr = Math.round(totalRemain % pu * 10) / 10;
-            remainDisp = srr > 0 ? sr + un + ' ' + srr + 'kg' : sr + un;
-            minDisp = Math.round(minStock / pu) + un;
-          }
+      const sku = item[3] || '';
+      const skuM = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
+      let remainDisp = totalRemain + 'kg', minDisp = minStock + 'kg', rpDisp = reorderPoint + 'kg';
+      if (skuM) {
+        const pu = parseFloat(skuM[1]), un = skuM[2];
+        if (pu > 0) {
+          const sr = Math.floor(totalRemain / pu), srr = Math.round(totalRemain % pu * 10) / 10;
+          remainDisp = srr > 0 ? sr + un + ' ' + srr + 'kg' : sr + un;
+          minDisp = Math.round(minStock / pu) + un;
+          rpDisp = Math.round(reorderPoint / pu) + un;
         }
-        lowStockItems.push({ name: item[1], code, remain: totalRemain, min: minStock, remainDisp, minDisp });
+      }
+      if (minStock > 0 && totalRemain < minStock) {
+        lowStock++;
+        lowStockItems.push({ name: item[1], code, remain: totalRemain, min: minStock, reorderPoint, remainDisp, minDisp, rpDisp, leadDays, orderCycle, level: 'err' });
+      } else if (reorderPoint > 0 && totalRemain <= reorderPoint) {
+        reorderItems.push({ name: item[1], code, remain: totalRemain, min: minStock, reorderPoint, remainDisp, minDisp, rpDisp, leadDays, orderCycle, level: 'warn' });
       }
     });
 
@@ -1102,6 +1108,14 @@ Screens.dashboard = async () => {
       }
     }
 
+    // 발주 필요 토스트
+    if (reorderItems.length > 0) {
+      toast(`📦 발주 필요 ${reorderItems.length}건: ${reorderItems.map(r=>r.name).join(', ')}`, 'warn');
+    }
+    if (lowStockItems.length > 0) {
+      toast(`🚨 재고 부족 ${lowStockItems.length}건: ${lowStockItems.map(r=>r.name).join(', ')}`, 'err');
+    }
+
     localStorage.setItem('lastNotifCheck', now);
   } catch (e) {
     console.warn('Dashboard data load error:', e);
@@ -1122,9 +1136,9 @@ Screens.dashboard = async () => {
           <div class="fs-11 c-txt-l">${isAdmin ? '승인 대기' : '내 작업'}</div>
         </div>
         <div class="card clickable" style="text-align:center;padding:12px" onclick="Router.go('inventory')">
-          <div style="font-size:20px">⚠️</div>
-          <div class="fs-20 fw-8 c-err" style="margin:4px 0">${lowStock}건</div>
-          <div class="fs-11 c-txt-l">재고 부족</div>
+          <div style="font-size:20px">${lowStock > 0 ? '🚨' : reorderItems.length > 0 ? '⚠️' : '✅'}</div>
+          <div class="fs-20 fw-8 ${lowStock > 0 ? 'c-err' : reorderItems.length > 0 ? 'c-warn' : 'c-suc'}" style="margin:4px 0">${lowStock + reorderItems.length}건</div>
+          <div class="fs-11 c-txt-l">${lowStock > 0 ? '재고 부족' : reorderItems.length > 0 ? '발주 필요' : '재고 정상'}</div>
         </div>
         <div class="card clickable" style="text-align:center;padding:12px" onclick="Router.go('equip')">
           <div style="font-size:20px">🔧</div>
@@ -1168,19 +1182,38 @@ Screens.dashboard = async () => {
         return notifHtml;
       })() : ''}
 
-      ${lowStockItems.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8 mt-8">재고 알림</div>
+      ${lowStockItems.length > 0 || reorderItems.length > 0 ? `
+        <div class="fs-14 fw-7 mb-8 mt-8">📦 재고·발주 알림</div>
         ${lowStockItems.map(item => `
-          <div class="card clickable" onclick="Router.go('inventory')">
+          <div class="card clickable" onclick="Router.go('inventory')" style="border-left:3px solid var(--err)">
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6 c-err">${item.name} 재고 부족</div>
-                <div class="fs-12 c-txt-l">현재고 ${item.remainDisp || item.remain+'kg'} / 안전재고 ${item.minDisp || item.min+'kg'}</div>
+                <div class="fs-12 c-txt-l">현재고 ${item.remainDisp} / 안전재고 ${item.minDisp}</div>
               </div>
-              <span class="badge badge-err">부족</span>
+              <span class="badge badge-err">긴급</span>
             </div>
           </div>
         `).join('')}
+        ${reorderItems.map(item => {
+          let recQty = '';
+          const deficit = Math.max(0, item.reorderPoint - item.remain);
+          if (item.code === 'RM003') { recQty = '1,000kg (1톤)'; }
+          else if (item.code === 'RM001') { recQty = Math.ceil(deficit / 1.5) + '판'; }
+          else if (item.code === 'RM006') { recQty = Math.ceil(deficit / 18) + '통 (18L)'; }
+          else { recQty = Math.ceil(deficit) + 'kg'; }
+          return `
+          <div class="card clickable" onclick="Router.go('inventory')" style="border-left:3px solid var(--warn)">
+            <div class="row between">
+              <div>
+                <div class="fs-14 fw-6" style="color:var(--warn)">${item.name} 발주 필요</div>
+                <div class="fs-12 c-txt-l">현재고 ${item.remainDisp} / 발주점 ${item.rpDisp}</div>
+                <div class="fs-11 c-info">권장: ${recQty} · 리드타임 ${item.leadDays}일 · ${item.orderCycle}</div>
+              </div>
+              <span class="badge badge-warn">발주</span>
+            </div>
+          </div>
+        `}).join('')}
       ` : ''}
 
       ${calAlerts.length > 0 ? `
@@ -1557,6 +1590,7 @@ async function renderInventoryContent(activeTab) {
         const code = item[0], name = item[1], minStock = parseFloat(item[6]) || 0;
         const sku = item[3] || '';
         const storageTemp = item[8] || '실온';
+        const reorderPoint = parseFloat(item[9]) || 0;
         const isWater = code === 'RM002';
 
         // Calculate remain from LOTs
@@ -1565,6 +1599,7 @@ async function renderInventoryContent(activeTab) {
             .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
 
         const isLow = !isWater && minStock > 0 && totalRemain < minStock;
+        const needsOrder = !isLow && !isWater && reorderPoint > 0 && totalRemain <= reorderPoint;
 
         // Find earliest expiry
         const lots = (State.rawMaterialLots || []).filter(l => l[1] === code && l[9] !== '폐기' && l[9] !== '소진');
@@ -1586,8 +1621,11 @@ async function renderInventoryContent(activeTab) {
           }
         }
 
+        const badgeClass = isWater ? 'gray' : isLow ? 'err' : needsOrder ? 'warn' : 'suc';
+        const badgeText = isWater ? '-' : isLow ? '부족' : needsOrder ? '발주필요' : '정상';
+
         return `
-          <div class="card ${isWater ? '' : 'clickable'}" ${isWater ? '' : `onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${name}'})"`}>
+          <div class="card ${isWater ? '' : 'clickable'}" ${isWater ? '' : `onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${name}'})"`} ${isLow ? 'style="border-left:3px solid var(--err)"' : needsOrder ? 'style="border-left:3px solid var(--warn)"' : ''}>
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6">
@@ -1595,10 +1633,10 @@ async function renderInventoryContent(activeTab) {
                   ${!isWater ? '<span class="fs-10 c-info" style="margin-left:4px">▸ LOT상세</span>' : ''}
                 </div>
                 <div class="fs-12 c-txt-l mt-4">현재고: ${isWater ? '-' : stockDisp}</div>
-                <div class="fs-11 ${isLow ? 'c-err fw-6' : 'c-txt-l'}">${isWater ? '관리대상 외' : `안전재고: ${safeDisp}`}</div>
+                <div class="fs-11 ${isLow ? 'c-err fw-6' : needsOrder ? 'c-warn fw-6' : 'c-txt-l'}">${isWater ? '관리대상 외' : `안전재고: ${safeDisp}`}</div>
                 <div class="fs-11 c-txt-l">소비기한: ${earliestExp ? earliestExp.substring(0,10) : '-'} · ${storageTemp}</div>
               </div>
-              <span class="badge badge-${isWater ? 'gray' : isLow ? 'err' : 'suc'}">${isWater ? '-' : isLow ? '부족' : '정상'}</span>
+              <span class="badge badge-${badgeClass}">${badgeText}</span>
             </div>
           </div>
         `;
@@ -1753,7 +1791,10 @@ Screens['lot-detail'] = async (params = {}) => {
   } else {
     totalRemain = lots.reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
   }
+  const rmItem = !isFG && !isSP ? State.rawMaterialItems?.find(i => i[0] === itemCode) : null;
+  const reorderPoint = parseFloat(rmItem?.[9]) || 0;
   const isLow = minStock > 0 && totalRemain < minStock;
+  const needsOrder = !isLow && reorderPoint > 0 && totalRemain <= reorderPoint;
 
   // Unit conversion for display — parseSkuUnit 활용 (알/판 포함)
   let lotStockDisp = totalRemain + (isFG ? '개' : 'kg'), lotSafeDisp = minStock + 'kg';
@@ -1769,15 +1810,19 @@ Screens['lot-detail'] = async (params = {}) => {
   // 완제품: 출하완료 LOT 제외
   const displayLots = isFG ? lots.filter(l => l[9] !== '출하완료' && l[9] !== '폐기' && l[9] !== '소진') : lots;
 
+  const lotBadgeClass = isLow ? 'err' : needsOrder ? 'warn' : 'suc';
+  const lotBadgeText = isLow ? '부족' : needsOrder ? '발주필요' : '정상';
+  const lotBoxClass = isLow ? 'warn' : needsOrder ? 'warn' : 'suc';
+
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="card info-box ${isLow ? 'warn' : 'suc'}">
+      <div class="card info-box ${lotBoxClass}">
         <div class="row between">
           <div>
             <div class="fs-16 fw-7">${itemName}</div>
             <div class="fs-12 c-txt-l">${itemCode} · 현재고 ${lotStockDisp}${!isFG && !isSP && minStock > 0 ? ` · 안전재고 ${lotSafeDisp}` : ''}</div>
           </div>
-          ${!isFG && !isSP ? `<span class="badge badge-${isLow ? 'err' : 'suc'}">${isLow ? '부족' : '정상'}</span>` : ''}
+          ${!isFG && !isSP ? `<span class="badge badge-${lotBadgeClass}">${lotBadgeText}</span>` : ''}
         </div>
       </div>
 
@@ -3401,21 +3446,26 @@ Screens['items-rm'] = async () => {
           const code = item[0], name = item[1], spec = item[2] || '', sku = item[3] || '', unit = item[4] || 'kg';
           const category = item[5] || '', minStock = parseFloat(item[6]) || 0, allergen = item[7] || '';
           const storage = item[8] || '실온';
+          const reorderPoint = parseFloat(item[9]) || 0;
+          const leadDays = item[10] || '';
+          const orderCycle = item[11] || '';
           const isWater = code === 'RM002';
           const totalRemain = isWater ? '-' :
             lots.filter(l => l[1] === code && l[9] !== '폐기' && l[9] !== '소진')
               .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
           const isLow = !isWater && minStock > 0 && totalRemain < minStock;
+          const needsOrder = !isLow && !isWater && reorderPoint > 0 && totalRemain <= reorderPoint;
           return `
-            <div class="card">
+            <div class="card" ${isLow ? 'style="border-left:3px solid var(--err)"' : needsOrder ? 'style="border-left:3px solid var(--warn)"' : ''}>
               <div class="row between mb-4">
                 <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
                 ${isWater ? '<span class="badge badge-info">수돗물</span>' :
-                  isLow ? '<span class="badge badge-err">재고부족</span>' : '<span class="badge badge-suc">정상</span>'}
+                  isLow ? '<span class="badge badge-err">재고부족</span>' : needsOrder ? '<span class="badge badge-warn">발주필요</span>' : '<span class="badge badge-suc">정상</span>'}
               </div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit} · SKU: ${sku || '-'}</div>
               <div class="fs-12 c-txt-l">분류: ${category || '-'} · 보관: ${storage} · 알레르겐: ${allergen || '없음'}</div>
-              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b> ${minStock > 0 ? ` · 안전재고: ${minStock}${unit}` : ''}</div>` : ''}
+              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b> ${minStock > 0 ? ` · 안전재고: ${minStock}${unit}` : ''}${reorderPoint > 0 ? ` · 발주점: ${reorderPoint}${unit}` : ''}</div>` : ''}
+              ${!isWater && (leadDays || orderCycle) ? `<div class="fs-11 c-txt-l">리드타임: ${leadDays || '-'}일 · 주문주기: ${orderCycle || '-'}</div>` : ''}
             </div>`;
         }).join('')
       }
