@@ -1935,10 +1935,11 @@ async function printLotLabels(lotId, itemName, type) {
     const labels = printable.map(iv => ({
       indivId: iv[0],
       itemName: itemName,
-      lotId: lotId,
-      date: inDate,
-      exp: expDate ? `EXP: ${expDate}` : '',
-      storage: storageTemp ? `보관: ${storageTemp}` : '',
+      lotId: '',
+      date: `생산날짜: ${inDate}`,
+      exp: expDate ? `소비기한: ${expDate}까지` : '',
+      storage: storageTemp ? `보관: ${storageTemp} 이하` : '',
+      company: '',
     }));
 
     // 라벨 인쇄 화면으로 이동 — fromInventory 모드로 폼 숨기고 바로 라벨 표시
@@ -1964,10 +1965,11 @@ async function printSingleLabel(indivId, itemName, lotId, type) {
       preLabels: [{
         indivId: indivId,
         itemName: itemName,
-        lotId: lotId,
-        date: inDate,
-        exp: expDate ? `EXP: ${expDate}` : '',
-        storage: storageTemp ? `보관: ${storageTemp}` : '',
+        lotId: '',
+        date: `생산날짜: ${inDate}`,
+        exp: expDate ? `소비기한: ${expDate}까지` : '',
+        storage: storageTemp ? `보관: ${storageTemp} 이하` : '',
+        company: '',
       }],
       srcLotId: lotId,
       srcItemName: itemName,
@@ -2893,14 +2895,16 @@ async function generateLabelsLot() {
   hideLoading();
   if (!itemNameVal) itemNameVal = '품목명 미확인';
 
+  const isFGLot = lotId.startsWith('FG-');
   renderLabelCards(
     Array.from({length: count}, (_, i) => ({
       indivId: `${lotId}-${String(i + 1).padStart(2, '0')}`,
       itemName: itemNameVal,
-      lotId: lotId,
-      date: formatDate(),
-      exp: expDate ? `EXP: ${expDate}` : '',
-      storage: storageTemp ? `보관: ${storageTemp}` : '',
+      lotId: isFGLot ? '' : lotId,
+      date: isFGLot ? `생산날짜: ${formatDate()}` : formatDate(),
+      exp: expDate ? (isFGLot ? `소비기한: ${expDate}까지` : `EXP: ${expDate}`) : '',
+      storage: storageTemp ? (isFGLot ? `보관: ${storageTemp} 이하` : `보관: ${storageTemp}`) : '',
+      company: isFGLot ? '' : undefined,
     }))
   );
 }
@@ -2938,8 +2942,12 @@ async function generateLabelsIndiv() {
         const indiv = fgIndivs.find(r => r[0] === qrId);
         if (indiv) {
           const lot = fgLots.find(l => l[0] === indiv[1]);
-          labels.push({ indivId: qrId, itemName: lot?.[2] || '완제품', date: lot?.[5] || formatDate(),
-            exp: lot?.[6] ? `EXP: ${lot[6]}` : '', storage: '', lotId: indiv[1] });
+          const fgDate = lot?.[5] || formatDate();
+          const fgExp = lot?.[6] || '';
+          const fgStorage = lot?.[11] || '냉동 -18°C';
+          labels.push({ indivId: qrId, itemName: lot?.[2] || '완제품',
+            date: `생산날짜: ${fgDate}`, exp: fgExp ? `소비기한: ${fgExp}까지` : '',
+            storage: `보관: ${fgStorage} 이하`, lotId: '', company: '' });
           found = true;
         }
       } else if (qrId.startsWith('SP-')) {
