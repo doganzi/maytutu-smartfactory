@@ -114,6 +114,17 @@ a { text-decoration:none; color:inherit; }
 .empty-state .es-desc { font-size:12px; color:var(--txt-l); margin-bottom:20px; }
 .row { display:flex; gap:8px; align-items:center; }
 .row.between { justify-content:space-between; }
+.card .row.between > span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.card .row.between > div:first-child { overflow:hidden; min-width:0; }
+.card .row.between > span.badge,
+.card .row.between > span:last-child { flex-shrink:0; white-space:nowrap; }
+.card > .fs-11.c-txt-l,
+.card > .fs-12.c-txt-l,
+.card .fs-11.c-txt-l,
+.card .fs-12.c-txt-l,
+.card .fs-14.fw-6,
+.card .fs-14.fw-7,
+.card > .row.between > span.fs-16 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .flex-1 { flex:1; }
 .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .mt-4 { margin-top:4px; } .mt-8 { margin-top:8px; } .mt-12 { margin-top:12px; } .mt-16 { margin-top:16px; }
