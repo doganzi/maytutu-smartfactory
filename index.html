@@ -3074,6 +3074,14 @@ function renderLabelCards(labels) {
 
   labels.forEach((lb, i) => {
     const idx = i + 1;
+    // ── 안전한 값 추출 (null/undefined 방어) ──
+    const sId = (lb && lb.indivId) ? String(lb.indivId).trim() : '';
+    const sName = (lb && lb.itemName) ? String(lb.itemName).trim() : '(품목명 없음)';
+    const sLot = (lb && lb.lotId) ? String(lb.lotId).trim() : '';
+    const sDate = (lb && lb.date) ? String(lb.date).trim() : '';
+    const sExp = (lb && lb.exp) ? String(lb.exp).trim() : '';
+    const sStor = (lb && lb.storage) ? String(lb.storage).trim() : '';
+    const sComp = lb ? lb.company : '';
 
     // Preview card — 콤팩트 미리보기 (QR 왼쪽 | 정보 오른쪽)
     const card = document.createElement('div');
@@ -3081,42 +3089,44 @@ function renderLabelCards(labels) {
     card.innerHTML = `
       <div id="qr-preview-${idx}" style="width:62px;height:62px;min-width:62px;flex-shrink:0;overflow:hidden"></div>
       <div style="flex:1;min-width:0;overflow:hidden;line-height:1.25">
-        <div style="font-size:12px;font-weight:700;word-break:keep-all;overflow-wrap:break-word">${lb.itemName}</div>
-        ${lb.lotId ? `<div style="font-size:10px;font-weight:600;color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.5px">LOT: ${lb.lotId}</div>` : ''}
-        ${lb.date ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.date}</div>` : ''}
-        ${lb.exp ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.exp}</div>` : ''}
-        ${lb.storage ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.storage}</div>` : ''}
-        <div style="font-size:9px;font-weight:600;color:#666;word-break:break-all;letter-spacing:-0.3px">${lb.indivId}</div>
-        ${lb.company !== '' ? `<div style="font-size:9px;font-weight:700;color:#333">${lb.company || '메이투투'}</div>` : ''}
+        <div style="font-size:12px;font-weight:700;word-break:keep-all;overflow-wrap:break-word">${sName}</div>
+        ${sLot ? `<div style="font-size:10px;font-weight:600;color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.5px">LOT: ${sLot}</div>` : ''}
+        ${sDate ? `<div style="font-size:9px;font-weight:600;color:#666">${sDate}</div>` : ''}
+        ${sExp ? `<div style="font-size:9px;font-weight:600;color:#666">${sExp}</div>` : ''}
+        ${sStor ? `<div style="font-size:9px;font-weight:600;color:#666">${sStor}</div>` : ''}
+        ${sId ? `<div style="font-size:9px;font-weight:600;color:#666;word-break:break-all;letter-spacing:-0.3px">${sId}</div>` : ''}
+        ${sComp !== '' ? `<div style="font-size:9px;font-weight:700;color:#333">${sComp || '메이투투'}</div>` : ''}
       </div>
       <div style="position:absolute;top:2px;right:5px;font-size:8px;color:#bbb">${idx}/${labels.length}</div>
     `;
     previewEl.appendChild(card);
 
-    // Generate QR
+    // Generate QR (안전하게)
     setTimeout(() => {
-      const el = $id(`qr-preview-${idx}`);
-      if (el) {
+      try {
+        const el = $id(`qr-preview-${idx}`);
+        if (el) {
           el.innerHTML = '';
-          el.setAttribute('data-qr-text', lb.indivId);
-          new QRCode(el, { text: lb.indivId, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M });
+          el.setAttribute('data-qr-text', sId || 'N/A');
+          new QRCode(el, { text: sId || 'N/A', width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M });
           el.querySelectorAll('img,canvas').forEach(c => c.style.cssText = 'width:62px!important;height:62px!important;display:block');
         }
+      } catch (qrErr) { console.warn('[Label] 미리보기 QR 생성 실패:', sId, qrErr); }
     }, 50 * idx);
 
     // Print area (fallback용)
-    const lines = [lb.itemName];
-    if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
-    if (lb.date) lines.push(lb.date);
-    if (lb.exp) lines.push(lb.exp);
-    if (lb.storage) lines.push(lb.storage);
-    lines.push(lb.indivId);
-    if (lb.company !== '') lines.push(lb.company || '메이투투');
+    const lines = [sName];
+    if (sLot) lines.push(`LOT: ${sLot}`);
+    if (sDate) lines.push(sDate);
+    if (sExp) lines.push(sExp);
+    if (sStor) lines.push(sStor);
+    if (sId) lines.push(sId);
+    if (sComp !== '') lines.push(sComp || '메이투투');
 
     const label = document.createElement('div');
     label.className = 'label';
     label.innerHTML = `
-      <div id="qr-print-${idx}" class="qr-img" data-qr-text="${lb.indivId}"></div>
+      <div id="qr-print-${idx}" class="qr-img" data-qr-text="${sId || 'N/A'}"></div>
       <div class="label-info">
         ${lines.map((l, j) => j === 0 ? `<div><strong>${l}</strong></div>` : `<div>${l}</div>`).join('')}
       </div>
@@ -3182,148 +3192,186 @@ function canvasTruncate(ctx, text, maxW) {
 // ── 라벨 1장을 Canvas에 그려서 dataURL 반환 ──
 function renderLabelToCanvas(lb) {
   return new Promise(resolve => {
-    // SLP-DX220: 203 DPI, 60×40mm
-    const DPI = 203;
-    const mm = (v) => Math.round(v * DPI / 25.4);
-    const W = mm(60), H = mm(40);
+    const _logTag = '[Label]';
+    try {
+      // ── 입력 검증 ──
+      const safeId = (lb && lb.indivId) ? String(lb.indivId).trim() : '';
+      const safeName = (lb && lb.itemName) ? String(lb.itemName).trim() : '(품목명 없음)';
+      const safeLotId = (lb && lb.lotId) ? String(lb.lotId).trim() : '';
+      const safeDate = (lb && lb.date) ? String(lb.date).trim() : '';
+      const safeExp = (lb && lb.exp) ? String(lb.exp).trim() : '';
+      const safeStorage = (lb && lb.storage) ? String(lb.storage).trim() : '';
+      const safeCompany = lb ? lb.company : '';
 
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
+      if (!safeId) console.warn(_logTag, '개별ID(indivId) 누락 — 빈 QR 생성됨', lb);
 
-    // 흰 배경
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, W, H);
+      // SLP-DX220: 203 DPI, 60×40mm
+      const DPI = 203;
+      const mm = (v) => Math.round(v * DPI / 25.4);
+      const W = mm(60), H = mm(40);
 
-    // QR 코드 생성 (임시 div에)
-    const qrBox = document.createElement('div');
-    qrBox.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
-    document.body.appendChild(qrBox);
-    const qrPx = mm(26);
-    new QRCode(qrBox, { text: lb.indivId, width: qrPx, height: qrPx, correctLevel: QRCode.CorrectLevel.M });
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
 
-    // 자간 축소(80%) 텍스트 그리기 헬퍼
-    function drawCondensed(ctx, text, x, y, scale) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(scale, 1);
-      ctx.fillText(text, 0, 0);
-      ctx.restore();
-    }
-    // 자간 축소 시 실제 폭 계산
-    function condensedWidth(ctx, text, scale) {
-      return ctx.measureText(text).width * scale;
-    }
-    // 자간 축소 말줄임
-    function condensedTruncate(ctx, text, maxW, scale) {
-      if (!text) return '';
-      if (condensedWidth(ctx, text, scale) <= maxW) return text;
-      let t = text;
-      while (t.length > 1 && condensedWidth(ctx, t + '…', scale) > maxW) t = t.slice(0, -1);
-      return t + '…';
-    }
+      // 흰 배경
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
 
-    // QR 렌더 대기 후 canvas에 그리기
-    setTimeout(() => {
-      const qrCanvas = qrBox.querySelector('canvas');
-      const topMargin = mm(5); // 위 여백 약 0.5cm
-      const qrMarginX = mm(1.5);
-      const qrY = topMargin + Math.round(((H - topMargin) - qrPx) / 2);
-      if (qrCanvas) ctx.drawImage(qrCanvas, qrMarginX, qrY, qrPx, qrPx);
-      document.body.removeChild(qrBox);
-
-      // 텍스트 영역 — QR 상단과 정렬
-      const textX = qrMarginX + qrPx + mm(2.5);
-      const textMaxW = W - textX - mm(1.5);
-      let y = qrY;  // QR코드 상단에 맞춤
-      const cScale = 0.8; // 자간 80%
-
-      // 모든 텍스트 굵게
-      const fontTitle = `bold ${mm(3.5)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontMain  = `bold ${mm(2.8)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const fontSub   = `bold ${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const lineH = mm(4.2);
-
-      // 품목명 (길면 2줄로 분할)
-      ctx.fillStyle = '#000000';
-      ctx.font = fontTitle;
-      const nameW = condensedWidth(ctx, lb.itemName, cScale);
-      if (nameW > textMaxW && lb.itemName.length > 6) {
-        // 괄호 앞, 공백 등 적절한 위치에서 분할
-        let splitIdx = lb.itemName.indexOf(' (');
-        if (splitIdx < 0) splitIdx = lb.itemName.indexOf('(');
-        if (splitIdx < 0) splitIdx = Math.floor(lb.itemName.length / 2);
-        const line1 = lb.itemName.substring(0, splitIdx).trim();
-        const line2 = lb.itemName.substring(splitIdx).trim();
-        drawCondensed(ctx, condensedTruncate(ctx, line1, textMaxW, cScale), textX, y + mm(2.5), cScale);
-        y += lineH - mm(0.5);
-        ctx.font = fontMain;
-        drawCondensed(ctx, condensedTruncate(ctx, line2, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
-      } else {
-        drawCondensed(ctx, condensedTruncate(ctx, lb.itemName, textMaxW, cScale), textX, y + mm(2.5), cScale);
-        y += lineH + mm(0.5);
+      // QR 코드 생성 (임시 div에)
+      const qrBox = document.createElement('div');
+      qrBox.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+      document.body.appendChild(qrBox);
+      const qrPx = mm(26);
+      try {
+        new QRCode(qrBox, { text: safeId || 'N/A', width: qrPx, height: qrPx, correctLevel: QRCode.CorrectLevel.M });
+      } catch (qrErr) {
+        console.error(_logTag, 'QR 생성 실패:', safeId, qrErr);
       }
 
-      // LOT 번호
-      ctx.font = fontMain;
-      if (lb.lotId) {
-        drawCondensed(ctx, condensedTruncate(ctx, 'LOT: ' + lb.lotId, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
+      // 자간 축소(80%) 텍스트 그리기 헬퍼
+      function drawCondensed(ctx, text, x, y, scale) {
+        if (!text) return;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, 1);
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
       }
-
-      // 입고일/생산일
-      ctx.font = fontMain;
-      if (lb.date) {
-        drawCondensed(ctx, condensedTruncate(ctx, lb.date, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
+      // 자간 축소 시 실제 폭 계산
+      function condensedWidth(ctx, text, scale) {
+        if (!text) return 0;
+        return ctx.measureText(text).width * scale;
       }
-
-      // 사용기한/소비기한
-      if (lb.exp) {
-        drawCondensed(ctx, condensedTruncate(ctx, lb.exp, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
+      // 자간 축소 말줄임
+      function condensedTruncate(ctx, text, maxW, scale) {
+        if (!text) return '';
+        if (condensedWidth(ctx, text, scale) <= maxW) return text;
+        let t = text;
+        while (t.length > 1 && condensedWidth(ctx, t + '…', scale) > maxW) t = t.slice(0, -1);
+        return t + '…';
       }
+      // y좌표 하단 초과 방어 — 남은 공간 체크
+      function canDrawLine(y, lineH) { return (y + lineH) <= H + mm(1); }
 
-      // 보관조건
-      if (lb.storage) {
-        drawCondensed(ctx, condensedTruncate(ctx, lb.storage, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
-      }
+      // QR 렌더 대기 후 canvas에 그리기 (저사양 기기 고려 500ms)
+      setTimeout(() => {
+        try {
+          const qrCanvas = qrBox.querySelector('canvas');
+          const topMargin = mm(5);
+          const qrMarginX = mm(1.5);
+          const qrY = topMargin + Math.round(((H - topMargin) - qrPx) / 2);
+          if (qrCanvas) {
+            ctx.drawImage(qrCanvas, qrMarginX, qrY, qrPx, qrPx);
+          } else {
+            console.warn(_logTag, 'QR canvas 미생성 — 빈 영역으로 진행:', safeId);
+          }
+          // DOM 정리 — 안전하게
+          try { document.body.removeChild(qrBox); } catch (e) { qrBox.remove && qrBox.remove(); }
 
-      // 개별 ID (소비기한/보관 뒤에 배치) — 긴 ID는 2줄 분할
-      ctx.font = fontSub;
-      const idW = condensedWidth(ctx, lb.indivId, cScale);
-      if (idW > textMaxW && lb.indivId) {
-        // "RM-003-260413" | "-270323-001-01" 형태로 3번째 '-' 기준 분할
-        let dashCount = 0, idSplit = -1;
-        for (let i = 0; i < lb.indivId.length; i++) {
-          if (lb.indivId[i] === '-') { dashCount++; if (dashCount === 3) { idSplit = i; break; } }
+          // 텍스트 영역 — QR 상단과 정렬
+          const textX = qrMarginX + qrPx + mm(2.5);
+          const textMaxW = W - textX - mm(1.5);
+          let y = qrY;  // QR코드 상단에 맞춤
+          const cScale = 0.8;
+
+          const fontTitle = `bold ${mm(3.5)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+          const fontMain  = `bold ${mm(2.8)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+          const fontSub   = `bold ${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+          const lineH = mm(4.2);
+
+          // ── 품목명 (길면 2줄 분할) ──
+          ctx.fillStyle = '#000000';
+          ctx.font = fontTitle;
+          const nameW = condensedWidth(ctx, safeName, cScale);
+          if (nameW > textMaxW && safeName.length > 6) {
+            let splitIdx = safeName.indexOf(' (');
+            if (splitIdx < 0) splitIdx = safeName.indexOf('(');
+            if (splitIdx < 0) splitIdx = Math.floor(safeName.length / 2);
+            const line1 = safeName.substring(0, splitIdx).trim();
+            const line2 = safeName.substring(splitIdx).trim();
+            drawCondensed(ctx, condensedTruncate(ctx, line1, textMaxW, cScale), textX, y + mm(2.5), cScale);
+            y += lineH - mm(0.5);
+            ctx.font = fontMain;
+            drawCondensed(ctx, condensedTruncate(ctx, line2, textMaxW, cScale), textX, y + mm(2), cScale);
+            y += lineH;
+          } else {
+            drawCondensed(ctx, condensedTruncate(ctx, safeName, textMaxW, cScale), textX, y + mm(2.5), cScale);
+            y += lineH + mm(0.5);
+          }
+
+          // ── LOT 번호 ──
+          ctx.font = fontMain;
+          if (safeLotId && canDrawLine(y, lineH)) {
+            drawCondensed(ctx, condensedTruncate(ctx, 'LOT: ' + safeLotId, textMaxW, cScale), textX, y + mm(2), cScale);
+            y += lineH;
+          }
+
+          // ── 입고일/생산일 ──
+          if (safeDate && canDrawLine(y, lineH)) {
+            drawCondensed(ctx, condensedTruncate(ctx, safeDate, textMaxW, cScale), textX, y + mm(2), cScale);
+            y += lineH;
+          }
+
+          // ── 사용기한/소비기한 ──
+          if (safeExp && canDrawLine(y, lineH)) {
+            drawCondensed(ctx, condensedTruncate(ctx, safeExp, textMaxW, cScale), textX, y + mm(2), cScale);
+            y += lineH;
+          }
+
+          // ── 보관조건 ──
+          if (safeStorage && canDrawLine(y, lineH)) {
+            drawCondensed(ctx, condensedTruncate(ctx, safeStorage, textMaxW, cScale), textX, y + mm(2), cScale);
+            y += lineH;
+          }
+
+          // ── 개별 ID — 긴 ID는 3번째 '-' 기준 2줄 분할 ──
+          if (safeId && canDrawLine(y, lineH)) {
+            ctx.font = fontSub;
+            const idW = condensedWidth(ctx, safeId, cScale);
+            if (idW > textMaxW) {
+              let dashCount = 0, idSplit = -1;
+              for (let i = 0; i < safeId.length; i++) {
+                if (safeId[i] === '-') { dashCount++; if (dashCount === 3) { idSplit = i; break; } }
+              }
+              if (idSplit > 0) {
+                const idLine1 = safeId.substring(0, idSplit);
+                const idLine2 = safeId.substring(idSplit);
+                drawCondensed(ctx, condensedTruncate(ctx, idLine1, textMaxW, cScale), textX, y + mm(2), cScale);
+                y += lineH - mm(0.8);
+                if (canDrawLine(y, lineH)) {
+                  drawCondensed(ctx, condensedTruncate(ctx, idLine2, textMaxW, cScale), textX, y + mm(2), cScale);
+                  y += lineH;
+                }
+              } else {
+                drawCondensed(ctx, condensedTruncate(ctx, safeId, textMaxW, cScale), textX, y + mm(2), cScale);
+                y += lineH;
+              }
+            } else {
+              drawCondensed(ctx, safeId, textX, y + mm(2), cScale);
+              y += lineH;
+            }
+          }
+
+          // ── 회사명 ──
+          if (safeCompany !== '' && canDrawLine(y, lineH)) {
+            ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
+            drawCondensed(ctx, safeCompany || '메이투투', textX, y + mm(2), cScale);
+          }
+
+          resolve(canvas.toDataURL('image/png'));
+        } catch (drawErr) {
+          console.error(_logTag, '라벨 Canvas 그리기 실패:', safeId, drawErr);
+          // 에러 시에도 흰 캔버스라도 반환 — 전체 인쇄 중단 방지
+          resolve(canvas.toDataURL('image/png'));
         }
-        if (idSplit > 0) {
-          const idLine1 = lb.indivId.substring(0, idSplit);
-          const idLine2 = lb.indivId.substring(idSplit);
-          drawCondensed(ctx, idLine1, textX, y + mm(2), cScale);
-          y += lineH - mm(0.8);
-          drawCondensed(ctx, idLine2, textX, y + mm(2), cScale);
-          y += lineH;
-        } else {
-          drawCondensed(ctx, condensedTruncate(ctx, lb.indivId, textMaxW, cScale), textX, y + mm(2), cScale);
-          y += lineH;
-        }
-      } else {
-        drawCondensed(ctx, condensedTruncate(ctx, lb.indivId, textMaxW, cScale), textX, y + mm(2), cScale);
-        y += lineH;
-      }
-
-      // 회사명 (company가 빈 문자열이면 숨김, undefined이면 '메이투투')
-      if (lb.company !== '') {
-        ctx.font = `bold ${mm(2.6)}px "Malgun Gothic","맑은 고딕",sans-serif`;
-        drawCondensed(ctx, lb.company || '메이투투', textX, y + mm(2), cScale);
-      }
-
-      resolve(canvas.toDataURL('image/png'));
-    }, 300);
+      }, 500);
+    } catch (initErr) {
+      console.error('[Label] 라벨 초기화 실패:', initErr);
+      // 빈 1x1 캔버스로 fallback — Promise reject 방지
+      const fb = document.createElement('canvas'); fb.width = 1; fb.height = 1;
+      resolve(fb.toDataURL('image/png'));
+    }
   });
 }
 
