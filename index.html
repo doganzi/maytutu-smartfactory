@@ -4797,7 +4797,7 @@ async function tempSaveWO() {
   }
 }
 
-function handleCompleteStep(isFinal = false) {
+async function handleCompleteStep(isFinal = false) {
   const step = State.woExec?.steps?.[State.woExec?.currentStep];
   if (!step) return;
   const stepNo = parseInt(step[1]);
