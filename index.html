@@ -1034,15 +1034,12 @@ Screens.dashboard = async () => {
       if (threshold <= 0) return;
       const totalRemain = rmLots.filter(l => l[1] === code && l[9] !== '폐기').reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
       const sku = item[3] || '';
-      const skuM = sku.match(/^(\d+)(?:kg|L)\/(통|판|포대|봉)/);
+      const skuP = parseSkuUnit(sku);
       let remainDisp = totalRemain + 'kg', threshDisp = threshold + 'kg';
-      if (skuM) {
-        const pu = parseFloat(skuM[1]), un = skuM[2];
-        if (pu > 0) {
-          const sr = Math.floor(totalRemain / pu), srr = Math.round(totalRemain % pu * 10) / 10;
-          remainDisp = srr > 0 ? sr + un + ' ' + srr + 'kg' : sr + un;
-          threshDisp = Math.round(threshold / pu) + un;
-        }
+      if (skuP && skuP.perUnit > 0) {
+        const sr = Math.floor(totalRemain / skuP.perUnit), srr = Math.round(totalRemain % skuP.perUnit * 10) / 10;
+        remainDisp = srr > 0 ? sr + skuP.unitName + ' ' + srr + 'kg' : sr + skuP.unitName;
+        threshDisp = Math.round(threshold / skuP.perUnit) + skuP.unitName;
       }
       if (totalRemain <= threshold) {
         lowStock++;
