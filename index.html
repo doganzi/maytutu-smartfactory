@@ -1506,7 +1506,7 @@ Screens['req-form'] = async () => {
   renderHeader('생산요청 등록', null, { back: 'production' });
 
   let fgItems = [];
-  try { fgItems = await SheetsAPI.getAll('완제품품목').catch(() => []); } catch(e) {}
+  try { fgItems = (await SheetsAPI.getAll('완제품품목').catch(() => [])).filter(i => i[7] !== '비활성'); } catch(e) {}
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -1514,7 +1514,7 @@ Screens['req-form'] = async () => {
         <label>완제품</label>
         <select id="req-product">
           ${fgItems.map(i => `<option value="${i[0]}">${i[0]} ${i[1]}</option>`).join('')}
-          ${fgItems.length === 0 ? '<option value="FG001">FG001 앙호두 (호두과자 전용반죽)</option>' : ''}
+          ${fgItems.length === 0 ? '<option value="FG002">FG002 앙호두</option>' : ''}
         </select>
       </div>
       <div class="input-group">
@@ -1556,7 +1556,7 @@ async function submitProductionRequest() {
     showLoading();
     const reqId = await generateSeqId('REQ', '생산요청');
     const productName = product?.includes(' ') ? product.split(' ').slice(1).join(' ') : '앙호두 (호두과자 전용반죽)';
-    const productCode = product?.split(' ')[0] || 'FG001';
+    const productCode = product?.split(' ')[0] || 'FG002';
 
     await SheetsAPI.append('생산요청', [
       reqId, productCode, productName, qty, unit, formatDate(), due, '대기', State.user?.email, notes || ''
@@ -1680,7 +1680,7 @@ async function renderInventoryContent(activeTab) {
     // Group by itemCode
     const grouped = {};
     fgLots.forEach(l => {
-      const code = l[1] || 'FG001';
+      const code = l[1] || 'FG002';
       if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalActiveIndivs: 0 };
       // 출하완료/폐기 제외한 실제 개별 수량 카운트
       const lotActiveIndivs = fgIndivs.filter(iv => iv[1] === l[0] && activeStatuses.includes(iv[3]));
@@ -2149,7 +2149,7 @@ function updateReceiveItems() {
   const type = $id('rcv-type')?.value;
   const sel = $id('rcv-item');
   if (type === '원재료') {
-    sel.innerHTML = (window._rcvRmItems || []).filter(i => i[0] !== 'RM002')
+    sel.innerHTML = (window._rcvRmItems || []).filter(i => i[0] !== 'RM002' && i[12] !== '비활성')
       .map(i => `<option value="${i[0]}" data-unit="${i[4]||'kg'}" data-sku="${i[3]||'kg'}">${i[0]} ${i[1]}</option>`).join('');
   } else {
     sel.innerHTML = (window._rcvSpItems || [])
@@ -3513,6 +3513,7 @@ Screens['items-fg'] = async () => {
       SheetsAPI.getAll('완제품품목').catch(() => []),
       SheetsAPI.getAll('완제품LOT').catch(() => []),
     ]);
+    items = items.filter(i => i[7] !== '비활성');
   } catch(e) {}
   hideLoading();
 
@@ -3868,7 +3869,7 @@ async function startWorkOrder() {
     const sop = State.sops.find(s => s[0] === _selectedSopId);
 
     await SheetsAPI.append('작업지시서', [
-      woId, _selectedSopId, reqId, sop?.[2] || 'FG001', sop?.[1]?.replace('제조','').trim() || '앙호두 (호두과자 전용반죽)',
+      woId, _selectedSopId, reqId, sop?.[2] || 'FG002', sop?.[1]?.replace('제조','').trim() || '앙호두 (호두과자 전용반죽)',
       totalKg, `${unitSize}kg`, qty, State.user?.email,
       formatDateTime(), '', '', '진행중', '0', '', '', '', '', ''
     ]);
@@ -5689,8 +5690,16 @@ async function approveWO(woId) {
 
       const packCount = parseInt(wo[7]) || 50;
       const qty = parseFloat(wo[5]) || 50;
-      const fgItemCode = wo[3] || 'FG001';
-      const expDate = formatDate(new Date(Date.now() + 180*86400000)); // +6개월
+      const fgItemCode = wo[3] || 'FG002';
+
+      // 생산일 = WO 종료시간(wo[10]) 또는 시작시간(wo[9]) 기준
+      const prodDateStr = wo[10] || wo[9] || formatDate();
+      const prodDate = new Date(prodDateStr);
+      // 소비기한 = 생산일 + 6개월
+      const expDt = new Date(prodDate);
+      expDt.setMonth(expDt.getMonth() + 6);
+      const expDate = formatDate(expDt);
+      const productionDate = formatDate(prodDate);
       const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
 
       // 1. Update WO — 출하가능 상태로
@@ -5704,7 +5713,7 @@ async function approveWO(woId) {
       // 2. Create FG LOT — status '출하가능'
       await SheetsAPI.append('완제품LOT', [
         fgLotId, fgItemCode, wo[4] || '앙호두 (호두과자 전용반죽)', qty, wo[6] || '1kg',
-        formatDate(), expDate, woId, qty, '출하가능', packCount, '냉동 -18°C'
+        productionDate, expDate, woId, qty, '출하가능', packCount, '냉동 -18°C'
       ]);
 
       // 3. Create FG individual QR records
@@ -5955,51 +5964,7 @@ async function processShipment(indivId, lotId, itemName) {
   showShipmentPopup(indivId, lotId, itemName);
 }
 
-// ─── 냉동 12h 경과 체크 & 출하가능 전환 (batchUpdate 최적화) ───
-async function checkFreezeAndUpdateStatus() {
-  try {
-    const wos = await SheetsAPI.getAll('작업지시서');
-    const freezing = wos.filter(w => w[12] === '냉동보관중' && w[11]);
-    if (freezing.length === 0) return;
-
-    // 전환 대상 WO 수집
-    const readyWOs = freezing.filter(wo => {
-      const hours = (Date.now() - new Date(wo[11]).getTime()) / (1000 * 60 * 60);
-      return hours >= 12;
-    });
-    if (readyWOs.length === 0) return;
-
-    // 완제품개별 한 번만 로드
-    const indivs = await SheetsAPI.getAll('완제품개별');
-    const batchData = [];
-
-    for (const wo of readyWOs) {
-      // WO 상태 업데이트 준비
-      const woIdx = await SheetsAPI.findRowIndex('작업지시서', 0, wo[0]);
-      if (woIdx > 0) batchData.push({ range: `작업지시서!M${woIdx}`, values: [['출하가능']] });
-
-      if (wo[14]) {
-        // LOT 상태 업데이트 준비
-        const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, wo[14]);
-        if (lotIdx > 0) batchData.push({ range: `완제품LOT!J${lotIdx}`, values: [['출하가능']] });
-
-        // 개별 항목 상태 업데이트 준비
-        const lotIndivs = indivs.filter(r => r[1] === wo[14] && r[3] === '냉동보관중');
-        for (const ind of lotIndivs) {
-          const indIdx = await SheetsAPI.findRowIndex('완제품개별', 0, ind[0]);
-          if (indIdx > 0) batchData.push({ range: `완제품개별!D${indIdx}`, values: [['출하가능']] });
-        }
-      }
-    }
-
-    // 한 번의 batchUpdate로 전체 처리
-    if (batchData.length > 0) {
-      await SheetsAPI.batchUpdate(batchData);
-      toast(`${readyWOs.length}건 출하 가능 상태로 전환됨`, 'suc');
-    }
-  } catch (e) { console.error('Freeze check error:', e); }
-}
-setInterval(checkFreezeAndUpdateStatus, 5 * 60 * 1000);
+// [제거됨] checkFreezeAndUpdateStatus — 관리자 승인(approveWO)만이 출하가능 전환 경로
 
 // ─── QR 라벨 프린트 (재고 화면에서) ───
 async function printFGLabels(itemCode, itemName) {
