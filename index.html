@@ -4943,6 +4943,25 @@ function handleCompleteStep(isFinal = false) {
   }
 
   if (isFinal) {
+    // 전체 완료 전 이전 공정 기록 사전 검증
+    try {
+      showLoading();
+      const allRecs = await SheetsAPI.getAll('공정기록').catch(() => []);
+      const woRecs = allRecs.filter(r => r[0] === State.woExec.woId);
+      const incompSteps = [];
+      for (let i = 0; i < State.woExec.steps.length - 1; i++) {
+        const sNo = State.woExec.steps[i][1];
+        const rec = woRecs.find(r => r[1] === String(sNo) && r[10] === '완료');
+        if (!rec) incompSteps.push(`${sNo}. ${State.woExec.steps[i][2] || ''}`);
+      }
+      hideLoading();
+      if (incompSteps.length > 0) {
+        toast(`⚠️ 이전 공정 ${incompSteps.length}건 미완료:\n• ${incompSteps.join('\n• ')}\n\n모든 공정을 순서대로 완료해주세요.`, 'err', 6000);
+        return;
+      }
+    } catch (e) {
+      hideLoading();
+    }
     submitForApproval();
   } else {
     completeStep();
@@ -5058,11 +5077,28 @@ async function submitForApproval() {
   confirm('냉동보관 시작', '모든 공정이 완료되었습니다. 냉동보관을 시작하시겠습니까?\n12시간 이후 관리자가 출하승인하면 완제품 재고로 등록됩니다.', async () => {
     try {
       showLoading();
-      const { woId } = State.woExec;
+      const { woId, steps } = State.woExec;
+
+      // ── 전체 공정기록 완료 검증 ──
+      const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+      const woRecords = allRecords.filter(r => r[0] === woId);
+      const missingSteps = [];
+      // 마지막 스텝(현재 스텝)은 아래에서 저장하므로 제외하고 검증
+      for (let i = 0; i < steps.length - 1; i++) {
+        const sNo = steps[i][1]; // stepNo (string)
+        const rec = woRecords.find(r => r[1] === String(sNo) && r[10] === '완료');
+        if (!rec) missingSteps.push(`${sNo}. ${steps[i][2] || ''}`);
+      }
+      if (missingSteps.length > 0) {
+        hideLoading();
+        toast(`⚠️ 미완료 공정이 있습니다:\n• ${missingSteps.join('\n• ')}\n\n모든 공정을 순서대로 완료해주세요.`, 'err', 6000);
+        return;
+      }
+
       const freezeStart = formatDateTime();
 
       // Save last step record with photos and data
-      const step = State.woExec.steps[State.woExec.currentStep];
+      const step = steps[State.woExec.currentStep];
       const stepNo = parseInt(step[1]);
       const stepType = step[3] || 'store';
       const photos = collectStepPhotos(stepNo, stepType);
@@ -5073,7 +5109,6 @@ async function submitForApproval() {
       }
       const stepData = collectStepData(stepNo, stepType, step);
 
-      const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
       const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
       if (existingIdx >= 0) {
         await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
