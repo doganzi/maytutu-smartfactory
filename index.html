@@ -3075,12 +3075,12 @@ function renderLabelCards(labels) {
     card.innerHTML = `
       <div id="qr-preview-${idx}" style="width:62px;height:62px;min-width:62px;flex-shrink:0;overflow:hidden"></div>
       <div style="flex:1;min-width:0;overflow:hidden;line-height:1.25">
-        <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lb.itemName}</div>
+        <div style="font-size:12px;font-weight:700;word-break:keep-all;overflow-wrap:break-word">${lb.itemName}</div>
         ${lb.lotId ? `<div style="font-size:10px;font-weight:600;color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.5px">LOT: ${lb.lotId}</div>` : ''}
-        <div style="font-size:9px;font-weight:600;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.3px">${lb.indivId}</div>
         ${lb.date ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.date}</div>` : ''}
         ${lb.exp ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.exp}</div>` : ''}
         ${lb.storage ? `<div style="font-size:9px;font-weight:600;color:#666">${lb.storage}</div>` : ''}
+        <div style="font-size:9px;font-weight:600;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.3px">${lb.indivId}</div>
         ${lb.company !== '' ? `<div style="font-size:9px;font-weight:700;color:#333">${lb.company || '메이투투'}</div>` : ''}
       </div>
       <div style="position:absolute;top:2px;right:5px;font-size:8px;color:#bbb">${idx}/${labels.length}</div>
@@ -3101,10 +3101,10 @@ function renderLabelCards(labels) {
     // Print area (fallback용)
     const lines = [lb.itemName];
     if (lb.lotId) lines.push(`LOT: ${lb.lotId}`);
-    lines.push(lb.indivId);
     if (lb.date) lines.push(lb.date);
     if (lb.exp) lines.push(lb.exp);
     if (lb.storage) lines.push(lb.storage);
+    lines.push(lb.indivId);
     if (lb.company !== '') lines.push(lb.company || '메이투투');
 
     const label = document.createElement('div');
@@ -3238,11 +3238,26 @@ function renderLabelToCanvas(lb) {
       const fontSub   = `bold ${mm(2.4)}px "Malgun Gothic","맑은 고딕",sans-serif`;
       const lineH = mm(4.2);
 
-      // 품목명
+      // 품목명 (길면 2줄로 분할)
       ctx.fillStyle = '#000000';
       ctx.font = fontTitle;
-      drawCondensed(ctx, condensedTruncate(ctx, lb.itemName, textMaxW, cScale), textX, y + mm(2.5), cScale);
-      y += lineH + mm(0.5);
+      const nameW = condensedWidth(ctx, lb.itemName, cScale);
+      if (nameW > textMaxW && lb.itemName.length > 6) {
+        // 괄호 앞, 공백 등 적절한 위치에서 분할
+        let splitIdx = lb.itemName.indexOf(' (');
+        if (splitIdx < 0) splitIdx = lb.itemName.indexOf('(');
+        if (splitIdx < 0) splitIdx = Math.floor(lb.itemName.length / 2);
+        const line1 = lb.itemName.substring(0, splitIdx).trim();
+        const line2 = lb.itemName.substring(splitIdx).trim();
+        drawCondensed(ctx, condensedTruncate(ctx, line1, textMaxW, cScale), textX, y + mm(2.5), cScale);
+        y += lineH - mm(0.5);
+        ctx.font = fontMain;
+        drawCondensed(ctx, condensedTruncate(ctx, line2, textMaxW, cScale), textX, y + mm(2), cScale);
+        y += lineH;
+      } else {
+        drawCondensed(ctx, condensedTruncate(ctx, lb.itemName, textMaxW, cScale), textX, y + mm(2.5), cScale);
+        y += lineH + mm(0.5);
+      }
 
       // LOT 번호
       ctx.font = fontMain;
@@ -3251,19 +3266,14 @@ function renderLabelToCanvas(lb) {
         y += lineH;
       }
 
-      // 개별 ID
-      ctx.font = fontSub;
-      drawCondensed(ctx, condensedTruncate(ctx, lb.indivId, textMaxW, cScale), textX, y + mm(2), cScale);
-      y += lineH;
-
-      // 입고일
+      // 입고일/생산일
       ctx.font = fontMain;
       if (lb.date) {
         drawCondensed(ctx, condensedTruncate(ctx, lb.date, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
 
-      // 사용기한
+      // 사용기한/소비기한
       if (lb.exp) {
         drawCondensed(ctx, condensedTruncate(ctx, lb.exp, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
@@ -3274,6 +3284,11 @@ function renderLabelToCanvas(lb) {
         drawCondensed(ctx, condensedTruncate(ctx, lb.storage, textMaxW, cScale), textX, y + mm(2), cScale);
         y += lineH;
       }
+
+      // 개별 ID (소비기한/보관 뒤에 배치)
+      ctx.font = fontSub;
+      drawCondensed(ctx, condensedTruncate(ctx, lb.indivId, textMaxW, cScale), textX, y + mm(2), cScale);
+      y += lineH;
 
       // 회사명 (company가 빈 문자열이면 숨김, undefined이면 '메이투투')
       if (lb.company !== '') {
