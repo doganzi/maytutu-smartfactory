@@ -1232,6 +1232,56 @@ Screens.dashboard = async () => {
       ` : ''}
     </div>
   `;
+
+  // ── 로그인 시 재고 알림 팝업 (하루 1회) ──
+  const allAlerts = [...lowStockItems, ...reorderItems];
+  if (allAlerts.length > 0) {
+    const todayStr = new Date().toISOString().substring(0, 10);
+    const lastPopup = localStorage.getItem('invAlertPopupDate');
+    if (lastPopup !== todayStr) {
+      const alertRows = allAlerts.map(item => {
+        const isErr = item.level === 'err';
+        let recQty = '';
+        if (isErr) {
+          recQty = '즉시 발주';
+        } else {
+          const deficit = Math.max(0, item.reorderPoint - item.remain);
+          if (item.code === 'RM003') recQty = '1,000kg (1톤)';
+          else if (item.code === 'RM001') recQty = Math.ceil(deficit / 1.5) + '판';
+          else if (item.code === 'RM006') recQty = Math.ceil(deficit / 18) + '통';
+          else recQty = Math.ceil(deficit) + 'kg';
+        }
+        return `
+          <div style="padding:10px 12px;border-radius:8px;margin-bottom:8px;background:${isErr ? '#c6282810' : '#f57f1710'};border-left:3px solid ${isErr ? 'var(--err)' : 'var(--warn)'}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-weight:700;font-size:14px;color:${isErr ? 'var(--err)' : 'var(--warn)'}">${isErr ? '🚨' : '⚠️'} ${item.name}</span>
+              <span class="badge badge-${isErr ? 'err' : 'warn'}" style="font-size:10px">${isErr ? '부족' : '발주필요'}</span>
+            </div>
+            <div style="font-size:12px;color:var(--txt-l);margin-top:4px">현재고 ${item.remainDisp} / ${isErr ? '안전재고 ' + item.minDisp : '발주점 ' + item.rpDisp}</div>
+            <div style="font-size:11px;color:var(--info);margin-top:2px">권장: ${recQty}${item.leadDays ? ' · 리드타임 ' + item.leadDays + '일' : ''}${item.orderCycle ? ' · ' + item.orderCycle : ''}</div>
+          </div>`;
+      }).join('');
+
+      const popupOverlay = document.createElement('div');
+      popupOverlay.id = 'inv-alert-popup';
+      popupOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100;';
+      popupOverlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;width:90%;max-width:380px;max-height:80vh;overflow-y:auto;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+          <div style="text-align:center;margin-bottom:14px">
+            <div style="font-size:28px;margin-bottom:4px">📦</div>
+            <div style="font-size:17px;font-weight:800;color:var(--txt)">재고·발주 알림</div>
+            <div style="font-size:12px;color:var(--txt-l);margin-top:2px">${todayStr} 기준 · ${allAlerts.filter(a=>a.level==='err').length}건 부족 · ${allAlerts.filter(a=>a.level==='warn').length}건 발주필요</div>
+          </div>
+          ${alertRows}
+          <button id="inv-alert-ok" style="width:100%;padding:12px;border:none;border-radius:8px;background:var(--pri);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px">확인</button>
+        </div>`;
+      document.body.appendChild(popupOverlay);
+      document.getElementById('inv-alert-ok').onclick = () => {
+        localStorage.setItem('invAlertPopupDate', todayStr);
+        popupOverlay.remove();
+      };
+    }
+  }
 };
 
 // ─── PRODUCTION ───
