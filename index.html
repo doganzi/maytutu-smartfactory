@@ -1011,7 +1011,7 @@ Screens.dashboard = async () => {
     ]);
 
     State.workOrders = woData;
-    State.rawMaterialItems = rmItems;
+    State.rawMaterialItems = rmItems.filter(i => i[12] !== '비활성');
     State.rawMaterialLots = rmLots;
     State.equipment = eqData;
 
@@ -1584,7 +1584,7 @@ Screens.inventory = async () => {
       SheetsAPI.getAll('소모품LOT').catch(_warnLoad('소모품LOT')),
       SheetsAPI.getAll('입고기록').catch(_warnLoad('입고기록')),
     ]);
-    State.rawMaterialItems = rmItems;
+    State.rawMaterialItems = rmItems.filter(i => i[12] !== '비활성');
     State.rawMaterialLots = rmLots;
     State.finishedGoodsLots = fgLots;
     State.consumableLots = spLots;
@@ -2084,7 +2084,7 @@ Screens['receive-form'] = async () => {
       <div class="input-group">
         <label>품목</label>
         <select id="rcv-item" onchange="updateReceiveUnit()">
-          ${rmItems.filter(i => i[0] !== 'RM002').map(i => `<option value="${i[0]}" data-unit="${i[4]||'kg'}" data-sku="${i[3]||'kg'}">${i[0]} ${i[1]}</option>`).join('')}
+          ${rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성').map(i => `<option value="${i[0]}" data-unit="${i[4]||'kg'}" data-sku="${i[3]||'kg'}">${i[0]} ${i[1]}</option>`).join('')}
         </select>
       </div>
       <div class="input-group">
@@ -3359,12 +3359,13 @@ function printTestLabel() {
 Screens['sop-list'] = async () => {
   renderHeader('SOP 관리', '표준작업절차서', { back: 'more' });
   try { State.sops = await SheetsAPI.getAll('SOP').catch(() => []); } catch(e) {}
+  const activeSopList = State.sops.filter(s => s[4] === '활성');
 
   $id('content').innerHTML = `
     <div style="padding:16px;position:relative">
-      ${State.sops.length === 0 ?
+      ${activeSopList.length === 0 ?
         `<div class="empty-state"><div class="es-icon">📋</div><div class="es-title">SOP가 없습니다</div></div>` :
-        State.sops.map(s => `
+        activeSopList.map(s => `
           <div class="card clickable" onclick="Router.go('sop-detail', {sopId:'${s[0]}'})">
             <div class="row between mb-4">
               <span class="fs-14 fw-6">${s[1] || ''}</span>
@@ -3461,6 +3462,7 @@ Screens['items-rm'] = async () => {
     ]);
   } catch(e) {}
   hideLoading();
+  items = items.filter(i => i[12] !== '비활성');
 
   $id('content').innerHTML = `
     <div style="padding:16px">
