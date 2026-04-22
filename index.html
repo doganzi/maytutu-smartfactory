@@ -1266,10 +1266,10 @@ Screens.dashboard = async () => {
     <div style="padding:16px">
       <!-- Summary Cards -->
       <div class="grid-2 mb-12">
-        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${inProgress > 0 ? 'var(--info)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(${isAdmin ? 3 : 2})');if(t)t.click();},200)">
-          <div style="font-size:20px">${inProgress > 0 ? '🏭' : '✅'}</div>
-          <div class="fs-20 fw-8 ${inProgress > 0 ? 'c-info' : 'c-suc'}" style="margin:4px 0">${inProgress}건</div>
-          <div class="fs-11 c-txt-l">생산 진행</div>
+        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${inProgress === 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(${isAdmin ? 3 : 2})');if(t)t.click();},200)">
+          <div style="font-size:20px">${inProgress === 0 ? '⚠️' : '🏭'}</div>
+          <div class="fs-20 fw-8 ${inProgress === 0 ? 'c-warn' : 'c-suc'}" style="margin:4px 0">${inProgress}건</div>
+          <div class="fs-11 c-txt-l">${inProgress === 0 ? '생산 없음' : '생산 진행'}</div>
         </div>
         <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${pendingApproval > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(2)');if(t)t.click();},200)">
           <div style="font-size:20px">${pendingApproval > 0 ? '📋' : '✅'}</div>
