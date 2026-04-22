@@ -1257,11 +1257,6 @@ Screens.dashboard = async () => {
       }
     }
 
-    // 발주 필요 토스트
-    if (orderAlertItems.length > 0) {
-      toast(`📦 발주 필요 ${orderAlertItems.length}건: ${orderAlertItems.map(r=>r.name).join(', ')}`, 'warn');
-    }
-
     localStorage.setItem('lastNotifCheck', now);
   } catch (e) {
     console.warn('Dashboard data load error:', e);
