@@ -933,6 +933,124 @@ window.addEventListener('popstate', (e) => {
 });
 
 /* ═══════════════════════════════════════════════
+   LIVE SYNC — PC↔모바일 실시간 데이터 동기화
+   ═══════════════════════════════════════════════ */
+const LiveSync = {
+  _pollTimer: null,
+  _pollInterval: 30000, // 30초 폴링 주기
+  _lastSyncTs: 0,
+  _minSyncGap: 5000,   // 최소 5초 간격 (중복 방지)
+  _isSyncing: false,
+
+  /** 앱 시작 시 호출 — visibilitychange + 폴링 등록 */
+  init() {
+    // 탭 활성화 시 자동 동기화
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[LiveSync] 탭 활성화 → 자동 동기화');
+        this.sync('visibility');
+      } else {
+        // 비활성 시 폴링 중지 (API 호출 절약)
+        this.stopPoll();
+      }
+    });
+
+    // focus 이벤트도 추가 (일부 브라우저에서 visibilitychange 미발생)
+    window.addEventListener('focus', () => {
+      const gap = Date.now() - this._lastSyncTs;
+      if (gap > this._minSyncGap) {
+        console.log('[LiveSync] 포커스 복귀 → 자동 동기화');
+        this.sync('focus');
+      }
+    });
+
+    // 초기 폴링 시작
+    this.startPoll();
+    console.log('[LiveSync] 초기화 완료, 폴링 주기:', this._pollInterval + 'ms');
+  },
+
+  /** 폴링 시작 */
+  startPoll() {
+    this.stopPoll(); // 중복 방지
+    this._pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible' && !this._isSyncing) {
+        this.sync('poll');
+      }
+    }, this._pollInterval);
+  },
+
+  /** 폴링 중지 */
+  stopPoll() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+  },
+
+  /** 동기화 실행 — 캐시 무효화 + 현재 화면 리렌더 */
+  async sync(trigger = 'manual') {
+    const now = Date.now();
+    if (now - this._lastSyncTs < this._minSyncGap) {
+      console.log(`[LiveSync] 최소 간격 미충족, skip (${now - this._lastSyncTs}ms)`);
+      return;
+    }
+    if (this._isSyncing) {
+      console.log('[LiveSync] 이미 동기화 중, skip');
+      return;
+    }
+
+    this._isSyncing = true;
+    this._lastSyncTs = now;
+
+    try {
+      // 모든 캐시 무효화 → 다음 getAll 호출 시 API에서 최신 데이터 로드
+      SheetsAPI.invalidateAllCache();
+
+      const screen = State.currentScreen;
+      console.log(`[LiveSync] 동기화 시작 (trigger=${trigger}, screen=${screen})`);
+
+      // 현재 화면 리렌더 — 화면별 최적화
+      if (screen === 'wo-execute' && State.woExec?.woId) {
+        // WO 실행 화면: 전체 리로드 (공정기록 + 작업지시서 최신화)
+        await Screens['wo-execute']({ woId: State.woExec.woId });
+      } else if (screen === 'wo-detail' && State._woDetailId) {
+        await Screens['wo-detail']({ woId: State._woDetailId });
+      } else if (Screens[screen]) {
+        await Screens[screen](State._lastParams || {});
+      }
+
+      // 동기화 완료 시각 표시 (토스트는 poll 때만 생략)
+      if (trigger !== 'poll') {
+        const timeStr = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        toast(`데이터 동기화 완료 (${timeStr})`, 'suc', 1500);
+      }
+
+      console.log(`[LiveSync] 동기화 완료 (trigger=${trigger})`);
+    } catch (e) {
+      console.error('[LiveSync] 동기화 실패:', e.message);
+      // 동기화 실패해도 시스템 정상 동작 — 다음 주기에 재시도
+    } finally {
+      this._isSyncing = false;
+    }
+  },
+
+  /** 수동 새로고침 버튼 핸들러 */
+  manualRefresh() {
+    this.sync('manual');
+  },
+};
+
+// Router.go에서 마지막 params 저장 (동기화 시 리렌더용)
+const _origRouterGo = Router.go.bind(Router);
+Router.go = function(screen, params = {}) {
+  State._lastParams = params;
+  if (screen === 'wo-detail' && params.woId) State._woDetailId = params.woId;
+  _origRouterGo(screen, params);
+  // 화면 전환 시 폴링 재시작 (interval 리셋)
+  LiveSync.startPoll();
+};
+
+/* ═══════════════════════════════════════════════
    BOTTOM NAV RENDERER
    ═══════════════════════════════════════════════ */
 function renderBottomNav() {
@@ -963,13 +1081,14 @@ function renderBottomNav() {
    ═══════════════════════════════════════════════ */
 function renderHeader(title, sub, opts = {}) {
   const backBtn = opts.back ? `<span class="h-back" onclick="Router.go('${opts.back}')">←</span>` : '';
-  const right = opts.right || '';
+  const refreshBtn = opts.noRefresh ? '' : `<div style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer" onclick="LiveSync.manualRefresh()" title="새로고침">🔄</div>`;
+  const right = opts.right ? `<div style="display:flex;align-items:center;gap:6px">${refreshBtn}${opts.right}</div>` : refreshBtn;
   $id('header').innerHTML = `
     <div class="h-row">
-      <div style="display:flex;align-items:center">
+      <div style="display:flex;align-items:center;min-width:0;flex:1">
         ${backBtn}
-        <div>
-          <div class="h-title">${title}</div>
+        <div style="min-width:0;flex:1">
+          <div class="h-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</div>
           ${sub ? `<div class="h-sub">${sub}</div>` : ''}
         </div>
       </div>
@@ -1265,7 +1384,9 @@ Screens.production = async () => {
   renderHeader('생산관리');
 
   try {
-    State.workOrders = await SheetsAPI.getAll('작업지시서').catch(() => []);
+    // 캐시 무효화 — 다른 기기에서 업데이트된 WO 목록 반영
+    SheetsAPI.invalidateCache('작업지시서');
+    State.workOrders = await SheetsAPI.getAll('작업지시서', false).catch(() => []);
     State.productionRequests = await SheetsAPI.getAll('생산요청').catch(() => []);
   } catch (e) { console.warn(e); }
 
@@ -3972,8 +4093,11 @@ Screens['wo-execute'] = async (params = {}) => {
   showLoading();
 
   try {
-    // Load WO data
-    const wos = await SheetsAPI.getAll('작업지시서');
+    // Load WO data — 항상 최신 데이터 (캐시 bypass)
+    // PC에서 열 때 휴대폰에서 업데이트된 데이터를 즉시 반영하기 위함
+    SheetsAPI.invalidateCache('작업지시서');
+    SheetsAPI.invalidateCache('공정기록');
+    const wos = await SheetsAPI.getAll('작업지시서', false);
     const wo = wos.find(w => w[0] === woId) || wos.find(w => w[12] === '진행중');
     if (!wo) { toast('작업지시서를 찾을 수 없습니다', 'err'); hideLoading(); Router.go('production'); return; }
 
@@ -5743,10 +5867,14 @@ function validateStepInputs(stepNo) {
    ═══════════════════════════════════════════════ */
 Screens['wo-detail'] = async (params = {}) => {
   const { woId } = params;
+  if (woId) State._woDetailId = woId;
   showLoading();
 
   try {
-    const wos = await SheetsAPI.getAll('작업지시서');
+    // 항상 최신 데이터 (PC에서 확인 시 휴대폰 업데이트 반영)
+    SheetsAPI.invalidateCache('작업지시서');
+    SheetsAPI.invalidateCache('공정기록');
+    const wos = await SheetsAPI.getAll('작업지시서', false);
     const wo = wos.find(w => w[0] === woId && w[12] !== '삭제');
     if (!wo) { toast('작업지시서를 찾을 수 없습니다', 'err'); hideLoading(); Router.go('production'); return; }
 
@@ -6311,6 +6439,9 @@ async function initApp() {
     }
 
     Router.go('dashboard');
+
+    // LiveSync 초기화 — PC↔모바일 실시간 동기화
+    LiveSync.init();
 
     // 냉동 상태 체크 (12h 경과 시 출하가능으로 전환)
     checkFreezeAndUpdateStatus();
