@@ -399,11 +399,21 @@ async function generateSeqId(prefix, tab, idCol = 0) {
 
 // 새 LOT ID 포맷: [대분류]-[품목번호]-[입고일YYMMDD]-[사용기한YYMMDD]-[입고순번NNN]
 // 예: RM-001-260406-260706-001
-async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0) {
-  const todayYM = toYYMMDD(formatDate());
+/**
+ * generateLotId: LOT ID 채번
+ * @param {string} prefix - 'RM', 'FG', 'SP'
+ * @param {string} itemCode - 품목코드 (FG002 등)
+ * @param {string} expDate - 소비기한 (YYYY-MM-DD)
+ * @param {string} tab - 시트 탭명
+ * @param {number} idCol - LOT ID 컬럼 인덱스
+ * @param {string} mfgDate - 제조일/입고일 (YYYY-MM-DD). 미지정 시 오늘 날짜
+ */
+async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0, mfgDate = null) {
+  // 제조일 기준 채번 — 승인일이 아닌 실제 생산일/입고일 사용
+  const mfgYM = toYYMMDD(mfgDate || formatDate());
   const expYM = toYYMMDD(expDate);
   const itemNum = extractItemNum(itemCode);
-  const searchPrefix = `${prefix}-${itemNum}-${todayYM}-`;
+  const searchPrefix = `${prefix}-${itemNum}-${mfgYM}-`;
 
   try {
     const rows = await SheetsAPI.getAll(tab);
@@ -415,9 +425,13 @@ async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0) {
         if (seq > max) max = seq;
       }
     });
-    return `${prefix}-${itemNum}-${todayYM}-${expYM}-${String(max + 1).padStart(3, '0')}`;
+    const lotId = `${prefix}-${itemNum}-${mfgYM}-${expYM}-${String(max + 1).padStart(3, '0')}`;
+    console.log(`[LOT채번] ${lotId} (mfgDate=${mfgDate||'today'}, prefix=${searchPrefix}, maxSeq=${max})`);
+    return lotId;
   } catch (e) {
-    return `${prefix}-${itemNum}-${todayYM}-${expYM}-001`;
+    const lotId = `${prefix}-${itemNum}-${mfgYM}-${expYM}-001`;
+    console.warn(`[LOT채번] fallback: ${lotId}`, e.message);
+    return lotId;
   }
 }
 
@@ -5079,47 +5093,71 @@ function previewStepPhoto(input, stepNo) {
   input.closest('.photo-upload')?.classList.add('has-photo');
 }
 
-function previewQRLabels(stepNo) {
+async function previewQRLabels(stepNo) {
   const qty = parseInt($id(`qr-label-qty-${stepNo}`)?.value) || 0;
   if (qty <= 0) { toast('라벨 수량을 입력하세요', 'err'); return; }
   if (qty > 200) { toast('라벨 수량이 너무 많습니다 (최대 200매)', 'err'); return; }
 
-  const { woId } = State.woExec;
-  const wo = State.workOrders.find(w => w[0] === woId && w[12] !== '삭제');
-  const productName = wo ? wo[4] : State.woExec.productName || '';
-  const unitWeight = wo ? wo[6] : '';
-  const today = formatDate();
+  const { woId, wo } = State.woExec;
+  const productName = wo ? wo[4] : '';
+  const fgItemCode = wo ? (wo[3] || 'FG002') : 'FG002';
 
-  // 소비기한 자동계산 (생산날짜 + 6개월)
-  const prodDate = new Date();
+  // 생산일 = WO 시작시간 기준 (실제 제조일)
+  const prodDateStr = wo ? (wo[9] || formatDate()) : formatDate();
+  const prodDate = new Date(prodDateStr);
+  const productionDate = formatDate(prodDate);
+
+  // 소비기한 = 생산일 + 6개월
   const expDate = new Date(prodDate);
   expDate.setMonth(expDate.getMonth() + 6);
-  const expStr = expDate.toISOString().split('T')[0];
+  const expStr = formatDate(expDate);
 
-  // 기존 재고 라벨 시스템과 동일한 형식으로 라벨 데이터 생성
-  const labels = [];
-  for (let i = 1; i <= qty; i++) {
-    const indivId = `${woId}-${String(i).padStart(3, '0')}`;
-    labels.push({
-      indivId: indivId,
-      itemName: productName,
-      lotId: '',
-      date: `생산날짜: ${today}`,
-      exp: `소비기한: ${expStr}까지`,
-      storage: '보관: 냉동 -18°C 이하',
-      company: '',
-    });
+  showLoading();
+
+  try {
+    // FG LOT ID 사전 채번 — approveWO에서 동일 ID 재사용됨
+    let fgLotId = wo ? wo[14] : '';
+    if (!fgLotId || !fgLotId.startsWith('FG-')) {
+      fgLotId = await generateLotId('FG', fgItemCode, expStr, '완제품LOT', 0, productionDate);
+      // WO에 사전 저장 — 승인 시 이 ID를 그대로 사용
+      await SheetsAPI.updateCell('작업지시서', 0, woId, 14, fgLotId);
+      if (wo) wo[14] = fgLotId;
+      console.log(`[QR라벨] FG LOT ID 사전 채번 및 저장: ${fgLotId}`);
+    } else {
+      console.log(`[QR라벨] 기존 FG LOT ID 재사용: ${fgLotId}`);
+    }
+
+    // FG LOT ID 기반 개별 QR 라벨 생성 — approveWO와 동일 형식
+    const labels = [];
+    for (let i = 1; i <= qty; i++) {
+      const indivId = `${fgLotId}-${String(i).padStart(2, '0')}`;
+      labels.push({
+        indivId: indivId,
+        itemName: productName,
+        lotId: fgLotId,
+        date: `제조일자: ${productionDate}`,
+        exp: `소비기한: ${expStr}`,
+        storage: '보관: 냉동 -18°C 이하',
+        company: '',
+      });
+    }
+
+    hideLoading();
+
+    // renderLabelCards 사용 (기존 라벨 시스템과 동일한 QR 미리보기)
+    applyPrintCSS();
+    renderLabelCards(labels);
+
+    // 인쇄 버튼 표시
+    const btnPrint = $id(`btn-wo-print-${stepNo}`);
+    if (btnPrint) btnPrint.style.display = '';
+
+    toast(`QR 라벨 ${qty}매 미리보기 생성 완료 (${fgLotId})`, 'suc');
+  } catch (e) {
+    hideLoading();
+    console.error('[QR라벨] 미리보기 생성 실패:', e);
+    toast('라벨 생성 실패: ' + e.message, 'err');
   }
-
-  // renderLabelCards 사용 (기존 라벨 시스템과 동일한 QR 미리보기)
-  applyPrintCSS();
-  renderLabelCards(labels);
-
-  // 인쇄 버튼 표시
-  const btnPrint = $id(`btn-wo-print-${stepNo}`);
-  if (btnPrint) btnPrint.style.display = '';
-
-  toast(`QR 라벨 ${qty}매 미리보기 생성 완료`, 'suc');
 }
 
 function goToStep(idx) {
@@ -6104,15 +6142,22 @@ async function approveWO(woId) {
       const qty = parseFloat(wo[5]) || 50;
       const fgItemCode = wo[3] || 'FG002';
 
-      // 생산일 = WO 종료시간(wo[10]) 또는 시작시간(wo[9]) 기준
-      const prodDateStr = wo[10] || wo[9] || formatDate();
+      // 생산일 = WO 시작시간(wo[9]) 기준 (실제 제조일)
+      const prodDateStr = wo[9] || wo[10] || formatDate();
       const prodDate = new Date(prodDateStr);
       // 소비기한 = 생산일 + 6개월
       const expDt = new Date(prodDate);
       expDt.setMonth(expDt.getMonth() + 6);
       const expDate = formatDate(expDt);
       const productionDate = formatDate(prodDate);
-      const fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT');
+
+      // FG LOT ID: QR라벨 단계에서 사전 생성된 ID가 있으면 재사용, 없으면 새로 채번
+      let fgLotId = wo[14] || '';
+      if (!fgLotId || !fgLotId.startsWith('FG-')) {
+        fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT', 0, productionDate);
+      } else {
+        console.log(`[승인] 사전 생성된 FG LOT ID 재사용: ${fgLotId}`);
+      }
 
       // 1. Update WO — 출하가능 상태로
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
