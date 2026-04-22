@@ -6491,6 +6491,41 @@ async function initApp() {
     // 냉동 상태 체크 (12h 경과 시 출하가능으로 전환)
     checkFreezeAndUpdateStatus();
 
+    // ── 마이그레이션: 진행중 WO에 FG LOT ID 사전 채번 ──
+    if (!localStorage.getItem('mt_migr_fg_lot_preassign')) {
+      (async () => {
+        try {
+          const targetWOs = ['WO-20260421-001', 'WO-20260422-001', 'WO-20260422-002'];
+          const allWO = await SheetsAPI.getAll('작업지시서');
+          for (const woId of targetWOs) {
+            const wo = allWO.find(r => r[0] === woId);
+            if (!wo) { console.log(`[마이그레이션] ${woId} 미발견, skip`); continue; }
+            if (wo[14] && wo[14].startsWith('FG-')) {
+              console.log(`[마이그레이션] ${woId} 이미 FG LOT ID 존재: ${wo[14]}, skip`);
+              continue;
+            }
+            // 생산일 = WO 시작시간(col9) 기준
+            const prodDateStr = wo[9] || formatDate();
+            const prodDate = new Date(prodDateStr);
+            const productionDate = formatDate(prodDate);
+            // 소비기한 = 생산일 + 6개월
+            const expDate = new Date(prodDate);
+            expDate.setMonth(expDate.getMonth() + 6);
+            const expStr = formatDate(expDate);
+            const fgItemCode = wo[3] || 'FG002';
+            const fgLotId = await generateLotId('FG', fgItemCode, expStr, '완제품LOT', 0, productionDate);
+            await SheetsAPI.updateCell('작업지시서', 0, woId, 14, fgLotId);
+            console.log(`[마이그레이션] ${woId} → FG LOT ID 사전 채번 완료: ${fgLotId} (생산일: ${productionDate})`);
+          }
+          localStorage.setItem('mt_migr_fg_lot_preassign', '1');
+          console.log('[마이그레이션] FG LOT ID 사전 채번 마이그레이션 완료');
+        } catch (e) {
+          console.error('[마이그레이션] FG LOT ID 사전 채번 실패:', e.message);
+          // 실패 시 플래그 미설정 → 다음 로그인 시 재시도
+        }
+      })();
+    }
+
     // ── 완료된 마이그레이션 플래그 설정 (더 이상 실행 불필요) ──
     ['mt_migr_step2_check','mt_migr_qr_url_cleanup','mt_migr_gen_indiv_v2','mt_migr_lot_id_v1']
       .forEach(k => { if (!localStorage.getItem(k)) localStorage.setItem(k, '1'); });
