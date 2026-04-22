@@ -5450,30 +5450,43 @@ async function completeStep() {
       const qtyInput = $id(`input-qty-${stepNo}`);
       const consumedQty = parseFloat(qtyInput?.value) || 0;
 
-      for (const item of scannedItems) {
-        // 개별 상태 변경: '미사용' → '소진'
-        await SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '소진' });
+      // ① 모든 개별 항목 소진 처리 (병렬)
+      await Promise.all(scannedItems.map(item =>
+        SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '소진' })
+      ));
 
-        // LOT 잔량 차감 + 개별 수 기준 소진 판정 (CON-009 통일)
+      // ② LOT별 그룹핑 → 잔량 차감 + 소진 판정 (LOT당 1회만 조회/업데이트)
+      const lotGroups = {};
+      scannedItems.forEach(item => {
         if (item.lotId) {
-          SheetsAPI.invalidateCache('원재료LOT');
-          SheetsAPI.invalidateCache('원재료개별');
-          const lots = await SheetsAPI.getAll('원재료LOT', false);
-          const lot = lots.find(l => l[0] === item.lotId);
-          if (lot) {
-            const prevRemain = parseFloat(lot[8]) || 0;
-            const qtyPerIndiv = scannedItems.length > 0 ? consumedQty / scannedItems.length : consumedQty;
-            const newRemain = Math.max(0, prevRemain - qtyPerIndiv);
-            // 개별 수 기준으로 소진 판정 (잔량이 아닌 활성 개별 수로 판단)
-            const allIndivs = await SheetsAPI.getAll('원재료개별');
-            const activeIndivs = allIndivs.filter(iv => iv[1] === item.lotId && !['폐기','소진'].includes(iv[3]));
-            const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
-            await SheetsAPI.updateRow('원재료LOT', 0, item.lotId, {
-              8: String(newRemain.toFixed(2)),
-              9: newStatus,
-            });
-          }
+          if (!lotGroups[item.lotId]) lotGroups[item.lotId] = 0;
+          lotGroups[item.lotId]++;
         }
+      });
+
+      SheetsAPI.invalidateCache('원재료LOT');
+      SheetsAPI.invalidateCache('원재료개별');
+      const lots = await SheetsAPI.getAll('원재료LOT', false);
+      const allIndivs = await SheetsAPI.getAll('원재료개별');
+
+      for (const [lotId, count] of Object.entries(lotGroups)) {
+        const lot = lots.find(l => l[0] === lotId);
+        if (!lot) continue;
+        // 개별 단위(perUnit) 기반 차감 — 투입량 편차에 의한 오차 방지
+        const totalIndivCount = parseInt(lot[10]) || 1;
+        const totalQty = parseFloat(lot[4]) || 0;
+        const perUnit = totalQty / totalIndivCount;
+        const prevRemain = parseFloat(lot[8]) || 0;
+        const deductQty = perUnit * count;
+        const newRemain = Math.max(0, prevRemain - deductQty);
+        // 활성 개별 수 기준 소진 판정
+        const activeIndivs = allIndivs.filter(iv => iv[1] === lotId && !['폐기','소진'].includes(iv[3]));
+        const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
+        await SheetsAPI.updateRow('원재료LOT', 0, lotId, {
+          8: String(newRemain.toFixed(2)),
+          9: newStatus,
+        });
+        console.log(`[재고차감] ${lotId}: -${count}개(${deductQty.toFixed(2)}kg), 잔량 ${prevRemain}→${newRemain.toFixed(2)}, 활성 ${activeIndivs.length}개, 상태 ${newStatus}`);
       }
       usedLotIds = scannedItems.map(s => s.lotId).filter(Boolean).join(',');
     }
