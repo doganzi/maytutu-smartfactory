@@ -695,15 +695,23 @@ const SheetsAPI = {
     return rows;
   },
 
-  // Append rows
+  // Append rows — 반드시 A열부터 시작하도록 범위 지정 (데이터 밀림 방지)
   async append(tab, rows) {
     const body = { values: Array.isArray(rows[0]) ? rows : [rows] };
+    const colCount = Array.isArray(rows[0]) ? rows[0].length : rows.length;
+    const endCol = String.fromCharCode(64 + Math.min(colCount, 26)); // A=65, 최대 Z
+    const range = `${tab}!A:${endCol}`;
     const res = await this._fetch(
-      `${this.baseUrl()}/values/${encodeURIComponent(tab)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      `${this.baseUrl()}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
       { method: 'POST', body: JSON.stringify(body) }
     );
-    if (!res.ok) throw new Error(`Sheets APPEND ${tab}: ${res.status}`);
-    this.invalidateCache(tab); // 쓰기 후 캐시 무효화
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`[SheetsAPI] APPEND 실패: ${tab}, status=${res.status}`, errText);
+      throw new Error(`Sheets APPEND ${tab}: ${res.status}`);
+    }
+    this.invalidateCache(tab);
+    console.log(`[SheetsAPI] APPEND 성공: ${range}, ${colCount}cols`);
     return res.json();
   },
 
