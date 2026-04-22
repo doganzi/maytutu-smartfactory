@@ -310,6 +310,15 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 const $id = (id) => document.getElementById(id);
 
+// ── 중복 제출 방지 유틸리티 ──
+const _actionLocks = {};
+function acquireLock(name) {
+  if (_actionLocks[name]) { toast('처리 중입니다. 잠시만 기다려주세요.', 'warn'); return false; }
+  _actionLocks[name] = true;
+  return true;
+}
+function releaseLock(name) { _actionLocks[name] = false; }
+
 function showLoading() { $id('loading').classList.remove('hidden'); }
 function hideLoading() { $id('loading').classList.add('hidden'); }
 
@@ -1681,13 +1690,14 @@ Screens['req-form'] = async () => {
 };
 
 async function submitProductionRequest() {
+  if (!acquireLock('submitProdReq')) return;
   const product = $id('req-product')?.value;
   const qty = $id('req-qty')?.value;
   const unit = $id('req-unit')?.value;
   const due = $id('req-due')?.value;
   const notes = $id('req-notes')?.value;
 
-  if (!qty || parseFloat(qty) <= 0) { toast('수량을 입력하세요', 'err'); return; }
+  if (!qty || parseFloat(qty) <= 0) { toast('수량을 입력하세요', 'err'); releaseLock('submitProdReq'); return; }
 
   try {
     showLoading();
@@ -1705,6 +1715,7 @@ async function submitProductionRequest() {
     toast('등록 실패: ' + e.message, 'err');
   } finally {
     hideLoading();
+    releaseLock('submitProdReq');
   }
 }
 
@@ -2378,6 +2389,10 @@ function previewReceivePhoto(input) {
 }
 
 async function submitReceiving() {
+  if (!acquireLock('submitReceiving')) return;
+  const submitBtn = document.querySelector('button[onclick="submitReceiving()"]');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '등록 처리 중...'; }
+
   const type = $id('rcv-type')?.value;
   const itemCode = $id('rcv-item')?.value;
   const itemName = $id('rcv-item')?.selectedOptions[0]?.textContent?.split(' ').slice(1).join(' ') || '';
@@ -2402,7 +2417,12 @@ async function submitReceiving() {
   if (!inputQty || inputQty <= 0) missing.push('수량');
   if (!exp) missing.push('소비기한');
   if (!photoInput?.files?.length) missing.push('입고 사진');
-  if (missing.length > 0) { toast('미입력 항목: ' + missing.join(', '), 'err'); return; }
+  if (missing.length > 0) {
+    toast('미입력 항목: ' + missing.join(', '), 'err');
+    releaseLock('submitReceiving');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '입고 등록 + QR 생성'; }
+    return;
+  }
 
   try {
     showLoading();
@@ -2463,6 +2483,8 @@ async function submitReceiving() {
     toast('입고 등록 실패: ' + e.message, 'err');
   } finally {
     hideLoading();
+    releaseLock('submitReceiving');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '입고 등록 + QR 생성'; }
   }
 }
 
@@ -5412,6 +5434,7 @@ async function handleCompleteStep(isFinal = false) {
 }
 
 async function completeStep() {
+  if (!acquireLock('completeStep')) return;
   const { woId, steps, currentStep } = State.woExec;
   const step = steps[currentStep];
   const stepNo = parseInt(step[1]);
@@ -5524,11 +5547,14 @@ async function completeStep() {
   } catch (e) {
     hideLoading();
     toast('공정 기록 실패: ' + e.message, 'err');
+  } finally {
+    releaseLock('completeStep');
   }
 }
 
 async function submitForApproval() {
   confirm('냉동보관 시작', '모든 공정이 완료되었습니다. 냉동보관을 시작하시겠습니까?\n12시간 이후 관리자가 출하승인하면 완제품 재고로 등록됩니다.', async () => {
+    if (!acquireLock('submitForApproval')) return;
     try {
       showLoading();
       const { woId, steps } = State.woExec;
@@ -5595,6 +5621,7 @@ async function submitForApproval() {
       toast('냉동보관 시작 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
+      releaseLock('submitForApproval');
     }
   });
 }
@@ -6129,6 +6156,7 @@ Screens['approval-detail'] = async (params = {}) => {
 
 async function approveWO(woId) {
   confirm('출하승인', '냉동 12시간이 경과되었습니다.\n출하승인하시겠습니까? 완제품 재고로 등록됩니다.', async () => {
+    if (!acquireLock('approveWO')) return;
     try {
       showLoading();
       const wos = await SheetsAPI.getAll('작업지시서');
@@ -6199,6 +6227,7 @@ async function approveWO(woId) {
       toast('승인 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
+      releaseLock('approveWO');
     }
   });
 }
@@ -6360,6 +6389,7 @@ async function showShipmentPopup(indivId, lotId, itemName) {
 }
 
 async function executeShipment(indivId, lotId, itemName, customerName, customerCode) {
+  if (!acquireLock('executeShipment')) return;
   try {
     showLoading();
     const shipTime = formatDateTime();
@@ -6419,6 +6449,7 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     toast('출하 실패: ' + e.message, 'err');
   } finally {
     hideLoading();
+    releaseLock('executeShipment');
   }
 }
 
