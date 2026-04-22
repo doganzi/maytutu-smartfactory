@@ -6214,10 +6214,10 @@ async function approveWO(woId) {
         16: formatDateTime(),
       });
 
-      // 2. Create FG LOT — status '출하가능'
+      // 2. Create FG LOT — status '출하가능', remainQty = 실제 개별 수(packCount)
       await SheetsAPI.append('완제품LOT', [
         fgLotId, fgItemCode, wo[4] || '앙호두 (호두과자 전용반죽)', qty, wo[6] || '1kg',
-        productionDate, expDate, woId, qty, '출하가능', packCount, '냉동 -18°C'
+        productionDate, expDate, woId, String(packCount), '출하가능', packCount, '냉동 -18°C'
       ]);
 
       // 3. Create FG individual QR records
@@ -6575,6 +6575,55 @@ async function initApp() {
         }
       })();
     }
+
+    // ── LOT 잔량-개별 정합성 자동 체크 (매 로그인 시) ──
+    (async () => {
+      try {
+        const rmLots = await SheetsAPI.getAll('원재료LOT');
+        const rmIndivs = await SheetsAPI.getAll('원재료개별');
+        const fgLots = await SheetsAPI.getAll('완제품LOT');
+        const fgIndivs = await SheetsAPI.getAll('완제품개별');
+        let fixCount = 0;
+
+        // 원재료 LOT: 잔량 = 활성개별수 × perUnit, 상태 = 활성개별 기반
+        for (const lot of rmLots) {
+          const lotId = lot[0], totalQty = parseFloat(lot[4]) || 0;
+          const totalIndivCount = parseInt(lot[10]) || 1;
+          const perUnit = totalQty / totalIndivCount;
+          const remain = parseFloat(lot[8]) || 0;
+          const status = lot[9] || '';
+          const myIndivs = rmIndivs.filter(iv => iv[1] === lotId);
+          const active = myIndivs.filter(iv => !['폐기','소진'].includes(iv[3]));
+          const consumed = myIndivs.filter(iv => iv[3] === '소진');
+          const correctRemain = Math.round(active.length * perUnit * 100) / 100;
+          const correctStatus = active.length === 0 ? '소진' : (consumed.length > 0 ? '사용중' : '미사용');
+          if (Math.abs(remain - correctRemain) > 0.01 || status !== correctStatus) {
+            await SheetsAPI.updateRow('원재료LOT', 0, lotId, { 8: String(correctRemain), 9: correctStatus });
+            console.log(`[정합성] ${lotId}: 잔량 ${remain}→${correctRemain}, 상태 ${status}→${correctStatus}`);
+            fixCount++;
+          }
+        }
+
+        // 완제품 LOT: remainQty = 활성개별수(냉동보관중+출하가능)
+        for (const lot of fgLots) {
+          const lotId = lot[0];
+          const dbRemain = parseInt(lot[8]) || 0;
+          const active = fgIndivs.filter(iv => iv[1] === lotId && ['냉동보관중','출하가능'].includes(iv[3]));
+          if (dbRemain !== active.length) {
+            await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 8: String(active.length) });
+            console.log(`[정합성] ${lotId}: remainQty ${dbRemain}→${active.length}`);
+            fixCount++;
+          }
+        }
+
+        if (fixCount > 0) {
+          SheetsAPI.invalidateAllCache();
+          console.log(`[정합성] ${fixCount}건 자동 보정 완료`);
+        }
+      } catch (e) {
+        console.warn('[정합성] 체크 실패:', e.message);
+      }
+    })();
 
     // ── 완료된 마이그레이션 플래그 설정 (더 이상 실행 불필요) ──
     ['mt_migr_step2_check','mt_migr_qr_url_cleanup','mt_migr_gen_indiv_v2','mt_migr_lot_id_v1']
