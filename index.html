@@ -256,7 +256,7 @@ const CONFIG = {
   CLIENT_ID: '905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com',
   SCOPES: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
   SHEET_ID: '1_koe58lReouU_ZZxzUh5SU8gUkuHjlwb1LNjZbJGSLU',
-  DRIVE_FOLDER_ID: '1GwQpb9KBsXIwymKe5Ko6oqrz25BjeG4g',
+  DRIVE_FOLDER_ID: '1V9Aqz2Y5Y066SkKO-78yKWWteA4aaFpD',
   API_KEY: '',
 };
 
@@ -859,6 +859,21 @@ const DriveAPI = {
       localStorage.removeItem('mt_token');
       setTimeout(() => Auth.login(), 1500);
       throw new Error('토큰 만료 — 재로그인 필요');
+    }
+    if (res.status === 404 && CONFIG.DRIVE_FOLDER_ID) {
+      // 폴더가 존재하지 않으면 폴더 없이 재시도
+      console.warn('[Drive] 폴더 404 — 폴더 없이 재업로드');
+      delete metadata.parents;
+      const form2 = new FormData();
+      form2.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form2.append('file', file);
+      const res2 = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+        method: 'POST', headers: { Authorization: `Bearer ${State.token}` }, body: form2,
+      });
+      if (!res2.ok) throw new Error(`Drive upload retry: ${res2.status}`);
+      const data2 = await res2.json();
+      try { await fetch(`https://www.googleapis.com/drive/v3/files/${data2.id}/permissions`, { method:'POST', headers:{Authorization:`Bearer ${State.token}`,'Content-Type':'application/json'}, body:JSON.stringify({role:'reader',type:'anyone'}) }); } catch(e){}
+      return `https://drive.google.com/file/d/${data2.id}/view`;
     }
     if (!res.ok) throw new Error(`Drive upload: ${res.status}`);
     const data = await res.json();
