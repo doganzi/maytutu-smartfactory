@@ -862,6 +862,16 @@ const DriveAPI = {
     }
     if (!res.ok) throw new Error(`Drive upload: ${res.status}`);
     const data = await res.json();
+
+    // 파일을 링크 공유 가능하게 설정 (썸네일 복원용)
+    try {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+      });
+    } catch (e) { console.warn('Permission set failed:', e); }
+
     return `https://drive.google.com/file/d/${data.id}/view`;
   },
 };
@@ -4828,11 +4838,71 @@ function restoreSavedStepData(stepNo, stepType, step) {
       }
     }
 
+    // ── 사진 복원 (모든 stepType 공통) ──
+    const savedPhotoUrls = rec[6] || '';
+    if (savedPhotoUrls) {
+      const urls = savedPhotoUrls.split(' | ').filter(u => u.trim());
+      if (urls.length > 0) {
+        restorePhotoThumbnails(stepNo, stepType, urls);
+      }
+    }
+
     // 복원 완료 로그
-    console.log(`[WO복원] stepNo=${stepNo} 데이터 복원 완료`);
+    console.log(`[WO복원] stepNo=${stepNo} 데이터 복원 완료 (사진 ${savedPhotoUrls ? savedPhotoUrls.split(' | ').length : 0}장)`);
   } catch (err) {
     console.error(`[WO복원] stepNo=${stepNo} 복원 중 오류:`, err);
     // 복원 실패해도 시스템은 정상 동작 — 빈 폼으로 표시됨
+  }
+}
+
+/**
+ * restorePhotoThumbnails: 저장된 Drive URL에서 사진 썸네일을 복원
+ */
+function restorePhotoThumbnails(stepNo, stepType, urls) {
+  const extractFileId = (url) => {
+    const m = url.match(/\/d\/([^/]+)\//);
+    return m ? m[1] : null;
+  };
+
+  const createThumb = (url) => {
+    const fileId = extractFileId(url);
+    const img = document.createElement('img');
+    img.src = fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w128` : url;
+    img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--suc);cursor:pointer';
+    img.title = '저장된 사진 (터치하여 보기)';
+    img.onclick = (e) => { e.stopPropagation(); window.open(url, '_blank'); };
+    img.onerror = () => {
+      img.style.cssText = 'width:64px;height:64px;border-radius:6px;border:1px solid var(--suc);display:flex;align-items:center;justify-content:center;background:#e8f5e9;font-size:10px;color:var(--suc)';
+      img.outerHTML = `<div style="width:64px;height:64px;border-radius:6px;border:1px solid var(--suc);display:flex;align-items:center;justify-content:center;background:#e8f5e9;font-size:20px;cursor:pointer" title="저장된 사진" onclick="window.open('${url}','_blank')">📷✓</div>`;
+    };
+    return img;
+  };
+
+  const fillPreview = (previewId, thumbUrls) => {
+    const preview = $id(previewId);
+    if (!preview) return;
+    preview.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px';
+    thumbUrls.forEach(u => preview.appendChild(createThumb(u)));
+    // photo-upload 상위에 has-photo 표시
+    preview.closest('.photo-upload')?.classList.add('has-photo');
+  };
+
+  if (stepType === 'input' || stepType === 'process' || stepType === 'store') {
+    fillPreview(`photo-preview-${stepNo}`, urls);
+  } else if (stepType === 'pack') {
+    // 3개 샘플에 분배
+    for (let n = 0; n < 3; n++) {
+      if (urls[n]) fillPreview(`photo-preview-${stepNo}-s${n+1}`, [urls[n]]);
+    }
+    // 3개 초과 시 나머지는 마지막 샘플에
+    if (urls.length > 3) fillPreview(`photo-preview-${stepNo}-s3`, urls.slice(2));
+  } else if (stepType === 'seal') {
+    for (let n = 0; n < 3; n++) {
+      if (urls[n]) fillPreview(`photo-preview-${stepNo}-seal${n+1}`, [urls[n]]);
+    }
+    if (urls.length > 3) fillPreview(`photo-preview-${stepNo}-seal3`, urls.slice(2));
+  } else if (stepType === 'inspect') {
+    fillPreview(`photo-preview-${stepNo}-ccp7`, urls);
   }
 }
 
@@ -4992,6 +5062,30 @@ function collectStepPhotos(stepNo, stepType) {
       addFilesFrom(fi);
     }
   }
+
+  // ── DOM file input이 비어있으면 State에 보관된 파일 사용 (단계 이동 후 복귀 시) ──
+  if (files.length === 0 && State.woExec?._pendingPhotos) {
+    // 단일 프리뷰 타입
+    const singleKey = String(stepNo);
+    if (State.woExec._pendingPhotos[singleKey]?.length > 0) {
+      files.push(...State.woExec._pendingPhotos[singleKey]);
+    }
+    // 멀티 프리뷰 타입 (pack: s1~s3, seal: seal1~seal3, inspect: ccp7)
+    if (stepType === 'pack') {
+      for (let n = 1; n <= 3; n++) {
+        const key = `${stepNo}-s${n}`;
+        if (State.woExec._pendingPhotos[key]?.length > 0) files.push(...State.woExec._pendingPhotos[key]);
+      }
+    } else if (stepType === 'seal') {
+      for (let n = 1; n <= 3; n++) {
+        const key = `${stepNo}-seal${n}`;
+        if (State.woExec._pendingPhotos[key]?.length > 0) files.push(...State.woExec._pendingPhotos[key]);
+      }
+    } else if (stepType === 'inspect') {
+      const key = `${stepNo}-ccp7`;
+      if (State.woExec._pendingPhotos[key]?.length > 0) files.push(...State.woExec._pendingPhotos[key]);
+    }
+  }
   return files;
 }
 
@@ -5083,13 +5177,20 @@ function collectStepData(stepNo, stepType, step) {
 async function uploadStepPhotos(files) {
   if (!files || files.length === 0) return '';
   const urls = [];
+  let failCount = 0;
   for (const file of files) {
     try {
       const url = await DriveAPI.uploadPhoto(file);
-      urls.push(url);
+      if (url) urls.push(url);
     } catch (e) {
+      failCount++;
       console.error('Photo upload failed:', e);
     }
+  }
+  if (failCount > 0 && urls.length === 0) {
+    toast(`⚠️ 사진 ${failCount}장 업로드 실패. 인증이 만료되었을 수 있습니다.`, 'err', 4000);
+  } else if (failCount > 0) {
+    toast(`⚠️ 사진 ${failCount}장 업로드 실패 (${urls.length}장 성공)`, 'warn', 3000);
   }
   return urls.join(' | ');
 }
@@ -5105,7 +5206,19 @@ function previewStepPhoto(input, stepNo) {
   if (!preview) return;
   preview.innerHTML = '';
   preview.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px';
+
+  // 파일을 State에 보관 (단계 이동 후에도 유지)
+  if (!State.woExec._pendingPhotos) State.woExec._pendingPhotos = {};
+  if (!State.woExec._pendingPhotos[stepNo]) State.woExec._pendingPhotos[stepNo] = [];
   Array.from(input.files).forEach(f => {
+    // 중복 방지
+    if (!State.woExec._pendingPhotos[stepNo].some(p => p.name === f.name && p.size === f.size)) {
+      State.woExec._pendingPhotos[stepNo].push(f);
+    }
+  });
+
+  // 모든 보관된 사진 프리뷰 표시
+  State.woExec._pendingPhotos[stepNo].forEach(f => {
     const img = document.createElement('img');
     img.src = URL.createObjectURL(f);
     img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)';
@@ -5211,16 +5324,20 @@ async function tempSaveWO() {
       photoUrls = await uploadStepPhotos(photos);
     }
 
+    // 새 사진이 없으면 기존 저장된 사진 URL 유지
+    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+    if (!photoUrls && existingIdx >= 0) {
+      photoUrls = allRecords[existingIdx][6] || '';
+    }
+
     // 입력값 수집
     const stepData = collectStepData(stepNo, stepType, step);
     const usedLotIds = (stepType === 'input') ?
       (State.woExec._scannedLots?.[stepNo] || []).map(s => s.lotId).filter(Boolean).join(',') : '';
 
-    // 공정기록 임시 저장 (기존 기록 있으면 덮어쓰기 위해 삭제 후 재작성)
-    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
-    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+    // 공정기록 임시 저장 (기존 기록 있으면 덮어쓰기)
     if (existingIdx >= 0) {
-      // 기존 임시 기록 덮어쓰기 — updateRow 사용
       await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
         0: woId, 1: String(stepNo), 2: step[2], 3: stepType,
         4: usedLotIds, 5: stepData, 6: photoUrls,
@@ -5512,12 +5629,17 @@ async function completeStep() {
       photoUrls = await uploadStepPhotos(photos);
     }
 
+    // 새 사진이 없으면 기존 저장된 사진 URL 유지
+    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
+    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+    if (!photoUrls && existingIdx >= 0) {
+      photoUrls = allRecords[existingIdx][6] || '';
+    }
+
     // 입력값 수집
     const stepData = collectStepData(stepNo, stepType, step);
 
     // 기존 임시저장 기록 있으면 덮어쓰기, 없으면 새로 추가
-    const allRecords = await SheetsAPI.getAll('공정기록').catch(() => []);
-    const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
     if (existingIdx >= 0) {
       await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
         0: woId, 1: step[1], 2: step[2], 3: step[3],
@@ -5541,6 +5663,14 @@ async function completeStep() {
     State.woExec.maxStep = newMaxStep;
     await SheetsAPI.updateCell('작업지시서', 0, woId, 13, String(newMaxStep));
     console.log(`[WO실행] completeStep: step=${currentStep}, prevMaxStep=${prevMaxStep}, newMaxStep=${newMaxStep}`);
+
+    // 업로드 완료된 사진 State에서 제거 (재업로드 방지)
+    if (State.woExec._pendingPhotos) {
+      delete State.woExec._pendingPhotos[stepNo];
+      if (stepType === 'pack') { for (let n=1;n<=3;n++) delete State.woExec._pendingPhotos[`${stepNo}-s${n}`]; }
+      if (stepType === 'seal') { for (let n=1;n<=3;n++) delete State.woExec._pendingPhotos[`${stepNo}-seal${n}`]; }
+      if (stepType === 'inspect') delete State.woExec._pendingPhotos[`${stepNo}-ccp7`];
+    }
 
     // records 캐시 갱신 — 이후 단계 이동 시 최신 데이터 복원 가능하도록
     try {
@@ -5595,9 +5725,13 @@ async function submitForApproval() {
         toast('사진 업로드 중...', 'info', 2000);
         photoUrls = await uploadStepPhotos(photos);
       }
+      // 새 사진이 없으면 기존 저장된 사진 URL 유지
+      const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
+      if (!photoUrls && existingIdx >= 0) {
+        photoUrls = allRecords[existingIdx][6] || '';
+      }
       const stepData = collectStepData(stepNo, stepType, step);
 
-      const existingIdx = allRecords.findIndex(r => r[0] === woId && r[1] === String(stepNo));
       if (existingIdx >= 0) {
         await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
           0: woId, 1: step[1], 2: step[2], 3: step[3],
