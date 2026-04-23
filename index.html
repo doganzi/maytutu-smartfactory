@@ -247,6 +247,8 @@ a { text-decoration:none; color:inherit; }
      ═══════════════════════════════════════════════ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
 
 <script>
 /* ═══════════════════════════════════════════════
@@ -874,6 +876,44 @@ const DriveAPI = {
     } catch (e) { console.warn('Permission set failed:', e); }
 
     return `https://drive.google.com/file/d/${data.id}/view`;
+  },
+
+  async uploadPdf(pdfBlob, fileName) {
+    const metadata = {
+      name: fileName,
+      mimeType: 'application/pdf',
+    };
+    if (CONFIG.DRIVE_FOLDER_ID) {
+      metadata.parents = [CONFIG.DRIVE_FOLDER_ID];
+    }
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', pdfBlob);
+
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${State.token}` },
+      body: form,
+    });
+    if (res.status === 401) {
+      toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+      localStorage.removeItem('mt_token');
+      setTimeout(() => Auth.login(), 1500);
+      throw new Error('토큰 만료 — 재로그인 필요');
+    }
+    if (!res.ok) throw new Error(`Drive PDF upload: ${res.status}`);
+    const data = await res.json();
+
+    // 공유 링크 설정
+    try {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions?supportsAllDrives=true`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+      });
+    } catch (e) { console.warn('PDF Permission set failed:', e); }
+
+    return { id: data.id, url: `https://drive.google.com/file/d/${data.id}/view` };
   },
 };
 
@@ -6235,6 +6275,19 @@ Screens['wo-detail'] = async (params = {}) => {
           ${wo[14] ? `<div class="fs-12 c-txt-l">완제품 LOT: ${wo[14]}</div>` : ''}
         </div>
 
+        ${wo[19] ? `
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <a href="${wo[19]}" target="_blank" rel="noopener" class="btn btn-pri" style="flex:1;text-align:center;text-decoration:none;font-size:13px">
+            📄 작업지시서 PDF 보기
+          </a>
+          <button class="btn" style="flex:0 0 auto;background:var(--gray-l);color:var(--txt);font-size:13px" onclick="generateAndSaveWOPdf('${woId}').then(()=>toast('PDF 재생성 완료','suc')).catch(e=>toast('실패: '+e.message,'err'));showLoading();setTimeout(hideLoading,5000)">
+            🔄 재생성
+          </button>
+        </div>` : (woStatus === '출하가능' || woStatus === '출하완료' || woStatus === '승인완료') ? `
+        <button class="btn btn-pri mb-12" style="width:100%;font-size:13px" onclick="showLoading();generateAndSaveWOPdf('${woId}').then(()=>{hideLoading();toast('PDF 생성 완료','suc');Screens['wo-detail']({woId:'${woId}'})}).catch(e=>{hideLoading();toast('실패: '+e.message,'err')})">
+          📄 작업지시서 PDF 생성
+        </button>` : ''}
+
         ${freezeStart ? `
         <div class="card bl-${freezeHours >= 12 ? 'suc' : 'warn'}" style="background:${freezeHours >= 12 ? '#e8f5e9' : '#fff8e1'}">
           <div class="fs-12 c-txt-l">냉동 시작: ${wo[11]}</div>
@@ -6418,6 +6471,359 @@ Screens['approval-detail'] = async (params = {}) => {
   }
 };
 
+/* ═══════════════════════════════════════════════
+   PDF 생성 (작업지시서 문서화)
+   ═══════════════════════════════════════════════ */
+async function generateWOPdf(woId) {
+  const { jsPDF } = window.jspdf;
+
+  const wos = await SheetsAPI.getAll('작업지시서', false);
+  const wo = wos.find(w => w[0] === woId);
+  if (!wo) throw new Error('작업지시서를 찾을 수 없습니다');
+
+  const records = (await SheetsAPI.getAll('공정기록', false)).filter(r => r[0] === woId);
+  records.sort((a, b) => parseInt(a[1]) - parseInt(b[1]));
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentW = pageW - margin * 2;
+  let y = margin;
+
+  // 한글 폰트 없이도 동작하도록 기본 폰트 사용 (한글은 Unicode로 직접 그림)
+  // jsPDF 2.5+ 는 기본적으로 standard14 폰트만 포함. 한글 지원을 위해 커스텀 폰트 대신
+  // HTML canvas 방식으로 한글 텍스트를 이미지로 변환하여 삽입
+  const canvasTextToImg = (text, fontSize, fontWeight, maxWidth, color) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const scale = 3; // 고해상도
+    ctx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+    const measured = ctx.measureText(text);
+    const w = Math.min(measured.width, maxWidth * scale);
+    canvas.width = w + 4;
+    canvas.height = fontSize * scale * 1.4;
+    ctx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+    ctx.fillStyle = color || '#000';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, 0, fontSize * scale * 0.15);
+    return { dataUrl: canvas.toDataURL('image/png'), w: canvas.width / scale, h: canvas.height / scale };
+  };
+
+  // 한글 텍스트를 PDF에 추가하는 헬퍼
+  const addKorText = (text, x, yPos, fontSize, fontWeight, color, maxWidth) => {
+    if (!text) return 0;
+    const mw = maxWidth || contentW;
+    // 긴 텍스트 줄바꿈 처리
+    const lines = [];
+    let remaining = text;
+    const testCanvas = document.createElement('canvas');
+    const testCtx = testCanvas.getContext('2d');
+    const scale = 3;
+    testCtx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+
+    while (remaining.length > 0) {
+      let fit = remaining.length;
+      while (fit > 0 && testCtx.measureText(remaining.substring(0, fit)).width > mw * scale) {
+        fit--;
+      }
+      if (fit === 0) fit = 1;
+      lines.push(remaining.substring(0, fit));
+      remaining = remaining.substring(fit);
+    }
+
+    let totalH = 0;
+    for (const line of lines) {
+      const img = canvasTextToImg(line, fontSize, fontWeight, mw, color);
+      if (yPos + totalH + img.h > pageH - 10) {
+        doc.addPage();
+        yPos = margin;
+        totalH = 0;
+      }
+      doc.addImage(img.dataUrl, 'PNG', x, yPos + totalH, img.w, img.h);
+      totalH += img.h + 0.5;
+    }
+    return totalH;
+  };
+
+  // 페이지 번호 추가 함수 (마지막에 호출)
+  const addPageNumbers = () => {
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text(`${i} / ${totalPages}`, pageW / 2, pageH - 6, { align: 'center' });
+      doc.text('MAYTUTU Smart Factory', pageW - margin, pageH - 6, { align: 'right' });
+    }
+  };
+
+  // ──── 헤더 ────
+  const hBg = '#1565c0';
+  doc.setFillColor(21, 101, 192);
+  doc.rect(0, 0, pageW, 32, 'F');
+  const titleImg = canvasTextToImg('작업지시서 (Work Order Report)', 14, 'bold', contentW, '#fff');
+  doc.addImage(titleImg.dataUrl, 'PNG', margin, 6, titleImg.w, titleImg.h);
+  const woIdImg = canvasTextToImg(woId, 10, 'normal', contentW, '#bbdefb');
+  doc.addImage(woIdImg.dataUrl, 'PNG', margin, 19, woIdImg.w, woIdImg.h);
+  // 생성일시
+  const dateStr = formatDateTime();
+  const dateImg = canvasTextToImg(dateStr, 8, 'normal', 80, '#bbdefb');
+  doc.addImage(dateImg.dataUrl, 'PNG', pageW - margin - 55, 22, dateImg.w, dateImg.h);
+  y = 38;
+
+  // ──── 기본 정보 테이블 ────
+  const h = addKorText('기본 정보', margin, y, 11, 'bold', '#1565c0');
+  y += h + 2;
+  doc.setDrawColor(21, 101, 192);
+  doc.setLineWidth(0.5);
+  doc.line(margin, y, pageW - margin, y);
+  y += 4;
+
+  const infoItems = [
+    ['제품명', wo[4] || '-'],
+    ['생산량', `${wo[5] || '-'} kg`],
+    ['포장 단위', wo[6] || '-'],
+    ['포장 수량', `${wo[7] || '-'} 개`],
+    ['작업자', wo[8] || '-'],
+    ['SOP', wo[1] || '-'],
+    ['시작 시간', (wo[9] || '-').substring(0, 16)],
+    ['완료 시간', (wo[10] || '-').substring(0, 16)],
+    ['냉동 시작', wo[11] || '-'],
+    ['상태', wo[12] || '-'],
+    ['완제품 LOT', wo[14] || '-'],
+    ['승인자', wo[15] || '-'],
+    ['승인 시간', (wo[16] || '-').substring(0, 16)],
+  ];
+
+  for (const [label, value] of infoItems) {
+    // 라벨
+    const lImg = canvasTextToImg(label, 8, 'bold', 35, '#555');
+    doc.addImage(lImg.dataUrl, 'PNG', margin + 2, y, lImg.w, lImg.h);
+    // 값
+    const vImg = canvasTextToImg(value, 8, 'normal', contentW - 42, '#222');
+    doc.addImage(vImg.dataUrl, 'PNG', margin + 40, y, vImg.w, vImg.h);
+    y += 5;
+    if (y > pageH - 20) { doc.addPage(); y = margin; }
+  }
+
+  y += 6;
+
+  // ──── 공정 기록 ────
+  const recH = addKorText(`공정 기록 (${records.length}단계)`, margin, y, 11, 'bold', '#1565c0');
+  y += recH + 2;
+  doc.setDrawColor(21, 101, 192);
+  doc.line(margin, y, pageW - margin, y);
+  y += 4;
+
+  for (const rec of records) {
+    const stepNo = rec[1] || '';
+    const stepName = rec[2] || '';
+    const stepType = rec[3] || '';
+    const usedLots = rec[4] || '';
+    const stepDataRaw = rec[5] || '';
+    const photoUrlsRaw = rec[6] || '';
+    const recordStatus = rec[10] || '';
+    const completedAt = rec[11] || '';
+    const worker = rec[12] || '';
+
+    // 페이지 넘김 체크
+    if (y > pageH - 40) { doc.addPage(); y = margin; }
+
+    // 공정 헤더 배경
+    const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관',pack:'계량'}[stepType] || stepType;
+    const statusColor = recordStatus === '완료' ? '#2e7d32' : '#f57c00';
+
+    doc.setFillColor(240, 245, 255);
+    doc.roundedRect(margin, y, contentW, 8, 1.5, 1.5, 'F');
+    const stepTitle = `${stepNo}. ${stepName}`;
+    const stH = addKorText(stepTitle, margin + 2, y + 1.5, 9, 'bold', '#1565c0', contentW - 60);
+    // 상태 & 유형 태그
+    const tagText = `[${typeLabel}] ${recordStatus}`;
+    const tagImg = canvasTextToImg(tagText, 7, 'bold', 60, statusColor);
+    doc.addImage(tagImg.dataUrl, 'PNG', pageW - margin - 40, y + 2, tagImg.w, tagImg.h);
+    y += Math.max(stH, 8) + 2;
+
+    // 작업자 / 시간
+    const metaText = `작업자: ${(worker||'').split('@')[0]}  |  시간: ${completedAt.substring(0,16)}`;
+    const metaH = addKorText(metaText, margin + 4, y, 7, 'normal', '#666');
+    y += metaH + 1;
+
+    // 사용 원재료 LOT
+    if (usedLots) {
+      const lots = usedLots.split(',').filter((v,i,a) => a.indexOf(v)===i);
+      const lotH = addKorText(`사용 원재료 LOT (${lots.length}건): ${lots.join(', ')}`, margin + 4, y, 7, 'normal', '#1565c0');
+      y += lotH + 1;
+    }
+
+    // Step Data 파싱
+    let stepData = {};
+    try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
+
+    if (stepType === 'input' && stepData.inputQty) {
+      const iqH = addKorText(`투입량: ${stepData.inputQty}kg${stepData.targetQty ? ` (목표: ${stepData.targetQty}kg)` : ''}`, margin + 4, y, 7, 'normal', '#333');
+      y += iqH + 1;
+    }
+
+    if (stepData.checks && stepData.checks.length > 0) {
+      for (const c of stepData.checks) {
+        const ck = c.checked ? '✅' : '⬜';
+        const chH = addKorText(`${ck} ${c.name}`, margin + 6, y, 7, 'normal', '#444');
+        y += chH + 0.5;
+      }
+      y += 1;
+    }
+
+    if (stepType === 'pack' && stepData.packQty) {
+      const pkH = addKorText(`포장 수량: ${stepData.packQty}개`, margin + 4, y, 7, 'normal', '#333');
+      y += pkH + 1;
+      if (stepData.samples) {
+        for (let si = 0; si < stepData.samples.length; si++) {
+          const s = stepData.samples[si];
+          const smH = addKorText(`  샘플 #${si+1} 무게: ${s.weight||'-'}kg`, margin + 6, y, 7, 'normal', '#555');
+          y += smH + 0.5;
+        }
+      }
+    }
+
+    if (stepType === 'seal' && stepData.sealQty) {
+      const slH = addKorText(`최종 수량: ${stepData.sealQty}개 · 라벨: ${stepData.labelCheck?'O':'X'} · 밀봉: ${stepData.sealCheck?'O':'X'}`, margin + 4, y, 7, 'normal', '#333');
+      y += slH + 1;
+    }
+
+    if (stepType === 'inspect') {
+      if (stepData.ccpTotal) {
+        const ccH = addKorText(`검사 수량: ${stepData.ccpTotal}개`, margin + 4, y, 7, 'normal', '#333');
+        y += ccH + 1;
+      }
+      if (stepData.times) {
+        const timeStr = Object.entries(stepData.times).map(([k,v]) => `${k}: ${v}`).join(' · ');
+        if (timeStr) { const tH = addKorText(timeStr, margin + 4, y, 7, 'normal', '#555'); y += tH + 1; }
+      }
+    }
+
+    if (stepType === 'qr-label' && stepData.qrQty) {
+      const qH = addKorText(`QR 라벨 수량: ${stepData.qrQty}매`, margin + 4, y, 7, 'normal', '#333');
+      y += qH + 1;
+    }
+    if (stepType === 'store' && stepData.freezeStart) {
+      const fH = addKorText(`냉동 시작: ${stepData.freezeStart}`, margin + 4, y, 7, 'normal', '#333');
+      y += fH + 1;
+    }
+
+    // 사진 삽입 (Drive 썸네일 → base64)
+    if (photoUrlsRaw) {
+      const photoUrls = photoUrlsRaw.split(' | ').filter(u => u.trim());
+      if (photoUrls.length > 0) {
+        const phH = addKorText(`촬영 사진 (${photoUrls.length}장)`, margin + 4, y, 7, 'bold', '#555');
+        y += phH + 2;
+
+        const photoSize = 28;
+        let px = margin + 4;
+
+        for (const url of photoUrls) {
+          if (px + photoSize > pageW - margin) {
+            px = margin + 4;
+            y += photoSize + 3;
+          }
+          if (y + photoSize > pageH - 15) { doc.addPage(); y = margin; px = margin + 4; }
+
+          try {
+            // Drive file ID 추출
+            const match = url.match(/\/d\/([^\/]+)/);
+            if (match) {
+              const fileId = match[1];
+              const thumbUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w200`;
+              const resp = await fetch(thumbUrl);
+              if (resp.ok) {
+                const blob = await resp.blob();
+                const b64 = await new Promise(resolve => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result);
+                  reader.readAsDataURL(blob);
+                });
+                doc.addImage(b64, 'JPEG', px, y, photoSize, photoSize);
+                px += photoSize + 3;
+              }
+            }
+          } catch (photoErr) {
+            console.warn(`[PDF] 사진 삽입 실패:`, photoErr.message);
+            // 실패 시 빈 박스
+            doc.setDrawColor(200);
+            doc.rect(px, y, photoSize, photoSize);
+            px += photoSize + 3;
+          }
+        }
+        y += photoSize + 3;
+      }
+    }
+
+    // 구분선
+    doc.setDrawColor(230);
+    doc.setLineWidth(0.2);
+    doc.line(margin + 2, y, pageW - margin - 2, y);
+    y += 4;
+  }
+
+  // ──── 서명란 ────
+  if (y > pageH - 45) { doc.addPage(); y = margin; }
+  y += 6;
+  const sigH = addKorText('서명', margin, y, 11, 'bold', '#1565c0');
+  y += sigH + 2;
+  doc.setDrawColor(21, 101, 192);
+  doc.line(margin, y, pageW - margin, y);
+  y += 6;
+
+  const sigItems = [
+    ['작업자', wo[8] || '-', (wo[10] || '-').substring(0, 16)],
+    ['승인자', wo[15] || '-', (wo[16] || '-').substring(0, 16)],
+  ];
+  for (const [role, name, dt] of sigItems) {
+    const rH = addKorText(`${role}: ${name}`, margin + 4, y, 8, 'normal', '#333');
+    y += rH;
+    const dH = addKorText(`날짜: ${dt}`, margin + 4, y, 7, 'normal', '#888');
+    y += dH + 3;
+
+    // 서명 라인
+    doc.setDrawColor(180);
+    doc.setLineWidth(0.3);
+    doc.line(margin + 50, y, margin + 100, y);
+    y += 8;
+  }
+
+  // 페이지 번호 추가
+  addPageNumbers();
+
+  // PDF Blob 생성
+  const pdfBlob = doc.output('blob');
+  const productName = (wo[4] || '작업지시서').replace(/[\/\\?%*:|"<>]/g, '');
+  const fileName = `${productName}_${woId}.pdf`;
+
+  return { pdfBlob, fileName };
+}
+
+// PDF 생성 → Drive 저장 → 작업지시서 URL 기록
+async function generateAndSaveWOPdf(woId) {
+  console.log(`[PDF] 작업지시서 PDF 생성 시작: ${woId}`);
+  try {
+    const { pdfBlob, fileName } = await generateWOPdf(woId);
+    console.log(`[PDF] PDF 생성 완료: ${fileName} (${(pdfBlob.size/1024).toFixed(1)}KB)`);
+
+    // Drive 업로드
+    const { url } = await DriveAPI.uploadPdf(pdfBlob, fileName);
+    console.log(`[PDF] Drive 업로드 완료: ${url}`);
+
+    // 작업지시서 col 19 (pdfUrl) 에 저장
+    await SheetsAPI.updateRow('작업지시서', 0, woId, { 19: url });
+    console.log(`[PDF] 작업지시서 pdfUrl 저장 완료`);
+
+    return url;
+  } catch (e) {
+    console.error(`[PDF] PDF 생성/저장 실패:`, e);
+    throw e;
+  }
+}
+
 async function approveWO(woId) {
   confirm('출하승인', '냉동 12시간이 경과되었습니다.\n출하승인하시겠습니까? 완제품 재고로 등록됩니다.', async () => {
     if (!acquireLock('approveWO')) return;
@@ -6480,6 +6886,14 @@ async function approveWO(woId) {
       await SheetsAPI.append('완제품개별', indivRows);
 
       toast(`출하승인 완료! ${fgLotId} 완제품 재고 등록 (QR ${packCount}개)`, 'suc', 5000);
+
+      // PDF 자동 생성 (백그라운드 — 실패해도 승인 흐름 중단하지 않음)
+      generateAndSaveWOPdf(woId).then(pdfUrl => {
+        toast('📄 작업지시서 PDF 저장 완료', 'suc', 3000);
+      }).catch(e => {
+        console.error('[PDF] 자동 생성 실패:', e);
+        toast('⚠️ PDF 생성 실패 — 상세 화면에서 재시도 가능', 'warn', 4000);
+      });
 
       confirm('라벨 인쇄', `완제품 QR 라벨 ${packCount}매를 인쇄하시겠습니까?`, () => {
         Router.go('label-print', { lotId: fgLotId, count: packCount, itemName: wo[4], type: 'fg' });
