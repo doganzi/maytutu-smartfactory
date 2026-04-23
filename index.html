@@ -6596,14 +6596,19 @@ async function generateWOPdf(woId) {
     ['승인 시간', (wo[16] || '-').substring(0, 16)],
   ];
 
-  for (const [label, value] of infoItems) {
-    // 라벨
-    const lImg = canvasTextToImg(label, 8, 'bold', 35, '#555');
-    doc.addImage(lImg.dataUrl, 'PNG', margin + 2, y, lImg.w, lImg.h);
-    // 값
-    const vImg = canvasTextToImg(value, 8, 'normal', contentW - 42, '#222');
-    doc.addImage(vImg.dataUrl, 'PNG', margin + 40, y, vImg.w, vImg.h);
-    y += 5;
+  // 2열 테이블 형태로 렌더링 (겹침 방지)
+  const colW = contentW / 2;
+  for (let i = 0; i < infoItems.length; i += 2) {
+    const [l1, v1] = infoItems[i];
+    const txt1 = `${l1}: ${v1}`;
+    const h1 = addKorText(txt1, margin + 2, y, 8, 'normal', '#333', colW - 4);
+    let h2 = 0;
+    if (i + 1 < infoItems.length) {
+      const [l2, v2] = infoItems[i + 1];
+      const txt2 = `${l2}: ${v2}`;
+      h2 = addKorText(txt2, margin + colW + 2, y, 8, 'normal', '#333', colW - 4);
+    }
+    y += Math.max(h1, h2) + 1;
     if (y > pageH - 20) { doc.addPage(); y = margin; }
   }
 
