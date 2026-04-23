@@ -1049,8 +1049,15 @@ const LiveSync = {
 
       // 현재 화면 리렌더 — 화면별 최적화
       if (screen === 'wo-execute' && State.woExec?.woId) {
-        // WO 실행 화면: 전체 리로드 (공정기록 + 작업지시서 최신화)
-        await Screens['wo-execute']({ woId: State.woExec.woId });
+        // WO 실행 화면: 작업 중 데이터 보존하면서 records만 갱신
+        // (전체 리로드는 _scannedLots, _pendingPhotos 등 인메모리 데이터 유실 위험)
+        try {
+          const freshRecords = await SheetsAPI.getAll('공정기록', false);
+          State.woExec.records = freshRecords.filter(r => r[0] === State.woExec.woId);
+          console.log(`[LiveSync] wo-execute 경량 동기화: records ${State.woExec.records.length}건 갱신`);
+        } catch (e) {
+          console.warn('[LiveSync] wo-execute records 갱신 실패:', e.message);
+        }
       } else if (screen === 'wo-detail' && State._woDetailId) {
         await Screens['wo-detail']({ woId: State._woDetailId });
       } else if (Screens[screen]) {
@@ -4174,13 +4181,27 @@ Screens['wo-execute'] = async (params = {}) => {
     // Store in state
     // currentStep: 현재 보고 있는 단계 (viewing position)
     // maxStep: 완료된 최대 단계 (navigation boundary) — 절대 감소하지 않음
+    // ── 기존 인메모리 데이터 보존 (LiveSync 리로드 시 스캔/사진 데이터 유실 방지) ──
+    const prevScannedLots = State.woExec?._scannedLots;
+    const prevPendingPhotos = State.woExec?._pendingPhotos;
+    const prevUseType = State.woExec?._useType;
+    const prevCurrentStep = State.woExec?.currentStep;
+    const isSameWo = State.woExec?.woId === wo[0];
+
     State.woExec = {
       woId: wo[0], wo, sopId, steps, recipes, records, targetQty,
-      currentStep: lastSaved,
+      currentStep: isSameWo ? (prevCurrentStep ?? lastSaved) : lastSaved,
       maxStep: maxStep,
       unit: wo[6] || '1kg',
       packCount: parseInt(wo[7]) || 50,
     };
+
+    // 같은 WO 리로드 시 인메모리 데이터 복원
+    if (isSameWo) {
+      if (prevScannedLots) State.woExec._scannedLots = prevScannedLots;
+      if (prevPendingPhotos) State.woExec._pendingPhotos = prevPendingPhotos;
+      if (prevUseType) State.woExec._useType = prevUseType;
+    }
 
     hideLoading();
     renderWOExecute();
@@ -4727,6 +4748,40 @@ function restoreSavedStepData(stepNo, stepType, step) {
             if (chkEl) { chkEl.classList.add('checked'); chkEl.textContent = '✓'; }
           }
         });
+      }
+
+      // ── 스캔된 LOT 리스트 UI 복원 (State._scannedLots에서) ──
+      if (State.woExec._scannedLots?.[stepNo]?.length > 0) {
+        renderScannedList(stepNo);
+        // useType 복원
+        if (State.woExec._useType?.[stepNo]) {
+          setUseType(stepNo, State.woExec._useType[stepNo]);
+        }
+      }
+      // DB 기록(usedLotIds)에서 스캔 데이터 복원 (State에 없을 때)
+      else if (rec[4]) {
+        const lotIds = rec[4].split(',').filter(Boolean);
+        if (lotIds.length > 0 && (!State.woExec._scannedLots || !State.woExec._scannedLots[stepNo]?.length)) {
+          // DB에 저장된 LOT ID로 State 복원 (비동기)
+          (async () => {
+            try {
+              if (!State.woExec._scannedLots) State.woExec._scannedLots = {};
+              if (!State.woExec._scannedLots[stepNo]) State.woExec._scannedLots[stepNo] = [];
+              const indivs = await SheetsAPI.getAll('원재료개별');
+              const lots = await SheetsAPI.getAll('원재료LOT');
+              lotIds.forEach(qrId => {
+                if (State.woExec._scannedLots[stepNo].find(s => s.qrId === qrId)) return;
+                const indiv = indivs.find(r => r[0] === qrId);
+                const lot = indiv ? lots.find(l => l[0] === indiv[1]) : null;
+                State.woExec._scannedLots[stepNo].push({
+                  qrId, lotId: indiv?.[1] || '', name: lot?.[2] || '',
+                  remain: indiv?.[4] || '0', expiry: (lot?.[7]||'').substring(0,10), status: indiv?.[3] || ''
+                });
+              });
+              renderScannedList(stepNo);
+            } catch (e) { console.warn('[WO복원] LOT 복원 실패:', e.message); }
+          })();
+        }
       }
     }
 
