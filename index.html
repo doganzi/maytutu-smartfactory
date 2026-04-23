@@ -4753,10 +4753,6 @@ function restoreSavedStepData(stepNo, stepType, step) {
       // ── 스캔된 LOT 리스트 UI 복원 (State._scannedLots에서) ──
       if (State.woExec._scannedLots?.[stepNo]?.length > 0) {
         renderScannedList(stepNo);
-        // useType 복원
-        if (State.woExec._useType?.[stepNo]) {
-          setUseType(stepNo, State.woExec._useType[stepNo]);
-        }
       }
       // DB 기록(usedLotIds)에서 스캔 데이터 복원 (State에 없을 때)
       else if (rec[4]) {
@@ -4782,6 +4778,10 @@ function restoreSavedStepData(stepNo, stepType, step) {
             } catch (e) { console.warn('[WO복원] LOT 복원 실패:', e.message); }
           })();
         }
+      }
+      // ── useType UI 복원 (스캔 리스트 유무와 무관) ──
+      if (State.woExec._useType?.[stepNo]) {
+        setUseType(stepNo, State.woExec._useType[stepNo]);
       }
     }
 
@@ -4903,11 +4903,52 @@ function restoreSavedStepData(stepNo, stepType, step) {
       }
     }
 
+    // ── 인메모리 _pendingPhotos blob URL 복원 (아직 업로드되지 않은 사진) ──
+    restorePendingPhotos(stepNo, stepType);
+
     // 복원 완료 로그
     console.log(`[WO복원] stepNo=${stepNo} 데이터 복원 완료 (사진 ${savedPhotoUrls ? savedPhotoUrls.split(' | ').length : 0}장)`);
   } catch (err) {
     console.error(`[WO복원] stepNo=${stepNo} 복원 중 오류:`, err);
     // 복원 실패해도 시스템은 정상 동작 — 빈 폼으로 표시됨
+  }
+}
+
+/**
+ * restorePendingPhotos: State._pendingPhotos에 남아있는 미업로드 파일의 blob URL을 DOM에 복원
+ * — DOM 재렌더(goToStep, LiveSync 등) 후 사진 미리보기가 사라지는 문제 방지
+ */
+function restorePendingPhotos(stepNo, stepType) {
+  const pendingPhotos = State.woExec?._pendingPhotos;
+  if (!pendingPhotos) return;
+
+  // 단일 preview 복원 헬퍼
+  const fillPreview = (key, previewId) => {
+    const files = pendingPhotos[key];
+    if (!files || files.length === 0) return;
+    const preview = $id(previewId);
+    if (!preview || preview.innerHTML.trim()) return; // 이미 Drive URL 썸네일이 있으면 skip
+    preview.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px';
+    files.forEach(f => {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)';
+      preview.appendChild(img);
+    });
+    // photo-upload 컨테이너에 has-photo 클래스 추가
+    const uploadEl = preview.closest('.photo-upload');
+    if (uploadEl) uploadEl.classList.add('has-photo');
+  };
+
+  // stepType별 preview 요소 매핑
+  if (stepType === 'pack') {
+    for (let n = 1; n <= 3; n++) fillPreview(`${stepNo}-s${n}`, `photo-preview-${stepNo}-s${n}`);
+  } else if (stepType === 'seal') {
+    for (let n = 1; n <= 3; n++) fillPreview(`${stepNo}-seal${n}`, `photo-preview-${stepNo}-seal${n}`);
+  } else if (stepType === 'inspect') {
+    fillPreview(`${stepNo}-ccp7`, `photo-preview-${stepNo}-ccp7`);
+  } else {
+    fillPreview(String(stepNo), `photo-preview-${stepNo}`);
   }
 }
 
