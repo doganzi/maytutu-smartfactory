@@ -5434,11 +5434,17 @@ async function tempSaveWO() {
       (State.woExec._scannedLots?.[stepNo] || []).map(s => s.lotId).filter(Boolean).join(',') : '';
 
     // 공정기록 임시 저장 (기존 기록 있으면 덮어쓰기)
+    // ⚠️ 이미 '완료'된 기록은 상태를 유지 (다운그레이드 방지)
+    const existingStatus = existingIdx >= 0 ? (allRecords[existingIdx][10] || '') : '';
+    const saveStatus = existingStatus === '완료' ? '완료' : '임시저장';
+    if (existingStatus === '완료') {
+      console.log(`[WO실행] 임시저장: stepNo=${stepNo} 이미 완료된 공정 — 데이터만 갱신, 상태 유지`);
+    }
     if (existingIdx >= 0) {
       await SheetsAPI.updateRowByIndex('공정기록', existingIdx + 2, {
         0: woId, 1: String(stepNo), 2: step[2], 3: stepType,
         4: usedLotIds, 5: stepData, 6: photoUrls,
-        7: '', 8: '', 9: '', 10: '임시저장',
+        7: '', 8: '', 9: '', 10: saveStatus,
         11: formatDateTime(), 12: State.user?.email
       });
     } else {
@@ -5463,7 +5469,8 @@ async function tempSaveWO() {
       State.woExec.records = freshRecords.filter(r => r[0] === woId);
     } catch (e) { console.warn('[WO실행] records 갱신 실패:', e.message); }
 
-    toast(`임시저장 완료${photos.length > 0 ? ` (사진 ${photos.length}장 업로드됨)` : ''}`, 'suc');
+    const statusMsg = saveStatus === '완료' ? ' (완료 상태 유지)' : '';
+    toast(`저장 완료${statusMsg}${photos.length > 0 ? ` (사진 ${photos.length}장 업로드됨)` : ''}`, 'suc');
   } catch (e) {
     toast('임시저장 실패: ' + e.message, 'err');
   } finally {
@@ -5651,6 +5658,24 @@ async function completeStep() {
 
   try {
     showLoading();
+
+    // ⚠️ 이전 공정 완료 여부 사전 검증 (건너뛰기 방지)
+    if (currentStep > 0) {
+      const allRecs = await SheetsAPI.getAll('공정기록').catch(() => []);
+      const woRecs = allRecs.filter(r => r[0] === woId);
+      const incompSteps = [];
+      for (let i = 0; i < currentStep; i++) {
+        const sNo = steps[i][1];
+        const rec = woRecs.find(r => r[1] === String(sNo) && r[10] === '완료');
+        if (!rec) incompSteps.push(`${sNo}. ${steps[i][2] || ''}`);
+      }
+      if (incompSteps.length > 0) {
+        hideLoading();
+        releaseLock('completeStep');
+        toast(`⚠️ 이전 공정 ${incompSteps.length}건 미완료:\n• ${incompSteps.join('\n• ')}\n\n이전 공정을 먼저 완료해주세요.`, 'err', 5000);
+        return;
+      }
+    }
 
     // input step: 원재료 재고 차감 (스캔된 LOT)
     let usedLotIds = '';
