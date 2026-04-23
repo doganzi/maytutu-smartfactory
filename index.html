@@ -849,7 +849,8 @@ const DriveAPI = {
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     form.append('file', file);
 
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    // supportsAllDrives: 공유 드라이브 폴더 지원
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true', {
       method: 'POST',
       headers: { Authorization: `Bearer ${State.token}` },
       body: form,
@@ -860,27 +861,12 @@ const DriveAPI = {
       setTimeout(() => Auth.login(), 1500);
       throw new Error('토큰 만료 — 재로그인 필요');
     }
-    if (res.status === 404 && CONFIG.DRIVE_FOLDER_ID) {
-      // 폴더가 존재하지 않으면 폴더 없이 재시도
-      console.warn('[Drive] 폴더 404 — 폴더 없이 재업로드');
-      delete metadata.parents;
-      const form2 = new FormData();
-      form2.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-      form2.append('file', file);
-      const res2 = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
-        method: 'POST', headers: { Authorization: `Bearer ${State.token}` }, body: form2,
-      });
-      if (!res2.ok) throw new Error(`Drive upload retry: ${res2.status}`);
-      const data2 = await res2.json();
-      try { await fetch(`https://www.googleapis.com/drive/v3/files/${data2.id}/permissions`, { method:'POST', headers:{Authorization:`Bearer ${State.token}`,'Content-Type':'application/json'}, body:JSON.stringify({role:'reader',type:'anyone'}) }); } catch(e){}
-      return `https://drive.google.com/file/d/${data2.id}/view`;
-    }
     if (!res.ok) throw new Error(`Drive upload: ${res.status}`);
     const data = await res.json();
 
     // 파일을 링크 공유 가능하게 설정 (썸네일 복원용)
     try {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions?supportsAllDrives=true`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'reader', type: 'anyone' }),
