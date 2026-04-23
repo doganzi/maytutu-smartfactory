@@ -6472,7 +6472,9 @@ Screens['approval-detail'] = async (params = {}) => {
 };
 
 /* ═══════════════════════════════════════════════
-   PDF 생성 (작업지시서 문서화)
+   PDF 생성 (HACCP 작업지시서 보고서)
+   — 매 공정 1페이지, 작업자 기입 내용 전체 표시,
+     사진 대형 삽입, HACCP 중요 포인트 강조
    ═══════════════════════════════════════════════ */
 async function generateWOPdf(woId) {
   const { jsPDF } = window.jspdf;
@@ -6485,319 +6487,434 @@ async function generateWOPdf(woId) {
   records.sort((a, b) => parseInt(a[1]) - parseInt(b[1]));
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 14;
-  const contentW = pageW - margin * 2;
-  let y = margin;
+  const pageW = doc.internal.pageSize.getWidth();  // 210
+  const pageH = doc.internal.pageSize.getHeight();  // 297
+  const M = 12; // margin
+  const CW = pageW - M * 2; // content width
+  let y = M;
 
-  // 한글 폰트 없이도 동작하도록 기본 폰트 사용 (한글은 Unicode로 직접 그림)
-  // jsPDF 2.5+ 는 기본적으로 standard14 폰트만 포함. 한글 지원을 위해 커스텀 폰트 대신
-  // HTML canvas 방식으로 한글 텍스트를 이미지로 변환하여 삽입
-  const canvasTextToImg = (text, fontSize, fontWeight, maxWidth, color) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const scale = 3; // 고해상도
-    ctx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
-    const measured = ctx.measureText(text);
-    const w = Math.min(measured.width, maxWidth * scale);
-    canvas.width = w + 4;
-    canvas.height = fontSize * scale * 1.4;
-    ctx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
-    ctx.fillStyle = color || '#000';
-    ctx.textBaseline = 'top';
-    ctx.fillText(text, 0, fontSize * scale * 0.15);
-    return { dataUrl: canvas.toDataURL('image/png'), w: canvas.width / scale, h: canvas.height / scale };
+  // ── 한글 Canvas 렌더링 헬퍼 ──
+  const _font = '"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+  const txtImg = (text, fs, fw, mw, color) => {
+    const c = document.createElement('canvas'), ctx = c.getContext('2d'), s = 3;
+    ctx.font = `${fw||'normal'} ${fs*s}px ${_font}`;
+    const tw = Math.min(ctx.measureText(text).width, mw*s);
+    c.width = tw + 6; c.height = fs*s*1.5;
+    ctx.font = `${fw||'normal'} ${fs*s}px ${_font}`;
+    ctx.fillStyle = color||'#000'; ctx.textBaseline = 'top';
+    ctx.fillText(text, 0, fs*s*0.15);
+    return { d: c.toDataURL('image/png'), w: c.width/s, h: c.height/s };
   };
 
-  // 한글 텍스트를 PDF에 추가하는 헬퍼
-  const addKorText = (text, x, yPos, fontSize, fontWeight, color, maxWidth) => {
+  // 한글 텍스트 추가 (자동 줄바꿈 + 페이지 넘김)
+  const putText = (text, x, yy, fs, fw, color, mw) => {
     if (!text) return 0;
-    const mw = maxWidth || contentW;
-    // 긴 텍스트 줄바꿈 처리
-    const lines = [];
-    let remaining = text;
-    const testCanvas = document.createElement('canvas');
-    const testCtx = testCanvas.getContext('2d');
-    const scale = 3;
-    testCtx.font = `${fontWeight || 'normal'} ${fontSize * scale}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
-
-    while (remaining.length > 0) {
-      let fit = remaining.length;
-      while (fit > 0 && testCtx.measureText(remaining.substring(0, fit)).width > mw * scale) {
-        fit--;
-      }
-      if (fit === 0) fit = 1;
-      lines.push(remaining.substring(0, fit));
-      remaining = remaining.substring(fit);
+    const maxW = mw || CW; const s = 3;
+    const tc = document.createElement('canvas'), tx = tc.getContext('2d');
+    tx.font = `${fw||'normal'} ${fs*s}px ${_font}`;
+    const lines = []; let rem = String(text);
+    while (rem.length > 0) {
+      let f = rem.length;
+      while (f > 0 && tx.measureText(rem.substring(0,f)).width > maxW*s) f--;
+      if (f === 0) f = 1;
+      lines.push(rem.substring(0, f)); rem = rem.substring(f);
     }
-
-    let totalH = 0;
-    for (const line of lines) {
-      const img = canvasTextToImg(line, fontSize, fontWeight, mw, color);
-      if (yPos + totalH + img.h > pageH - 10) {
-        doc.addPage();
-        yPos = margin;
-        totalH = 0;
-      }
-      doc.addImage(img.dataUrl, 'PNG', x, yPos + totalH, img.w, img.h);
-      totalH += img.h + 0.5;
+    let th = 0;
+    for (const ln of lines) {
+      const im = txtImg(ln, fs, fw, maxW, color);
+      if (yy + th + im.h > pageH - 12) { doc.addPage(); yy = M; th = 0; }
+      doc.addImage(im.d, 'PNG', x, yy + th, im.w, im.h);
+      th += im.h + 0.3;
     }
-    return totalH;
+    return th;
   };
 
-  // 페이지 번호 추가 함수 (마지막에 호출)
-  const addPageNumbers = () => {
-    const totalPages = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`${i} / ${totalPages}`, pageW / 2, pageH - 6, { align: 'center' });
-      doc.text('MAYTUTU Smart Factory', pageW - margin, pageH - 6, { align: 'right' });
-    }
+  // 구분선 헬퍼
+  const hLine = (yy, color, width) => {
+    doc.setDrawColor(...(color||[21,101,192])); doc.setLineWidth(width||0.4);
+    doc.line(M, yy, pageW - M, yy);
   };
 
-  // ──── 헤더 ────
-  const hBg = '#1565c0';
+  // Drive 사진 → base64 로드
+  const loadDrivePhoto = async (url) => {
+    try {
+      const m = url.match(/\/d\/([^\/]+)/);
+      if (!m) return null;
+      const resp = await fetch(`https://drive.google.com/thumbnail?id=${m[1]}&sz=w400`);
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      return await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result); rd.readAsDataURL(blob); });
+    } catch { return null; }
+  };
+
+  // 페이지 헤더 (각 페이지 상단에 공통 정보 표시)
+  const pageHeader = (title, subtitle) => {
+    doc.setFillColor(21, 101, 192);
+    doc.rect(0, 0, pageW, 18, 'F');
+    const t1 = txtImg(title, 10, 'bold', CW - 60, '#fff');
+    doc.addImage(t1.d, 'PNG', M, 3, t1.w, t1.h);
+    if (subtitle) {
+      const t2 = txtImg(subtitle, 7, 'normal', CW - 60, '#bbdefb');
+      doc.addImage(t2.d, 'PNG', M, 11, t2.w, t2.h);
+    }
+    // 오른쪽: WO번호
+    const t3 = txtImg(woId, 7, 'normal', 60, '#bbdefb');
+    doc.addImage(t3.d, 'PNG', pageW - M - 50, 5, t3.w, t3.h);
+    // 제품명
+    const t4 = txtImg(wo[4]||'', 7, 'normal', 60, '#e3f2fd');
+    doc.addImage(t4.d, 'PNG', pageW - M - 50, 11, t4.w, t4.h);
+    return 22;
+  };
+
+  // 정보 행 (라벨: 값) — 테이블 느낌
+  const infoRow = (label, value, yy, labelW) => {
+    const lw = labelW || 32;
+    // 라벨 배경
+    doc.setFillColor(240, 244, 250);
+    doc.rect(M, yy, lw, 6, 'F');
+    doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.15);
+    doc.rect(M, yy, CW, 6);
+    const lh = putText(label, M + 1.5, yy + 1, 7, 'bold', '#333', lw - 3);
+    const vh = putText(String(value||'-'), M + lw + 2, yy + 1, 7, 'normal', '#222', CW - lw - 4);
+    return Math.max(lh, vh, 6) + 0.5;
+  };
+
+  // ════════════════════════════════════════════
+  // PAGE 1: 표지 + 기본 정보 + HACCP 요약
+  // ════════════════════════════════════════════
+  // 표지 헤더
   doc.setFillColor(21, 101, 192);
-  doc.rect(0, 0, pageW, 32, 'F');
-  const titleImg = canvasTextToImg('작업지시서 (Work Order Report)', 14, 'bold', contentW, '#fff');
-  doc.addImage(titleImg.dataUrl, 'PNG', margin, 6, titleImg.w, titleImg.h);
-  const woIdImg = canvasTextToImg(woId, 10, 'normal', contentW, '#bbdefb');
-  doc.addImage(woIdImg.dataUrl, 'PNG', margin, 19, woIdImg.w, woIdImg.h);
-  // 생성일시
-  const dateStr = formatDateTime();
-  const dateImg = canvasTextToImg(dateStr, 8, 'normal', 80, '#bbdefb');
-  doc.addImage(dateImg.dataUrl, 'PNG', pageW - margin - 55, 22, dateImg.w, dateImg.h);
-  y = 38;
+  doc.rect(0, 0, pageW, 50, 'F');
+  const mainTitle = txtImg('HACCP 생산 기록서', 18, 'bold', CW, '#fff');
+  doc.addImage(mainTitle.d, 'PNG', M, 10, mainTitle.w, mainTitle.h);
+  const subTitle = txtImg('작업지시서 (Work Order Report)', 11, 'normal', CW, '#bbdefb');
+  doc.addImage(subTitle.d, 'PNG', M, 24, subTitle.w, subTitle.h);
+  const woIdTitle = txtImg(woId, 10, 'normal', CW, '#e3f2fd');
+  doc.addImage(woIdTitle.d, 'PNG', M, 36, woIdTitle.w, woIdTitle.h);
+  // 우측 날짜
+  const genDate = txtImg(`문서 생성: ${formatDateTime()}`, 8, 'normal', 70, '#90caf9');
+  doc.addImage(genDate.d, 'PNG', pageW - M - 60, 40, genDate.w, genDate.h);
+  y = 56;
 
-  // ──── 기본 정보 테이블 ────
-  const h = addKorText('기본 정보', margin, y, 11, 'bold', '#1565c0');
-  y += h + 2;
-  doc.setDrawColor(21, 101, 192);
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, pageW - margin, y);
-  y += 4;
+  // ── 기본 정보 섹션 ──
+  const secH = putText('1. 기본 정보', M, y, 11, 'bold', '#1565c0');
+  y += secH + 2; hLine(y); y += 3;
 
-  const infoItems = [
+  const infoData = [
     ['제품명', wo[4] || '-'],
-    ['생산량', `${wo[5] || '-'} kg`],
+    ['제품코드', wo[3] || '-'],
+    ['SOP 번호', wo[1] || '-'],
+    ['생산량 (목표)', `${wo[5] || '-'} kg`],
     ['포장 단위', wo[6] || '-'],
     ['포장 수량', `${wo[7] || '-'} 개`],
     ['작업자', wo[8] || '-'],
-    ['SOP', wo[1] || '-'],
-    ['시작 시간', (wo[9] || '-').substring(0, 16)],
-    ['완료 시간', (wo[10] || '-').substring(0, 16)],
-    ['냉동 시작', wo[11] || '-'],
-    ['상태', wo[12] || '-'],
+    ['생산 시작', (wo[9] || '-').substring(0, 16)],
+    ['생산 완료', (wo[10] || '-').substring(0, 16)],
+    ['냉동 시작 시간', wo[11] || '-'],
+    ['현재 상태', wo[12] || '-'],
     ['완제품 LOT', wo[14] || '-'],
     ['승인자', wo[15] || '-'],
-    ['승인 시간', (wo[16] || '-').substring(0, 16)],
+    ['승인 일시', (wo[16] || '-').substring(0, 16)],
   ];
 
-  // 2열 테이블 형태로 렌더링 (겹침 방지)
-  const colW = contentW / 2;
-  for (let i = 0; i < infoItems.length; i += 2) {
-    const [l1, v1] = infoItems[i];
-    const txt1 = `${l1}: ${v1}`;
-    const h1 = addKorText(txt1, margin + 2, y, 8, 'normal', '#333', colW - 4);
-    let h2 = 0;
-    if (i + 1 < infoItems.length) {
-      const [l2, v2] = infoItems[i + 1];
-      const txt2 = `${l2}: ${v2}`;
-      h2 = addKorText(txt2, margin + colW + 2, y, 8, 'normal', '#333', colW - 4);
-    }
-    y += Math.max(h1, h2) + 1;
-    if (y > pageH - 20) { doc.addPage(); y = margin; }
+  for (const [label, value] of infoData) {
+    if (y > pageH - 15) { doc.addPage(); y = M; }
+    y += infoRow(label, value, y, 36);
   }
 
   y += 6;
 
-  // ──── 공정 기록 ────
-  const recH = addKorText(`공정 기록 (${records.length}단계)`, margin, y, 11, 'bold', '#1565c0');
-  y += recH + 2;
-  doc.setDrawColor(21, 101, 192);
-  doc.line(margin, y, pageW - margin, y);
-  y += 4;
+  // ── HACCP 관리 요약 ──
+  const hacH = putText('2. HACCP 관리 요약', M, y, 11, 'bold', '#1565c0');
+  y += hacH + 2; hLine(y); y += 3;
 
-  for (const rec of records) {
+  // CCP 공정 식별
+  const ccpRecords = records.filter(r => r[3] === 'inspect');
+  const inputRecords = records.filter(r => r[3] === 'input');
+  const storeRecords = records.filter(r => r[3] === 'store');
+
+  const hacInfo = [
+    ['총 공정 수', `${records.length}단계`],
+    ['CCP 검사 공정 수', `${ccpRecords.length}건`],
+    ['원재료 투입 공정 수', `${inputRecords.length}건`],
+    ['냉동보관 공정 수', `${storeRecords.length}건`],
+    ['원재료 LOT 추적', inputRecords.length > 0 ? '기록됨' : '해당 없음'],
+    ['작업 완료 여부', records.every(r => r[10] === '완료') ? '전체 완료' : '일부 미완료'],
+  ];
+  for (const [label, value] of hacInfo) {
+    if (y > pageH - 15) { doc.addPage(); y = M; }
+    y += infoRow(label, value, y, 42);
+  }
+
+  // ════════════════════════════════════════════
+  // 각 공정별 1페이지
+  // ════════════════════════════════════════════
+  for (let ri = 0; ri < records.length; ri++) {
+    const rec = records[ri];
     const stepNo = rec[1] || '';
     const stepName = rec[2] || '';
     const stepType = rec[3] || '';
     const usedLots = rec[4] || '';
     const stepDataRaw = rec[5] || '';
     const photoUrlsRaw = rec[6] || '';
+    const actualValue = rec[7] || '';
+    const photoUrl = rec[8] || '';
+    const checkResult = rec[9] || '';
     const recordStatus = rec[10] || '';
     const completedAt = rec[11] || '';
     const worker = rec[12] || '';
 
-    // 페이지 넘김 체크
-    if (y > pageH - 40) { doc.addPage(); y = margin; }
+    const typeLabel = {input:'원재료 투입',process:'믹싱 공정',seal:'포장/밀봉',inspect:'CCP 검사(금속검출)','qr-label':'QR 라벨 출력',store:'냉동보관',pack:'계량/소분'}[stepType] || stepType;
+    const isCCP = stepType === 'inspect';
+    const isInput = stepType === 'input';
 
-    // 공정 헤더 배경
-    const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관',pack:'계량'}[stepType] || stepType;
-    const statusColor = recordStatus === '완료' ? '#2e7d32' : '#f57c00';
+    // ── 새 페이지 시작 ──
+    doc.addPage();
+    y = pageHeader(`공정 ${stepNo}. ${stepName}`, `${typeLabel} | ${recordStatus}`);
 
-    doc.setFillColor(240, 245, 255);
-    doc.roundedRect(margin, y, contentW, 8, 1.5, 1.5, 'F');
-    const stepTitle = `${stepNo}. ${stepName}`;
-    const stH = addKorText(stepTitle, margin + 2, y + 1.5, 9, 'bold', '#1565c0', contentW - 60);
-    // 상태 & 유형 태그
-    const tagText = `[${typeLabel}] ${recordStatus}`;
-    const tagImg = canvasTextToImg(tagText, 7, 'bold', 60, statusColor);
-    doc.addImage(tagImg.dataUrl, 'PNG', pageW - margin - 40, y + 2, tagImg.w, tagImg.h);
-    y += Math.max(stH, 8) + 2;
-
-    // 작업자 / 시간
-    const metaText = `작업자: ${(worker||'').split('@')[0]}  |  시간: ${completedAt.substring(0,16)}`;
-    const metaH = addKorText(metaText, margin + 4, y, 7, 'normal', '#666');
-    y += metaH + 1;
-
-    // 사용 원재료 LOT
-    if (usedLots) {
-      const lots = usedLots.split(',').filter((v,i,a) => a.indexOf(v)===i);
-      const lotH = addKorText(`사용 원재료 LOT (${lots.length}건): ${lots.join(', ')}`, margin + 4, y, 7, 'normal', '#1565c0');
-      y += lotH + 1;
+    // CCP 공정은 빨간 강조 배너
+    if (isCCP) {
+      doc.setFillColor(255, 235, 238);
+      doc.rect(M, y, CW, 8, 'F');
+      doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5);
+      doc.rect(M, y, CW, 8);
+      putText('⚠ HACCP CCP (Critical Control Point) — 중요관리점', M + 3, y + 1.5, 8, 'bold', '#c62828', CW - 6);
+      y += 10;
     }
 
-    // Step Data 파싱
+    // ── 공정 기본 정보 ──
+    const stepSec = putText('기록 정보', M, y, 9, 'bold', '#1565c0');
+    y += stepSec + 1; hLine(y, [200,210,230], 0.2); y += 2;
+
+    y += infoRow('공정 번호', stepNo, y, 30);
+    y += infoRow('공정명', stepName, y, 30);
+    y += infoRow('공정 유형', typeLabel, y, 30);
+    y += infoRow('작업자', worker, y, 30);
+    y += infoRow('기록 시간', completedAt, y, 30);
+    y += infoRow('상태', recordStatus, y, 30);
+    if (actualValue) y += infoRow('측정값', actualValue, y, 30);
+    if (checkResult) y += infoRow('판정', checkResult, y, 30);
+
+    y += 4;
+
+    // ── 사용 원재료 LOT (추적성 — HACCP 핵심) ──
+    if (usedLots) {
+      const lots = usedLots.split(',').filter((v,i,a) => a.indexOf(v)===i);
+      const lotSec = putText('원재료 LOT 추적 (Traceability)', M, y, 9, 'bold', '#1565c0');
+      y += lotSec + 1; hLine(y, [200,210,230], 0.2); y += 2;
+
+      for (const lot of lots) {
+        if (y > pageH - 15) { doc.addPage(); y = M; }
+        doc.setFillColor(232, 245, 253);
+        doc.rect(M + 2, y, CW - 4, 5.5, 'F');
+        putText(`📦 ${lot}`, M + 4, y + 0.8, 7, 'normal', '#0d47a1', CW - 8);
+        y += 6;
+      }
+      y += 3;
+    }
+
+    // ── Step Data (작업자 기입 내용 전체) ──
     let stepData = {};
     try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
 
-    if (stepType === 'input' && stepData.inputQty) {
-      const iqH = addKorText(`투입량: ${stepData.inputQty}kg${stepData.targetQty ? ` (목표: ${stepData.targetQty}kg)` : ''}`, margin + 4, y, 7, 'normal', '#333');
-      y += iqH + 1;
-    }
+    const hasStepData = Object.keys(stepData).length > 0;
+    if (hasStepData) {
+      const dataSec = putText('작업자 기입 내용', M, y, 9, 'bold', '#1565c0');
+      y += dataSec + 1; hLine(y, [200,210,230], 0.2); y += 2;
 
-    if (stepData.checks && stepData.checks.length > 0) {
-      for (const c of stepData.checks) {
-        const ck = c.checked ? '✅' : '⬜';
-        const chH = addKorText(`${ck} ${c.name}`, margin + 6, y, 7, 'normal', '#444');
-        y += chH + 0.5;
+      // 투입량
+      if (stepData.inputQty != null) {
+        y += infoRow('투입량', `${stepData.inputQty} kg`, y, 30);
+        if (stepData.targetQty) y += infoRow('목표 투입량', `${stepData.targetQty} kg`, y, 30);
+        if (stepData.useType) y += infoRow('사용 구분', stepData.useType === 'full' ? '전량 사용' : '부분 사용', y, 30);
       }
-      y += 1;
-    }
 
-    if (stepType === 'pack' && stepData.packQty) {
-      const pkH = addKorText(`포장 수량: ${stepData.packQty}개`, margin + 4, y, 7, 'normal', '#333');
-      y += pkH + 1;
-      if (stepData.samples) {
+      // 체크항목 (HACCP 위생 점검 등)
+      if (stepData.checks && stepData.checks.length > 0) {
+        y += 2;
+        const chkTitle = putText('체크항목 (위생/품질 점검)', M + 2, y, 8, 'bold', '#333');
+        y += chkTitle + 1;
+        for (const c of stepData.checks) {
+          if (y > pageH - 12) { doc.addPage(); y = M; }
+          const icon = c.checked ? '☑' : '☐';
+          const chColor = c.checked ? '#2e7d32' : '#c62828';
+          putText(`${icon} ${c.name}`, M + 4, y, 7.5, 'normal', chColor, CW - 8);
+          y += 4.5;
+        }
+        y += 2;
+      }
+
+      // 계량/포장 데이터
+      if (stepData.packQty != null) {
+        y += infoRow('포장 수량', `${stepData.packQty} 개`, y, 30);
+      }
+      if (stepData.samples && stepData.samples.length > 0) {
+        y += 2;
+        putText('중량 검사 샘플 (HACCP 계량 검증)', M + 2, y, 8, 'bold', '#333');
+        y += 5;
         for (let si = 0; si < stepData.samples.length; si++) {
+          if (y > pageH - 12) { doc.addPage(); y = M; }
           const s = stepData.samples[si];
-          const smH = addKorText(`  샘플 #${si+1} 무게: ${s.weight||'-'}kg`, margin + 6, y, 7, 'normal', '#555');
-          y += smH + 0.5;
+          y += infoRow(`샘플 #${si+1}`, `${s.weight||'-'} kg`, y, 30);
+        }
+        y += 2;
+      }
+
+      // 밀봉/라벨
+      if (stepData.sealQty != null) {
+        y += infoRow('최종 수량', `${stepData.sealQty} 개`, y, 30);
+        y += infoRow('라벨 부착 확인', stepData.labelCheck ? '확인 완료 ✓' : '미확인 ✗', y, 30);
+        y += infoRow('밀봉 상태 확인', stepData.sealCheck ? '확인 완료 ✓' : '미확인 ✗', y, 30);
+      }
+
+      // CCP 검사 데이터 (금속검출 등 — HACCP 핵심)
+      if (isCCP) {
+        if (stepData.ccpTotal != null) y += infoRow('검사 총 수량', `${stepData.ccpTotal} 개`, y, 34);
+        if (stepData.passCount != null) y += infoRow('합격 수량', `${stepData.passCount} 개`, y, 34);
+        if (stepData.failCount != null) y += infoRow('불합격 수량', `${stepData.failCount} 개`, y, 34);
+        if (stepData.times) {
+          y += 2;
+          putText('CCP 모니터링 시간 기록', M + 2, y, 8, 'bold', '#c62828');
+          y += 5;
+          for (const [k, v] of Object.entries(stepData.times)) {
+            if (y > pageH - 12) { doc.addPage(); y = M; }
+            y += infoRow(k, v, y, 30);
+          }
+        }
+        // CCP 판정 결과 강조
+        y += 3;
+        const ccpResult = (stepData.failCount != null && stepData.failCount > 0) ? '불합격 발생' : '전량 합격';
+        const ccpColor = ccpResult === '전량 합격' ? [232,245,233] : [255,235,238];
+        const ccpTxtColor = ccpResult === '전량 합격' ? '#2e7d32' : '#c62828';
+        doc.setFillColor(...ccpColor);
+        doc.rect(M, y, CW, 8, 'F');
+        putText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 1.5, 8, 'bold', ccpTxtColor, CW - 6);
+        y += 10;
+      }
+
+      // QR 라벨
+      if (stepData.qrQty) y += infoRow('QR 라벨 발행 수', `${stepData.qrQty} 매`, y, 30);
+
+      // 냉동보관
+      if (stepData.freezeStart) {
+        y += infoRow('냉동 시작 시간', stepData.freezeStart, y, 34);
+        y += infoRow('냉동 온도', stepData.freezeTemp || '-18°C (기본)', y, 34);
+      }
+
+      // 기타 JSON 데이터 전체 표시 (누락 방지)
+      const shownKeys = ['inputQty','targetQty','useType','checks','packQty','samples','sealQty',
+        'labelCheck','sealCheck','ccpTotal','passCount','failCount','times','qrQty','freezeStart','freezeTemp'];
+      const extraKeys = Object.keys(stepData).filter(k => !shownKeys.includes(k));
+      if (extraKeys.length > 0) {
+        y += 2;
+        putText('기타 기록 데이터', M + 2, y, 8, 'bold', '#666');
+        y += 5;
+        for (const k of extraKeys) {
+          if (y > pageH - 12) { doc.addPage(); y = M; }
+          const val = typeof stepData[k] === 'object' ? JSON.stringify(stepData[k]) : String(stepData[k]);
+          y += infoRow(k, val, y, 30);
         }
       }
     }
 
-    if (stepType === 'seal' && stepData.sealQty) {
-      const slH = addKorText(`최종 수량: ${stepData.sealQty}개 · 라벨: ${stepData.labelCheck?'O':'X'} · 밀봉: ${stepData.sealCheck?'O':'X'}`, margin + 4, y, 7, 'normal', '#333');
-      y += slH + 1;
-    }
+    // ── 사진 영역 (크게 표시) ──
+    const allPhotoUrls = [];
+    if (photoUrlsRaw) allPhotoUrls.push(...photoUrlsRaw.split(' | ').filter(u => u.trim()));
+    if (photoUrl && !allPhotoUrls.includes(photoUrl)) allPhotoUrls.push(photoUrl);
 
-    if (stepType === 'inspect') {
-      if (stepData.ccpTotal) {
-        const ccH = addKorText(`검사 수량: ${stepData.ccpTotal}개`, margin + 4, y, 7, 'normal', '#333');
-        y += ccH + 1;
-      }
-      if (stepData.times) {
-        const timeStr = Object.entries(stepData.times).map(([k,v]) => `${k}: ${v}`).join(' · ');
-        if (timeStr) { const tH = addKorText(timeStr, margin + 4, y, 7, 'normal', '#555'); y += tH + 1; }
-      }
-    }
+    if (allPhotoUrls.length > 0) {
+      if (y > pageH - 60) { doc.addPage(); y = M; }
+      y += 3;
+      const photoSec = putText(`증빙 사진 (${allPhotoUrls.length}장)`, M, y, 9, 'bold', '#1565c0');
+      y += photoSec + 1; hLine(y, [200,210,230], 0.2); y += 3;
 
-    if (stepType === 'qr-label' && stepData.qrQty) {
-      const qH = addKorText(`QR 라벨 수량: ${stepData.qrQty}매`, margin + 4, y, 7, 'normal', '#333');
-      y += qH + 1;
-    }
-    if (stepType === 'store' && stepData.freezeStart) {
-      const fH = addKorText(`냉동 시작: ${stepData.freezeStart}`, margin + 4, y, 7, 'normal', '#333');
-      y += fH + 1;
-    }
+      // 사진을 크게 표시 (폭 80mm, 2열이면 각 85mm)
+      const photoW = allPhotoUrls.length === 1 ? Math.min(CW - 4, 120) : (CW - 8) / 2;
+      const photoH = photoW * 0.75; // 4:3 비율
+      let px = M + 2;
+      let colIdx = 0;
 
-    // 사진 삽입 (Drive 썸네일 → base64)
-    if (photoUrlsRaw) {
-      const photoUrls = photoUrlsRaw.split(' | ').filter(u => u.trim());
-      if (photoUrls.length > 0) {
-        const phH = addKorText(`촬영 사진 (${photoUrls.length}장)`, margin + 4, y, 7, 'bold', '#555');
-        y += phH + 2;
+      for (const pUrl of allPhotoUrls) {
+        if (y + photoH > pageH - 15) { doc.addPage(); y = M; px = M + 2; colIdx = 0; }
 
-        const photoSize = 28;
-        let px = margin + 4;
-
-        for (const url of photoUrls) {
-          if (px + photoSize > pageW - margin) {
-            px = margin + 4;
-            y += photoSize + 3;
-          }
-          if (y + photoSize > pageH - 15) { doc.addPage(); y = margin; px = margin + 4; }
-
-          try {
-            // Drive file ID 추출
-            const match = url.match(/\/d\/([^\/]+)/);
-            if (match) {
-              const fileId = match[1];
-              const thumbUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w200`;
-              const resp = await fetch(thumbUrl);
-              if (resp.ok) {
-                const blob = await resp.blob();
-                const b64 = await new Promise(resolve => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(reader.result);
-                  reader.readAsDataURL(blob);
-                });
-                doc.addImage(b64, 'JPEG', px, y, photoSize, photoSize);
-                px += photoSize + 3;
-              }
-            }
-          } catch (photoErr) {
-            console.warn(`[PDF] 사진 삽입 실패:`, photoErr.message);
-            // 실패 시 빈 박스
-            doc.setDrawColor(200);
-            doc.rect(px, y, photoSize, photoSize);
-            px += photoSize + 3;
-          }
+        const b64 = await loadDrivePhoto(pUrl);
+        if (b64) {
+          doc.addImage(b64, 'JPEG', px, y, photoW, photoH);
+        } else {
+          doc.setDrawColor(200); doc.setFillColor(245,245,245);
+          doc.rect(px, y, photoW, photoH, 'FD');
+          putText('사진 로드 실패', px + photoW/2 - 12, y + photoH/2 - 3, 7, 'normal', '#999', photoW);
         }
-        y += photoSize + 3;
+
+        colIdx++;
+        if (allPhotoUrls.length === 1 || colIdx >= 2) {
+          y += photoH + 3;
+          px = M + 2;
+          colIdx = 0;
+        } else {
+          px += photoW + 4;
+        }
       }
+      if (colIdx > 0) y += photoH + 3;
     }
+  } // end for each record
 
-    // 구분선
-    doc.setDrawColor(230);
-    doc.setLineWidth(0.2);
-    doc.line(margin + 2, y, pageW - margin - 2, y);
-    y += 4;
-  }
+  // ════════════════════════════════════════════
+  // 마지막 페이지: 서명란 + HACCP 확인서
+  // ════════════════════════════════════════════
+  doc.addPage();
+  y = pageHeader('확인 및 서명', 'HACCP 생산기록 확인서');
+  y += 4;
 
-  // ──── 서명란 ────
-  if (y > pageH - 45) { doc.addPage(); y = margin; }
-  y += 6;
-  const sigH = addKorText('서명', margin, y, 11, 'bold', '#1565c0');
-  y += sigH + 2;
-  doc.setDrawColor(21, 101, 192);
-  doc.line(margin, y, pageW - margin, y);
-  y += 6;
+  const cfmSec = putText('HACCP 생산기록 확인', M, y, 11, 'bold', '#1565c0');
+  y += cfmSec + 2; hLine(y); y += 4;
 
-  const sigItems = [
-    ['작업자', wo[8] || '-', (wo[10] || '-').substring(0, 16)],
-    ['승인자', wo[15] || '-', (wo[16] || '-').substring(0, 16)],
+  const confirmItems = [
+    ['문서 번호', woId],
+    ['제품명', wo[4] || '-'],
+    ['생산량', `${wo[5]||'-'} kg / ${wo[7]||'-'} 개`],
+    ['생산 기간', `${(wo[9]||'-').substring(0,16)} ~ ${(wo[10]||'-').substring(0,16)}`],
+    ['CCP 검사 결과', ccpRecords.length > 0 ? '검사 완료' : '해당 없음'],
+    ['원재료 LOT 추적', inputRecords.filter(r => r[4]).length > 0 ? '전체 기록됨' : '해당 없음'],
+    ['냉동보관 기록', storeRecords.length > 0 ? '기록됨' : '해당 없음'],
+    ['총 공정 완료', `${records.filter(r=>r[10]==='완료').length} / ${records.length}단계`],
+    ['완제품 LOT', wo[14] || '-'],
   ];
-  for (const [role, name, dt] of sigItems) {
-    const rH = addKorText(`${role}: ${name}`, margin + 4, y, 8, 'normal', '#333');
-    y += rH;
-    const dH = addKorText(`날짜: ${dt}`, margin + 4, y, 7, 'normal', '#888');
-    y += dH + 3;
-
-    // 서명 라인
-    doc.setDrawColor(180);
-    doc.setLineWidth(0.3);
-    doc.line(margin + 50, y, margin + 100, y);
-    y += 8;
+  for (const [label, value] of confirmItems) {
+    y += infoRow(label, value, y, 38);
   }
 
-  // 페이지 번호 추가
-  addPageNumbers();
+  y += 10;
+
+  // 서명란
+  const sigSec = putText('서명란', M, y, 10, 'bold', '#1565c0');
+  y += sigSec + 2; hLine(y); y += 6;
+
+  const sigEntries = [
+    ['작업자 (생산담당)', wo[8] || '-', (wo[10] || '-').substring(0, 16)],
+    ['승인자 (품질관리)', wo[15] || '-', (wo[16] || '-').substring(0, 16)],
+  ];
+  for (const [role, name, dt] of sigEntries) {
+    putText(role, M + 2, y, 8, 'bold', '#333');
+    y += 5;
+    y += infoRow('성명', name, y, 20);
+    y += infoRow('일시', dt, y, 20);
+    // 서명란 박스
+    doc.setDrawColor(180); doc.setLineWidth(0.3);
+    putText('서명:', M + 2, y + 1, 7, 'normal', '#888');
+    doc.rect(M + 20, y, 60, 10);
+    y += 14;
+  }
+
+  // ── 페이지 번호 + 푸터 ──
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7); doc.setTextColor(150);
+    doc.text(`${i} / ${totalPages}`, pageW / 2, pageH - 5, { align: 'center' });
+    doc.text('MAYTUTU Smart Factory · HACCP 생산기록', pageW - M, pageH - 5, { align: 'right' });
+    doc.text(woId, M, pageH - 5);
+  }
 
   // PDF Blob 생성
   const pdfBlob = doc.output('blob');
