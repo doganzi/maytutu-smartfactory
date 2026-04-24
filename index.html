@@ -6540,7 +6540,7 @@ async function generateWOPdf(woId) {
     try {
       const m = url.match(/\/d\/([^\/]+)/);
       if (!m) return null;
-      const resp = await fetch(`https://drive.google.com/thumbnail?id=${m[1]}&sz=w400`);
+      const resp = await fetch(`https://drive.google.com/thumbnail?id=${m[1]}&sz=w600`);
       if (!resp.ok) return null;
       const blob = await resp.blob();
       return await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result); rd.readAsDataURL(blob); });
@@ -6566,17 +6566,41 @@ async function generateWOPdf(woId) {
     return 22;
   };
 
-  // 정보 행 (라벨: 값) — 테이블 느낌
+  // 텍스트 높이 측정 (실제로 그리지 않음)
+  const measureText = (text, fs, fw, mw) => {
+    if (!text) return 0;
+    const maxW = mw || CW; const s = 3;
+    const tc = document.createElement('canvas'), tx = tc.getContext('2d');
+    tx.font = `${fw||'normal'} ${fs*s}px ${_font}`;
+    let rem = String(text), lines = 0;
+    while (rem.length > 0) {
+      let f = rem.length;
+      while (f > 0 && tx.measureText(rem.substring(0,f)).width > maxW*s) f--;
+      if (f === 0) f = 1;
+      rem = rem.substring(f); lines++;
+    }
+    return lines * (fs * 1.5 / s + 0.3) + 0.3;
+  };
+
+  // 정보 행 (라벨: 값) — 테이블 느낌 (동적 높이)
   const infoRow = (label, value, yy, labelW) => {
-    const lw = labelW || 32;
-    // 라벨 배경
+    const lw = labelW || 42;
+    const valStr = String(value||'-');
+    // 높이 측정
+    const lh = measureText(label, 7, 'bold', lw - 3);
+    const vh = measureText(valStr, 7, 'normal', CW - lw - 4);
+    const rh = Math.max(lh, vh, 6) + 2;
+    // 페이지 넘침 체크
+    if (yy + rh > pageH - 12) { doc.addPage(); yy = M; }
+    // 배경 & 테두리
     doc.setFillColor(240, 244, 250);
-    doc.rect(M, yy, lw, 6, 'F');
+    doc.rect(M, yy, lw, rh, 'F');
     doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.15);
-    doc.rect(M, yy, CW, 6);
-    const lh = putText(label, M + 1.5, yy + 1, 7, 'bold', '#333', lw - 3);
-    const vh = putText(String(value||'-'), M + lw + 2, yy + 1, 7, 'normal', '#222', CW - lw - 4);
-    return Math.max(lh, vh, 6) + 0.5;
+    doc.rect(M, yy, CW, rh);
+    // 텍스트
+    putText(label, M + 1.5, yy + 1, 7, 'bold', '#333', lw - 3);
+    putText(valStr, M + lw + 2, yy + 1, 7, 'normal', '#222', CW - lw - 4);
+    return rh + 0.5;
   };
 
   // ════════════════════════════════════════════
@@ -6619,7 +6643,7 @@ async function generateWOPdf(woId) {
 
   for (const [label, value] of infoData) {
     if (y > pageH - 15) { doc.addPage(); y = M; }
-    y += infoRow(label, value, y, 36);
+    y += infoRow(label, value, y, 42);
   }
 
   y += 6;
@@ -6643,7 +6667,7 @@ async function generateWOPdf(woId) {
   ];
   for (const [label, value] of hacInfo) {
     if (y > pageH - 15) { doc.addPage(); y = M; }
-    y += infoRow(label, value, y, 42);
+    y += infoRow(label, value, y, 48);
   }
 
   // ════════════════════════════════════════════
@@ -6686,14 +6710,14 @@ async function generateWOPdf(woId) {
     const stepSec = putText('기록 정보', M, y, 9, 'bold', '#1565c0');
     y += stepSec + 1; hLine(y, [200,210,230], 0.2); y += 2;
 
-    y += infoRow('공정 번호', stepNo, y, 30);
-    y += infoRow('공정명', stepName, y, 30);
-    y += infoRow('공정 유형', typeLabel, y, 30);
-    y += infoRow('작업자', worker, y, 30);
-    y += infoRow('기록 시간', completedAt, y, 30);
-    y += infoRow('상태', recordStatus, y, 30);
-    if (actualValue) y += infoRow('측정값', actualValue, y, 30);
-    if (checkResult) y += infoRow('판정', checkResult, y, 30);
+    y += infoRow('공정 번호', stepNo, y, 40);
+    y += infoRow('공정명', stepName, y, 40);
+    y += infoRow('공정 유형', typeLabel, y, 40);
+    y += infoRow('작업자', worker, y, 40);
+    y += infoRow('기록 시간', completedAt, y, 40);
+    y += infoRow('상태', recordStatus, y, 40);
+    if (actualValue) y += infoRow('측정값', actualValue, y, 40);
+    if (checkResult) y += infoRow('판정', checkResult, y, 40);
 
     y += 4;
 
@@ -6724,9 +6748,9 @@ async function generateWOPdf(woId) {
 
       // 투입량
       if (stepData.inputQty != null) {
-        y += infoRow('투입량', `${stepData.inputQty} kg`, y, 30);
-        if (stepData.targetQty) y += infoRow('목표 투입량', `${stepData.targetQty} kg`, y, 30);
-        if (stepData.useType) y += infoRow('사용 구분', stepData.useType === 'full' ? '전량 사용' : '부분 사용', y, 30);
+        y += infoRow('투입량', `${stepData.inputQty} kg`, y, 40);
+        if (stepData.targetQty) y += infoRow('목표 투입량', `${stepData.targetQty} kg`, y, 40);
+        if (stepData.useType) y += infoRow('사용 구분', stepData.useType === 'full' ? '전량 사용' : '부분 사용', y, 40);
       }
 
       // 체크항목 (HACCP 위생 점검 등)
@@ -6746,7 +6770,7 @@ async function generateWOPdf(woId) {
 
       // 계량/포장 데이터
       if (stepData.packQty != null) {
-        y += infoRow('포장 수량', `${stepData.packQty} 개`, y, 30);
+        y += infoRow('포장 수량', `${stepData.packQty} 개`, y, 40);
       }
       if (stepData.samples && stepData.samples.length > 0) {
         y += 2;
@@ -6755,30 +6779,30 @@ async function generateWOPdf(woId) {
         for (let si = 0; si < stepData.samples.length; si++) {
           if (y > pageH - 12) { doc.addPage(); y = M; }
           const s = stepData.samples[si];
-          y += infoRow(`샘플 #${si+1}`, `${s.weight||'-'} kg`, y, 30);
+          y += infoRow(`샘플 #${si+1}`, `${s.weight||'-'} kg`, y, 40);
         }
         y += 2;
       }
 
       // 밀봉/라벨
       if (stepData.sealQty != null) {
-        y += infoRow('최종 수량', `${stepData.sealQty} 개`, y, 30);
-        y += infoRow('라벨 부착 확인', stepData.labelCheck ? '확인 완료 ✓' : '미확인 ✗', y, 30);
-        y += infoRow('밀봉 상태 확인', stepData.sealCheck ? '확인 완료 ✓' : '미확인 ✗', y, 30);
+        y += infoRow('최종 수량', `${stepData.sealQty} 개`, y, 40);
+        y += infoRow('라벨 부착 확인', stepData.labelCheck ? '확인 완료 ✓' : '미확인 ✗', y, 40);
+        y += infoRow('밀봉 상태 확인', stepData.sealCheck ? '확인 완료 ✓' : '미확인 ✗', y, 40);
       }
 
       // CCP 검사 데이터 (금속검출 등 — HACCP 핵심)
       if (isCCP) {
-        if (stepData.ccpTotal != null) y += infoRow('검사 총 수량', `${stepData.ccpTotal} 개`, y, 34);
-        if (stepData.passCount != null) y += infoRow('합격 수량', `${stepData.passCount} 개`, y, 34);
-        if (stepData.failCount != null) y += infoRow('불합격 수량', `${stepData.failCount} 개`, y, 34);
+        if (stepData.ccpTotal != null) y += infoRow('검사 총 수량', `${stepData.ccpTotal} 개`, y, 42);
+        if (stepData.passCount != null) y += infoRow('합격 수량', `${stepData.passCount} 개`, y, 42);
+        if (stepData.failCount != null) y += infoRow('불합격 수량', `${stepData.failCount} 개`, y, 42);
         if (stepData.times) {
           y += 2;
           putText('CCP 모니터링 시간 기록', M + 2, y, 8, 'bold', '#c62828');
           y += 5;
           for (const [k, v] of Object.entries(stepData.times)) {
             if (y > pageH - 12) { doc.addPage(); y = M; }
-            y += infoRow(k, v, y, 30);
+            y += infoRow(k, v, y, 40);
           }
         }
         // CCP 판정 결과 강조
@@ -6793,12 +6817,12 @@ async function generateWOPdf(woId) {
       }
 
       // QR 라벨
-      if (stepData.qrQty) y += infoRow('QR 라벨 발행 수', `${stepData.qrQty} 매`, y, 30);
+      if (stepData.qrQty) y += infoRow('QR 라벨 발행 수', `${stepData.qrQty} 매`, y, 42);
 
       // 냉동보관
       if (stepData.freezeStart) {
-        y += infoRow('냉동 시작 시간', stepData.freezeStart, y, 34);
-        y += infoRow('냉동 온도', stepData.freezeTemp || '-18°C (기본)', y, 34);
+        y += infoRow('냉동 시작 시간', stepData.freezeStart, y, 42);
+        y += infoRow('냉동 온도', stepData.freezeTemp || '-18°C (기본)', y, 42);
       }
 
       // 기타 JSON 데이터 전체 표시 (누락 방지)
@@ -6812,7 +6836,7 @@ async function generateWOPdf(woId) {
         for (const k of extraKeys) {
           if (y > pageH - 12) { doc.addPage(); y = M; }
           const val = typeof stepData[k] === 'object' ? JSON.stringify(stepData[k]) : String(stepData[k]);
-          y += infoRow(k, val, y, 30);
+          y += infoRow(k, val, y, 40);
         }
       }
     }
@@ -6881,7 +6905,7 @@ async function generateWOPdf(woId) {
     ['완제품 LOT', wo[14] || '-'],
   ];
   for (const [label, value] of confirmItems) {
-    y += infoRow(label, value, y, 38);
+    y += infoRow(label, value, y, 44);
   }
 
   y += 10;
@@ -6897,8 +6921,8 @@ async function generateWOPdf(woId) {
   for (const [role, name, dt] of sigEntries) {
     putText(role, M + 2, y, 8, 'bold', '#333');
     y += 5;
-    y += infoRow('성명', name, y, 20);
-    y += infoRow('일시', dt, y, 20);
+    y += infoRow('성명', name, y, 30);
+    y += infoRow('일시', dt, y, 30);
     // 서명란 박스
     doc.setDrawColor(180); doc.setLineWidth(0.3);
     putText('서명:', M + 2, y + 1, 7, 'normal', '#888');
