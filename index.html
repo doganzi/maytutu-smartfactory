@@ -5793,20 +5793,21 @@ async function completeStep() {
       for (const [lotId, count] of Object.entries(lotGroups)) {
         const lot = lots.find(l => l[0] === lotId);
         if (!lot) continue;
-        const totalIndivCount = parseInt(lot[10]) || 1;
         const totalQty = parseFloat(lot[4]) || 0;
-        const perUnit = totalQty / totalIndivCount;
-        const prevRemain = parseFloat(lot[8]) || 0;
-        const deductQty = perUnit * count;
-        const newRemain = Math.max(0, prevRemain - deductQty);
-        // 활성 개별 수 기준 소진 판정 (잔여 상태도 활성으로 간주)
+        // perUnit: 개별 항목의 실제 수량 우선, 없으면 LOT 총량/원래개수 사용
+        const sampleIndiv = allIndivs.find(iv => iv[1] === lotId);
+        const perUnit = sampleIndiv ? (parseFloat(sampleIndiv[4]) || totalQty / (parseInt(lot[10]) || 1))
+                                    : totalQty / (parseInt(lot[10]) || 1);
+        // 활성 개별 수 기준으로 잔량 직접 산출 (누적 오차 방지)
         const activeIndivs = allIndivs.filter(iv => iv[1] === lotId && !['폐기','소진'].includes(iv[3]));
+        const newRemain = Math.round(activeIndivs.length * perUnit * 100) / 100;
+        const prevRemain = parseFloat(lot[8]) || 0;
         const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
         await SheetsAPI.updateRow('원재료LOT', 0, lotId, {
-          8: String(newRemain.toFixed(2)),
+          8: String(newRemain),
           9: newStatus,
         });
-        console.log(`[재고차감] ${lotId}: -${count}개(${deductQty.toFixed(2)}kg), 잔량 ${prevRemain}→${newRemain.toFixed(2)}, 활성 ${activeIndivs.length}개, 상태 ${newStatus}`);
+        console.log(`[재고차감] ${lotId}: -${count}개(${(perUnit*count).toFixed(2)}kg), 잔량 ${prevRemain}→${newRemain}, 활성 ${activeIndivs.length}개, 상태 ${newStatus}`);
       }
       // 잔여분 항목도 기록에 포함 (개별 QR ID로 저장)
       usedLotIds = scannedItems.map(s => s.qrId).filter(Boolean).join(',');
@@ -7830,13 +7831,15 @@ async function initApp() {
         // 원재료 LOT: 잔량 = 활성개별수 × perUnit, 상태 = 활성개별 기반
         for (const lot of rmLots) {
           const lotId = lot[0], totalQty = parseFloat(lot[4]) || 0;
-          const totalIndivCount = parseInt(lot[10]) || 1;
-          const perUnit = totalQty / totalIndivCount;
           const remain = parseFloat(lot[8]) || 0;
           const status = lot[9] || '';
           const myIndivs = rmIndivs.filter(iv => iv[1] === lotId);
           const active = myIndivs.filter(iv => !['폐기','소진'].includes(iv[3]));
           const consumed = myIndivs.filter(iv => iv[3] === '소진');
+          // perUnit: 개별 항목의 실제 수량 우선 사용 (lot[10] 의존 제거)
+          const sampleIndiv = myIndivs[0];
+          const perUnit = sampleIndiv ? (parseFloat(sampleIndiv[4]) || totalQty / (parseInt(lot[10]) || 1))
+                                      : totalQty / (parseInt(lot[10]) || 1);
           const correctRemain = Math.round(active.length * perUnit * 100) / 100;
           const correctStatus = active.length === 0 ? '소진' : (consumed.length > 0 ? '사용중' : '미사용');
           if (Math.abs(remain - correctRemain) > 0.01 || status !== correctStatus) {
