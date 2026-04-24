@@ -6707,7 +6707,7 @@ async function generateWOPdf(woId) {
   };
 
   /* ── 텍스트 렌더링 ── */
-  const LH_FACTOR = 0.4; // 줄 높이 계수 (축소)
+  const LH_FACTOR = 0.55; // 줄 높이 계수 (겹침 방지)
 
   const drawText = (text, x, yy, fs, fw, color, mw, align) => {
     if (!text && text !== 0) return { h: 0, y: yy };
@@ -6779,7 +6779,7 @@ async function generateWOPdf(woId) {
         let token = localStorage.getItem('mt_token') || State.token;
         if (!token) return null;
         try {
-          const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(15000)
           });
@@ -7228,7 +7228,8 @@ async function generateWOPdf(woId) {
           // 테두리
           doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.3);
           doc.rect(px, y, photoW, photoH);
-          doc.addImage(b64, 'JPEG', px + 0.5, y + 0.5, photoW - 1, photoH - 1);
+          const imgFmt = b64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(b64, imgFmt, px + 0.5, y + 0.5, photoW - 1, photoH - 1);
         } else {
           doc.setDrawColor(200); doc.setFillColor(245, 245, 245);
           doc.rect(px, y, photoW, photoH, 'FD');
