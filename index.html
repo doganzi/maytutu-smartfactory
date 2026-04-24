@@ -6606,7 +6606,7 @@ async function generateWOPdf(woId) {
 
   /* ── 테이블 행 ── */
   const ROW_FS = 6, ROW_PAD = 1.2, MIN_ROW_H = 4.5;
-  const LABEL_W = 28; // 라벨 너비 (축소하여 값 영역 확대)
+  const LABEL_W = 35; // 라벨 너비 (한글 5자까지 한 줄 표시)
 
   const tableRow = (label, value, yy, labelW) => {
     const lw = labelW || LABEL_W;
@@ -6713,19 +6713,14 @@ async function generateWOPdf(woId) {
   }
   y += 4;
 
-  // ── 3. 공정 목록 요약 ──
+  // ── 3. 공정 목록 요약 (컴팩트 형식) ──
   y = sectionTitle('3. 공정 목록 요약', y);
   for (const rec of records) {
-    const typeMap = {input:'투입',process:'믹싱',seal:'포장',inspect:'검사','qr-label':'라벨',store:'보관',pack:'계량'};
-    const r = tableRow(
-      `${rec[1]}. ${rec[2]||''}`,
-      `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'미완료'} | ${(rec[11]||'').substring(11,16)||'-'}`,
-      y, 32
-    );
+    const typeMap = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'라벨',store:'보관',pack:'계량'};
+    const stepVal = `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'미완료'} | ${(rec[11]||'').substring(11,16)||'-'}`;
+    const r = tableRow(`${rec[1]}. ${rec[2]||''}`, stepVal, y, 55);
     y = r.nextY;
   }
-  // 공정 목록 후 빈 공간이 남아도 불필요한 페이지 추가 방지
-  // (각 공정 페이지는 doc.addPage()로 시작하므로 여기서 여백 제거)
 
   /* ═══════════════════════════════════════════
      각 공정별 페이지
@@ -6748,10 +6743,8 @@ async function generateWOPdf(woId) {
     const typeLabel = {input:'원재료 투입',process:'믹싱 공정',seal:'포장/밀봉',inspect:'CCP 검사(금속검출)','qr-label':'QR 라벨 출력',store:'냉동보관',pack:'계량/소분'}[stepType] || stepType;
     const isCCP = stepType === 'inspect';
 
-    // ── 새 페이지 시작 (빈 페이지 방지: y가 상단이면 addPage 생략) ──
-    if (y > M + 5) {
-      doc.addPage();
-    }
+    // ── 항상 새 페이지에서 시작 (각 공정은 독립 페이지) ──
+    doc.addPage();
     y = processHeader(`공정 ${stepNo}. ${stepName}`, `${typeLabel}  |  ${recordStatus}`);
 
     // CCP 배너
