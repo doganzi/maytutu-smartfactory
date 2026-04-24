@@ -6348,6 +6348,189 @@ function validateStepInputs(stepNo) {
 }
 
 /* ═══════════════════════════════════════════════
+   공정기록 카드 렌더링 (wo-detail / approval-detail 공유)
+   ═══════════════════════════════════════════════ */
+function renderProcessRecordCard(r) {
+  const stepNo = r[1] || '';
+  const name = r[2] || '';
+  const type = r[3] || '';
+  const usedLots = r[4] || '';
+  const stepDataRaw = r[5] || '';
+  const photoUrlsRaw = r[6] || '';
+  const recordStatus = r[10] || '';
+  const time = (r[11]||'').substring(11,16);
+  const worker = r[12] || '';
+  const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관',pack:'계량'}[type] || type;
+  const typeColor = {input:'#1565c0',process:'#7c3aed',seal:'#7c3aed',inspect:'#c62828','qr-label':'#1565c0',store:'#00695c',pack:'#e65100'}[type] || '#666';
+  const lotList = usedLots ? usedLots.split(',').filter((v,i,a) => a.indexOf(v) === i) : [];
+  const photoUrls = photoUrlsRaw ? photoUrlsRaw.split(' | ').filter(u => u.trim()) : [];
+  let stepData = {};
+  try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
+  const statusIcon = recordStatus === '완료' ? '✓' : (recordStatus === '임시저장' ? '⏸' : '✓');
+  const statusBg = recordStatus === '임시저장' ? 'var(--warn)' : 'var(--suc)';
+
+  let bodyHtml = '';
+
+  if (type === 'input') {
+    bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
+      <div class="fs-12 fw-6" style="color:#1565c0">원재료 투입</div>
+      ${stepData.targetQty ? `<div class="fs-11 c-txt-l mt-4">목표 투입량: ${stepData.targetQty}kg</div>` : ''}
+    </div>`;
+    if (stepData.checks?.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+    }
+    if (lotList.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12" style="border-top:1px solid var(--gray-l);padding-top:10px">투입 제품 목록 (${lotList.length}건)</div>`;
+      bodyHtml += lotList.map(id => `<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;align-items:center;gap:10px">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
+        <div class="lot-id" style="font-size:12px;flex:1">${id}</div>
+      </div>`).join('');
+    }
+    if (photoUrls.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 계량값 사진</div>`;
+      bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+    }
+    if (stepData.inputQty) {
+      bodyHtml += `<div class="input-group mt-12"><label>실제 투입량</label><div class="input-suffix"><input type="number" value="${stepData.inputQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>`;
+    }
+  }
+  else if (type === 'process') {
+    const isMixing = name.includes('믹싱');
+    bodyHtml += `<div class="info-box" style="background:rgba(${isMixing?'20,184,166':'59,130,246'},0.1)">
+      <div class="fs-12 fw-6" style="color:${isMixing?'#0d9488':'var(--pri)'}">${name}</div>
+    </div>`;
+    if (stepData.checks?.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+    }
+    if (photoUrls.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">공정 사진</div>`;
+      bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+    }
+  }
+  else if (type === 'seal') {
+    bodyHtml += `<div class="info-box" style="background:rgba(124,58,237,0.1)">
+      <div class="fs-12 fw-6" style="color:#7c3aed">포장 공정</div>
+    </div>`;
+    bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+    bodyHtml += `<div class="check-item"><div class="check-box ${stepData.labelCheck?'checked':''}" style="pointer-events:none">${stepData.labelCheck?'✓':''}</div><span>제품 라벨 부착 확인</span></div>`;
+    bodyHtml += `<div class="check-item"><div class="check-box ${stepData.sealCheck?'checked':''}" style="pointer-events:none">${stepData.sealCheck?'✓':''}</div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>`;
+    if (photoUrls.length || stepData.samples?.length) {
+      bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 — 저울 위 사진 + 무게 기록</div>`;
+      for (let n = 0; n < 3; n++) {
+        const sampleWeight = stepData.samples?.[n]?.weight || '-';
+        bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #7c3aed;margin-bottom:6px">
+          <div class="fs-13 fw-6 mb-8">샘플 #${n+1}</div>
+          ${photoUrls[n] ? `<a href="${photoUrls[n]}" target="_blank" rel="noopener"><img src="${photoUrls[n]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : '<div class="fs-11 c-txt-l" style="font-style:italic">사진 없음</div>'}
+          <div class="input-group mt-8"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${sampleWeight}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>g</span></div></div>
+        </div>`;
+      }
+    }
+    if (stepData.sealQty) {
+      bodyHtml += `<div class="input-group mt-12"><label>최종 완제품 수량</label><div class="input-suffix"><input type="number" value="${stepData.sealQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
+    }
+  }
+  else if (type === 'inspect') {
+    bodyHtml += `<div class="info-box" style="background:rgba(198,40,40,0.1)">
+      <div class="fs-12 fw-6" style="color:#c62828">CCP 금속검출 검사</div>
+    </div>`;
+    if (stepData.ccpTotal) bodyHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
+    if (stepData.passCount != null) bodyHtml += `<div class="fs-11 c-txt-l">합격: ${stepData.passCount}개 · 불합격: ${stepData.failCount||0}개</div>`;
+    if (stepData.checks?.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+    }
+    if (stepData.times) {
+      bodyHtml += `<div class="fs-11 fw-6 mt-8 mb-4">CCP 모니터링 시간</div>`;
+      bodyHtml += Object.entries(stepData.times).map(([k,v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
+    }
+    if (photoUrls.length) {
+      bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+    }
+  }
+  else if (type === 'qr-label') {
+    bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
+      <div class="fs-12 fw-6" style="color:#1565c0">QR 라벨 인쇄</div>
+    </div>`;
+    if (stepData.qrQty) bodyHtml += `<div class="input-group mt-8"><label>QR 라벨 수량</label><div class="input-suffix"><input type="number" value="${stepData.qrQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>매</span></div></div>`;
+  }
+  else if (type === 'store') {
+    bodyHtml += `<div class="info-box" style="background:rgba(0,105,92,0.1)">
+      <div class="fs-12 fw-6" style="color:#00695c">냉동 보관</div>
+    </div>`;
+    if (stepData.freezeStart) bodyHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
+    if (stepData.checks?.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+    }
+  }
+  else if (type === 'pack') {
+    bodyHtml += `<div class="info-box" style="background:rgba(230,81,0,0.1)">
+      <div class="fs-12 fw-6" style="color:#e65100">계량 공정</div>
+    </div>`;
+    if (stepData.packQty) bodyHtml += `<div class="input-group mt-8"><label>포장 수량</label><div class="input-suffix"><input type="number" value="${stepData.packQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
+    if (stepData.samples?.length) {
+      bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">샘플 무게 기록</div>`;
+      stepData.samples.forEach((s,si) => {
+        bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #e65100;margin-bottom:6px">
+          <div class="fs-13 fw-6 mb-4">샘플 #${si+1}</div>
+          ${photoUrls[si] ? `<a href="${photoUrls[si]}" target="_blank" rel="noopener"><img src="${photoUrls[si]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : ''}
+          <div class="input-group mt-4"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${s.weight||'-'}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>
+        </div>`;
+      });
+    }
+  }
+  else {
+    if (stepData.checks?.length) {
+      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4">체크항목</div>`;
+      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+    }
+    if (photoUrls.length) {
+      bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>`).join('')}</div>`;
+    }
+  }
+
+  return `
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+      <div style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;background:${typeColor}08"
+           onclick="const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.arrow').textContent=d.style.display==='none'?'▸':'▾'">
+        <div style="width:28px;height:28px;border-radius:14px;background:${statusBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${statusIcon}</div>
+        <div style="flex:1">
+          <div class="fs-13 fw-6">${stepNo}. ${name}</div>
+          <div class="fs-11 c-txt-l">${time} · ${worker.split('@')[0]}</div>
+        </div>
+        <span style="background:${typeColor}15;color:${typeColor};font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600">${typeLabel}</span>
+        <span class="arrow" style="color:var(--txt-l);font-size:12px">▾</span>
+      </div>
+      <div style="padding:12px;border-top:1px solid var(--gray-l)">
+        ${bodyHtml}
+        <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">기록: ${r[11]||'-'} · ${worker.split('@')[0]}</div>
+      </div>
+    </div>`;
+}
+
+/* PDF 미리보기 — 저장 없이 로컬 생성 후 새 탭으로 열기 */
+async function previewWOPdf(woId) {
+  try {
+    showLoading();
+    const { pdfBlob, fileName } = await generateWOPdf(woId);
+    const url = URL.createObjectURL(pdfBlob);
+    const w = window.open(url, '_blank');
+    if (!w) {
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    hideLoading();
+    toast('📄 PDF 미리보기 생성 완료', 'suc', 2000);
+  } catch (e) {
+    hideLoading();
+    toast('PDF 생성 실패: ' + e.message, 'err');
+  }
+}
+
+/* ═══════════════════════════════════════════════
    WO DETAIL (작업지시서 상세 - 공정기록 조회)
    ═══════════════════════════════════════════════ */
 Screens['wo-detail'] = async (params = {}) => {
@@ -6411,188 +6594,7 @@ Screens['wo-detail'] = async (params = {}) => {
 
         <div class="fs-14 fw-7 mb-8">공정 기록 (${records.length}단계)</div>
         ${records.length === 0 ? '<div class="fs-12 c-txt-l">아직 기록된 공정이 없습니다</div>' :
-          records.map(r => {
-            const stepNo = r[1] || '';
-            const name = r[2] || '';
-            const type = r[3] || '';
-            const usedLots = r[4] || '';
-            const stepDataRaw = r[5] || '';
-            const photoUrlsRaw = r[6] || '';
-            const recordStatus = r[10] || '';
-            const time = (r[11]||'').substring(11,16);
-            const worker = r[12] || '';
-            const typeLabel = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'QR라벨',store:'보관',pack:'계량'}[type] || type;
-            const typeColor = {input:'#1565c0',process:'#7c3aed',seal:'#7c3aed',inspect:'#c62828','qr-label':'#1565c0',store:'#00695c',pack:'#e65100'}[type] || '#666';
-            const lotList = usedLots ? usedLots.split(',').filter((v,i,a) => a.indexOf(v) === i) : [];
-            const photoUrls = photoUrlsRaw ? photoUrlsRaw.split(' | ').filter(u => u.trim()) : [];
-            let stepData = {};
-            try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
-            const statusIcon = recordStatus === '완료' ? '✓' : (recordStatus === '임시저장' ? '⏸' : '✓');
-            const statusBg = recordStatus === '임시저장' ? 'var(--warn)' : 'var(--suc)';
-
-            // ── 기입 당시 화면과 동일한 스타일 렌더링 ──
-            let bodyHtml = '';
-
-            // 투입 공정
-            if (type === 'input') {
-              bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
-                <div class="fs-12 fw-6" style="color:#1565c0">원재료 투입</div>
-                ${stepData.targetQty ? `<div class="fs-11 c-txt-l mt-4">목표 투입량: ${stepData.targetQty}kg</div>` : ''}
-              </div>`;
-              // 체크항목
-              if (stepData.checks?.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-              }
-              // 사용 원재료 QR
-              if (lotList.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12" style="border-top:1px solid var(--gray-l);padding-top:10px">투입 제품 목록 (${lotList.length}건)</div>`;
-                bodyHtml += lotList.map(id => `<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;align-items:center;gap:10px">
-                  <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
-                  <div class="lot-id" style="font-size:12px;flex:1">${id}</div>
-                </div>`).join('');
-              }
-              // 사진
-              if (photoUrls.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 계량값 사진</div>`;
-                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
-              }
-              // 투입량
-              if (stepData.inputQty) {
-                bodyHtml += `<div class="input-group mt-12"><label>실제 투입량</label><div class="input-suffix"><input type="number" value="${stepData.inputQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>`;
-              }
-            }
-
-            // 공정(믹싱 등)
-            else if (type === 'process') {
-              const isMixing = name.includes('믹싱');
-              bodyHtml += `<div class="info-box" style="background:rgba(${isMixing?'20,184,166':'59,130,246'},0.1)">
-                <div class="fs-12 fw-6" style="color:${isMixing?'#0d9488':'var(--pri)'}">${name}</div>
-              </div>`;
-              if (stepData.checks?.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-              }
-              if (photoUrls.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">공정 사진</div>`;
-                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
-              }
-            }
-
-            // 밀봉/포장
-            else if (type === 'seal') {
-              bodyHtml += `<div class="info-box" style="background:rgba(124,58,237,0.1)">
-                <div class="fs-12 fw-6" style="color:#7c3aed">포장 공정</div>
-              </div>`;
-              // 체크항목
-              bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-              bodyHtml += `<div class="check-item"><div class="check-box ${stepData.labelCheck?'checked':''}" style="pointer-events:none">${stepData.labelCheck?'✓':''}</div><span>제품 라벨 부착 확인</span></div>`;
-              bodyHtml += `<div class="check-item"><div class="check-box ${stepData.sealCheck?'checked':''}" style="pointer-events:none">${stepData.sealCheck?'✓':''}</div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>`;
-              // 샘플 사진 + 무게
-              if (photoUrls.length || stepData.samples?.length) {
-                bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 — 저울 위 사진 + 무게 기록</div>`;
-                for (let n = 0; n < 3; n++) {
-                  const sampleWeight = stepData.samples?.[n]?.weight || '-';
-                  bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #7c3aed;margin-bottom:6px">
-                    <div class="fs-13 fw-6 mb-8">샘플 #${n+1}</div>
-                    ${photoUrls[n] ? `<a href="${photoUrls[n]}" target="_blank" rel="noopener"><img src="${photoUrls[n]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : '<div class="fs-11 c-txt-l" style="font-style:italic">사진 없음</div>'}
-                    <div class="input-group mt-8"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${sampleWeight}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>g</span></div></div>
-                  </div>`;
-                }
-              }
-              // 최종 수량
-              if (stepData.sealQty) {
-                bodyHtml += `<div class="input-group mt-12"><label>최종 완제품 수량</label><div class="input-suffix"><input type="number" value="${stepData.sealQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
-              }
-            }
-
-            // CCP 검사
-            else if (type === 'inspect') {
-              bodyHtml += `<div class="info-box" style="background:rgba(198,40,40,0.1)">
-                <div class="fs-12 fw-6" style="color:#c62828">CCP 금속검출 검사</div>
-              </div>`;
-              if (stepData.ccpTotal) bodyHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
-              if (stepData.passCount != null) bodyHtml += `<div class="fs-11 c-txt-l">합격: ${stepData.passCount}개 · 불합격: ${stepData.failCount||0}개</div>`;
-              if (stepData.checks?.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-              }
-              if (stepData.times) {
-                bodyHtml += `<div class="fs-11 fw-6 mt-8 mb-4">CCP 모니터링 시간</div>`;
-                bodyHtml += Object.entries(stepData.times).map(([k,v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
-              }
-              if (photoUrls.length) {
-                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
-              }
-            }
-
-            // QR 라벨
-            else if (type === 'qr-label') {
-              bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
-                <div class="fs-12 fw-6" style="color:#1565c0">QR 라벨 인쇄</div>
-              </div>`;
-              if (stepData.qrQty) bodyHtml += `<div class="input-group mt-8"><label>QR 라벨 수량</label><div class="input-suffix"><input type="number" value="${stepData.qrQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>매</span></div></div>`;
-            }
-
-            // 보관
-            else if (type === 'store') {
-              bodyHtml += `<div class="info-box" style="background:rgba(0,105,92,0.1)">
-                <div class="fs-12 fw-6" style="color:#00695c">냉동 보관</div>
-              </div>`;
-              if (stepData.freezeStart) bodyHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
-              if (stepData.checks?.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-              }
-            }
-
-            // 계량
-            else if (type === 'pack') {
-              bodyHtml += `<div class="info-box" style="background:rgba(230,81,0,0.1)">
-                <div class="fs-12 fw-6" style="color:#e65100">계량 공정</div>
-              </div>`;
-              if (stepData.packQty) bodyHtml += `<div class="input-group mt-8"><label>포장 수량</label><div class="input-suffix"><input type="number" value="${stepData.packQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
-              if (stepData.samples?.length) {
-                bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">샘플 무게 기록</div>`;
-                stepData.samples.forEach((s,si) => {
-                  bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #e65100;margin-bottom:6px">
-                    <div class="fs-13 fw-6 mb-4">샘플 #${si+1}</div>
-                    ${photoUrls[si] ? `<a href="${photoUrls[si]}" target="_blank" rel="noopener"><img src="${photoUrls[si]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : ''}
-                    <div class="input-group mt-4"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${s.weight||'-'}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>
-                  </div>`;
-                });
-              }
-            }
-
-            // 기타 — fallback
-            else {
-              if (stepData.checks?.length) {
-                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4">체크항목</div>`;
-                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-              }
-              if (photoUrls.length) {
-                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>`).join('')}</div>`;
-              }
-            }
-
-            return `
-            <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
-              <div style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;background:${typeColor}08"
-                   onclick="const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.arrow').textContent=d.style.display==='none'?'▸':'▾'">
-                <div style="width:28px;height:28px;border-radius:14px;background:${statusBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${statusIcon}</div>
-                <div style="flex:1">
-                  <div class="fs-13 fw-6">${stepNo}. ${name}</div>
-                  <div class="fs-11 c-txt-l">${time} · ${worker.split('@')[0]}</div>
-                </div>
-                <span style="background:${typeColor}15;color:${typeColor};font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600">${typeLabel}</span>
-                <span class="arrow" style="color:var(--txt-l);font-size:12px">▾</span>
-              </div>
-              <div style="padding:12px;border-top:1px solid var(--gray-l)">
-                ${bodyHtml}
-                <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">기록: ${r[11]||'-'} · ${worker.split('@')[0]}</div>
-              </div>
-            </div>`;
-          }).join('')}
+          records.map(r => renderProcessRecordCard(r)).join('')}
       </div>
     `;
 
@@ -6611,11 +6613,14 @@ Screens['approval-detail'] = async (params = {}) => {
   showLoading();
 
   try {
-    const wos = await SheetsAPI.getAll('작업지시서');
+    SheetsAPI.invalidateCache('작업지시서');
+    SheetsAPI.invalidateCache('공정기록');
+    const wos = await SheetsAPI.getAll('작업지시서', false);
     const wo = wos.find(w => w[0] === woId && w[12] !== '삭제') || wos.find(w => w[12] === '냉동보관중' && w[12] !== '삭제');
     if (!wo) { toast('작업지시서를 찾을 수 없습니다', 'err'); hideLoading(); Router.go('production'); return; }
 
-    const records = (await SheetsAPI.getAll('공정기록').catch(() => [])).filter(r => r[0] === wo[0]);
+    const records = (await SheetsAPI.getAll('공정기록', false).catch(() => [])).filter(r => r[0] === wo[0]);
+    records.sort((a, b) => parseInt(a[1]) - parseInt(b[1]));
     const woStatus = wo[12] || '';
     const freezeStart = wo[11] ? new Date(wo[11]) : null;
     const now = new Date();
@@ -6648,18 +6653,18 @@ Screens['approval-detail'] = async (params = {}) => {
           ${canApprove ? `<div class="fs-12 c-suc mt-4">출하승인 시 완제품 재고로 등록됩니다</div>` : ''}
         </div>
 
-        <div class="fs-14 fw-7 mb-8">공정 기록 타임라인</div>
-        ${records.map(r => `
-          <div class="card" style="padding:10px">
-            <div class="row" style="gap:10px">
-              <div style="width:24px;height:24px;border-radius:12px;background:var(--suc);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">✓</div>
-              <div style="flex:1">
-                <div class="fs-13 fw-6">${r[1]||''}. ${r[2]||''}</div>
-                <div class="fs-11 c-txt-l">${(r[11]||'').substring(11,16)}</div>
-              </div>
-            </div>
+        <div class="card" style="background:#eef5ff;border-left:3px solid var(--pri)">
+          <div class="fs-13 fw-7 mb-4">📄 작업지시서 PDF</div>
+          <div class="fs-11 c-txt-l mb-8">전 공정 기록·CCP 결과·사진·LOT 추적을 포함한 HACCP 생산기록</div>
+          <div class="row" style="gap:8px">
+            <button class="btn btn-pri" style="flex:1" onclick="previewWOPdf('${wo[0]}')">📥 PDF 미리보기</button>
+            ${wo[19] ? `<button class="btn btn-outline" style="flex:1" onclick="window.open('${wo[19]}','_blank')">🔗 저장본 열기</button>` : ''}
           </div>
-        `).join('')}
+        </div>
+
+        <div class="fs-14 fw-7 mb-8">공정 기록 (${records.length}단계) <span class="fs-11 c-txt-l">— 상세 기록 확인 후 승인</span></div>
+        ${records.length === 0 ? '<div class="fs-12 c-txt-l">기록된 공정이 없습니다</div>' :
+          records.map(r => renderProcessRecordCard(r)).join('')}
       </div>
 
       <div style="display:flex;gap:10px;padding:12px 16px;background:var(--white);border-top:1px solid var(--gray-l)">
