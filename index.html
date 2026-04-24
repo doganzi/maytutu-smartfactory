@@ -6836,8 +6836,8 @@ async function generateWOPdf(woId) {
   };
 
   /* ── 테이블 행 ── */
-  const ROW_FS = 7.5, ROW_PAD = 1.5, MIN_ROW_H = 5.5;
-  const LABEL_W = 38; // 라벨 너비 (한글 5자까지 한 줄 표시)
+  const ROW_FS = 15, ROW_PAD = 3, MIN_ROW_H = 11;
+  const LABEL_W = 50; // 라벨 너비 (큰 폰트 대응)
 
   const tableRow = (label, value, yy, labelW) => {
     const lw = labelW || LABEL_W;
@@ -6862,41 +6862,36 @@ async function generateWOPdf(woId) {
 
   /* ── 섹션 제목 ── */
   const sectionTitle = (text, yy, color) => {
-    const h = measureH(text, 9, 'bold', CW);
+    const h = measureH(text, 18, 'bold', CW);
     if (yy + h + 5 > PH - 12) { doc.addPage(); yy = M; }
-    const r = drawText(text, M, yy, 9, 'bold', color || '#1565c0', CW);
-    yy = r.y + r.h + 1.5;
-    hLine(yy); yy += 2.5;
+    const r = drawText(text, M, yy, 18, 'bold', color || '#1565c0', CW);
+    yy = r.y + r.h + 2;
+    hLine(yy); yy += 3;
     return yy;
   };
 
   /* ── 공정 페이지 헤더 (높이 확대, 겹침 방지) ── */
   const processHeader = (title, subtitle) => {
-    const headerH = 28; // 높이 확대 (22→28)
+    const headerH = 48;
     doc.setFillColor(21, 101, 192);
     doc.rect(0, 0, PW, headerH, 'F');
-    // 왼쪽: 공정명 (1줄만, 크기 축소)
-    drawText(title, M, 4, 9, 'bold', '#ffffff', CW * 0.55);
-    // 왼쪽: 유형|상태 (아래쪽, 충분한 간격)
-    if (subtitle) drawText(subtitle, M, 16, 6, 'normal', '#bbdefb', CW * 0.55);
-    // 오른쪽: WO번호 (크기 축소)
-    drawText(woId, PW - M - 50, 5, 6, 'normal', '#bbdefb', 50);
-    // 오른쪽: 제품명
-    drawText(wo[4]||'', PW - M - 50, 14, 6, 'normal', '#e3f2fd', 50);
-    return headerH + 3;
+    drawText(title, M, 5, 18, 'bold', '#ffffff', CW * 0.55);
+    if (subtitle) drawText(subtitle, M, 28, 12, 'normal', '#bbdefb', CW * 0.55);
+    drawText(woId, PW - M - 60, 6, 12, 'normal', '#bbdefb', 60);
+    drawText(wo[4]||'', PW - M - 60, 24, 12, 'normal', '#e3f2fd', 60);
+    return headerH + 4;
   };
 
   /* ═══════════════════════════════════════════
      PAGE 1: 표지 + 기본 정보 + HACCP 요약
      ═══════════════════════════════════════════ */
   doc.setFillColor(21, 101, 192);
-  doc.rect(0, 0, PW, 42, 'F');
-  drawText('HACCP 생산 기록서', M, 6, 14, 'bold', '#ffffff', CW);
-  drawText('작업지시서 (Work Order Report)', M, 18, 8, 'normal', '#bbdefb', CW);
-  drawText(woId, M, 27, 7, 'normal', '#e3f2fd', CW);
-  // 문서 생성 날짜 (오른쪽 정렬, 줄내림 방지)
-  drawText(`${formatDateTime()}`, PW - M - 50, 34, 6, 'normal', '#90caf9', 50, 'right');
-  y = 47;
+  doc.rect(0, 0, PW, 65, 'F');
+  drawText('HACCP 생산 기록서', M, 6, 28, 'bold', '#ffffff', CW);
+  drawText('작업지시서 (Work Order Report)', M, 28, 16, 'normal', '#bbdefb', CW);
+  drawText(woId, M, 42, 14, 'normal', '#e3f2fd', CW);
+  drawText(`${formatDateTime()}`, PW - M - 60, 52, 12, 'normal', '#90caf9', 60, 'right');
+  y = 70;
 
   // ── 1. 기본 정보 ──
   y = sectionTitle('1. 기본 정보', y);
@@ -6944,12 +6939,33 @@ async function generateWOPdf(woId) {
   }
   y += 4;
 
-  // ── 3. 공정 목록 요약 (컴팩트 형식) ──
-  y = sectionTitle('3. 공정 목록 요약', y);
+  // ── 3. 공정 결과 요약 ──
+  y = sectionTitle('3. 공정 결과 요약', y);
   for (const rec of records) {
     const typeMap = {input:'투입',process:'믹싱',seal:'포장',inspect:'CCP','qr-label':'라벨',store:'보관',pack:'계량'};
-    const stepVal = `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'미완료'} | ${(rec[11]||'').substring(11,16)||'-'}`;
-    const r = tableRow(`${rec[1]}. ${rec[2]||''}`, stepVal, y, 55);
+    // 각 공정의 주요 정량 지표 추출
+    let metric = '';
+    try {
+      const sd = rec[5] ? JSON.parse(rec[5]) : {};
+      if (sd.targetQty != null || sd.inputQty != null) metric = `투입 ${sd.inputQty||'-'}kg / 목표 ${sd.targetQty||'-'}kg`;
+      else if (sd.ccpTotal != null) metric = `검사 ${sd.ccpTotal}개, 합격 ${sd.passCount||0}, 불합격 ${sd.failCount||0}`;
+      else if (sd.sealQty != null) metric = `밀봉 ${sd.sealQty}개`;
+      else if (sd.packQty != null) metric = `포장 ${sd.packQty}개`;
+      else if (sd.samples && sd.samples.length > 0) {
+        const ws = sd.samples.map(s => s.weight).filter(w => w);
+        if (ws.length > 0) metric = `샘플 ${ws.length}건, 평균 ${(ws.reduce((a,b)=>a+Number(b),0)/ws.length).toFixed(1)}g`;
+      }
+      else if (sd.qrQty) metric = `QR ${sd.qrQty}매`;
+      else if (sd.freezeStart) metric = `냉동 ${sd.freezeStart}`;
+      if (sd.checks && sd.checks.length > 0) {
+        const passed = sd.checks.filter(c => c.checked).length;
+        metric += (metric ? ' / ' : '') + `점검 ${passed}/${sd.checks.length}`;
+      }
+    } catch(e) {}
+    const status = rec[10] || '미완료';
+    const time = (rec[11] || '').substring(11, 16) || '-';
+    const stepVal = `${typeMap[rec[3]]||rec[3]} | ${status} | ${time}` + (metric ? `\n${metric}` : '');
+    const r = tableRow(`${rec[1]}. ${rec[2]||''}`, stepVal, y, 65);
     y = r.nextY;
   }
 
@@ -6987,20 +7003,20 @@ async function generateWOPdf(woId) {
       y += 5;
       doc.setDrawColor(21, 101, 192); doc.setLineWidth(0.8);
       doc.line(M, y, PW - M, y);
-      y += 4;
-      const hdr = drawText(`공정 ${stepNo}. ${stepName}`, M, y, 10, 'bold', '#1565c0', CW * 0.6);
-      drawText(`${typeLabel} | ${recordStatus}`, M + CW * 0.62, y + 1, 7, 'normal', '#666', CW * 0.38);
-      y = hdr.y + hdr.h + 3;
+      y += 5;
+      const hdr = drawText(`공정 ${stepNo}. ${stepName}`, M, y, 20, 'bold', '#1565c0', CW * 0.6);
+      drawText(`${typeLabel} | ${recordStatus}`, M + CW * 0.62, y + 2, 14, 'normal', '#666', CW * 0.38);
+      y = hdr.y + hdr.h + 4;
     }
 
     // CCP 배너
     if (isCCP) {
       doc.setFillColor(255, 235, 238);
-      doc.rect(M, y, CW, 9, 'F');
+      doc.rect(M, y, CW, 16, 'F');
       doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5);
-      doc.rect(M, y, CW, 9);
-      drawText('⚠ HACCP CCP (Critical Control Point) — 중요관리점', M + 3, y + 2, 9, 'bold', '#c62828', CW - 6);
-      y += 11;
+      doc.rect(M, y, CW, 16);
+      drawText('⚠ HACCP CCP (Critical Control Point) — 중요관리점', M + 3, y + 2, 18, 'bold', '#c62828', CW - 6);
+      y += 19;
     }
 
     // ── 기록 정보 ──
@@ -7049,20 +7065,19 @@ async function generateWOPdf(woId) {
       // 체크항목 (HACCP 위생 점검)
       if (stepData.checks && stepData.checks.length > 0) {
         y += 3;
-        const chkR = drawText('체크항목 (위생/품질 점검)', M, y, 9, 'bold', '#333', CW);
-        y = chkR.y + chkR.h + 2;
+        const chkR = drawText('체크항목 (위생/품질 점검)', M, y, 18, 'bold', '#333', CW);
+        y = chkR.y + chkR.h + 3;
         for (const c of stepData.checks) {
           if (y > PH - 12) { doc.addPage(); y = M; }
           const icon = c.checked ? '☑' : '☐';
           const txt = `${icon}  ${c.name}`;
           const chColor = c.checked ? '#2e7d32' : '#c62828';
-          // 배경 박스
           doc.setFillColor(c.checked ? 232 : 255, c.checked ? 245 : 235, c.checked ? 233 : 238);
-          doc.rect(M + 2, y, CW - 4, 8, 'F');
-          drawText(txt, M + 4, y + 1.2, 7.5, 'normal', chColor, CW - 8);
-          y += 7;
+          doc.rect(M + 2, y, CW - 4, 14, 'F');
+          drawText(txt, M + 4, y + 2, 15, 'normal', chColor, CW - 8);
+          y += 13;
         }
-        y += 2;
+        y += 3;
       }
 
       // 계량/포장
@@ -7072,7 +7087,7 @@ async function generateWOPdf(woId) {
       }
       if (stepData.samples && stepData.samples.length > 0) {
         y += 2;
-        const sr = drawText('중량 검사 샘플 (HACCP 계량 검증)', M, y, 9, 'bold', '#333', CW);
+        const sr = drawText('중량 검사 샘플 (HACCP 계량 검증)', M, y, 18, 'bold', '#333', CW);
         y = sr.y + sr.h + 2;
         for (let si = 0; si < stepData.samples.length; si++) {
           if (y > PH - 12) { doc.addPage(); y = M; }
@@ -7105,7 +7120,7 @@ async function generateWOPdf(woId) {
         if (stepData.failCount != null) { const r = tableRow('불합격 수량', `${stepData.failCount} 개`, y); y = r.nextY; }
         if (stepData.times) {
           y += 2;
-          const tr = drawText('CCP 모니터링 시간 기록', M, y, 9, 'bold', '#c62828', CW);
+          const tr = drawText('CCP 모니터링 시간 기록', M, y, 18, 'bold', '#c62828', CW);
           y = tr.y + tr.h + 2;
           for (const [k, v] of Object.entries(stepData.times)) {
             if (y > PH - 12) { doc.addPage(); y = M; }
@@ -7117,10 +7132,10 @@ async function generateWOPdf(woId) {
         const ccpResult = (stepData.failCount != null && stepData.failCount > 0) ? '불합격 발생' : '전량 합격';
         const isPass = ccpResult === '전량 합격';
         doc.setFillColor(isPass ? 232 : 255, isPass ? 245 : 235, isPass ? 233 : 238);
-        doc.rect(M, y, CW, 9, 'F');
-        if (!isPass) { doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 9); }
-        drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 9, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
-        y += 11;
+        doc.rect(M, y, CW, 16, 'F');
+        if (!isPass) { doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 16); }
+        drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 18, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
+        y += 19;
       }
 
       // QR 라벨
@@ -7139,7 +7154,7 @@ async function generateWOPdf(woId) {
       const extraKeys = Object.keys(stepData).filter(k => !shownKeys.includes(k));
       if (extraKeys.length > 0) {
         y += 2;
-        const er = drawText('기타 기록 데이터', M, y, 9, 'bold', '#666', CW);
+        const er = drawText('기타 기록 데이터', M, y, 18, 'bold', '#666', CW);
         y = er.y + er.h + 2;
         for (const k of extraKeys) {
           if (y > PH - 12) { doc.addPage(); y = M; }
@@ -7191,11 +7206,10 @@ async function generateWOPdf(woId) {
         lotGroups[lot]++;
       }
 
-      const ROW_H = 6;
+      const ROW_H = 12;
       if (lotOrder.length < allLots.length) {
-        // 그룹핑 표시 (동일 ID가 있는 경우)
         for (let gi = 0; gi < lotOrder.length; gi++) {
-          if (y > PH - 10) { doc.addPage(); y = M; }
+          if (y > PH - 14) { doc.addPage(); y = M; }
           const lotId = lotOrder[gi];
           const cnt = lotGroups[lotId];
           doc.setFillColor(gi % 2 === 0 ? 242 : 232, gi % 2 === 0 ? 247 : 245, 253);
@@ -7203,18 +7217,17 @@ async function generateWOPdf(woId) {
           doc.setDrawColor(210, 220, 240); doc.setLineWidth(0.1);
           doc.rect(M, y, CW, ROW_H);
           const label = cnt > 1 ? `${gi+1}. ${lotId}  ×${cnt}` : `${gi+1}. ${lotId}`;
-          drawText(label, M + 2, y + 1, 7, 'normal', '#0d47a1', CW - 4);
+          drawText(label, M + 2, y + 1.5, 14, 'normal', '#0d47a1', CW - 4);
           y += ROW_H;
         }
       } else {
-        // 전부 고유 ID인 경우 개별 나열
         for (let li = 0; li < allLots.length; li++) {
-          if (y > PH - 10) { doc.addPage(); y = M; }
+          if (y > PH - 14) { doc.addPage(); y = M; }
           doc.setFillColor(li % 2 === 0 ? 242 : 232, li % 2 === 0 ? 247 : 245, 253);
           doc.rect(M, y, CW, ROW_H, 'F');
           doc.setDrawColor(210, 220, 240); doc.setLineWidth(0.1);
           doc.rect(M, y, CW, ROW_H);
-          drawText(`${li + 1}. ${allLots[li]}`, M + 2, y + 1, 7, 'normal', '#0d47a1', CW - 4);
+          drawText(`${li + 1}. ${allLots[li]}`, M + 2, y + 1.5, 14, 'normal', '#0d47a1', CW - 4);
           y += ROW_H;
         }
       }
@@ -7222,12 +7235,12 @@ async function generateWOPdf(woId) {
       // 총 투입 수량 요약
       y += 1.5;
       doc.setFillColor(248, 250, 255);
-      doc.rect(M, y, CW, 6, 'F');
+      doc.rect(M, y, CW, 12, 'F');
       const summaryText = lotOrder.length < allLots.length
         ? `총 투입: ${allLots.length}건 (${lotOrder.length}종)`
         : `총 투입: ${allLots.length}건`;
-      drawText(summaryText, M + 2, y + 1, 7, 'bold', '#1565c0', CW - 4);
-      y += 8;
+      drawText(summaryText, M + 2, y + 1.5, 14, 'bold', '#1565c0', CW - 4);
+      y += 14;
     }
 
     // ── 사진 영역 ──
@@ -7238,7 +7251,7 @@ async function generateWOPdf(woId) {
     if (allPhotoUrls.length > 0) {
       if (y > PH - 50) { doc.addPage(); y = M; }
       y += 2;
-      y = sectionTitle(`증빙 사진 (${allPhotoUrls.length}장)`, y);
+      y = sectionTitle(`첨부사진 (${allPhotoUrls.length}장)`, y);
 
       const photoW = allPhotoUrls.length === 1 ? Math.min(CW - 4, 130) : (CW - 8) / 2;
       const photoH = photoW * 0.75;
@@ -7257,7 +7270,7 @@ async function generateWOPdf(woId) {
         } else {
           doc.setDrawColor(200); doc.setFillColor(245, 245, 245);
           doc.rect(px, y, photoW, photoH, 'FD');
-          drawText('사진 로드 실패', px + 4, y + photoH/2 - 3, 7, 'normal', '#999', photoW - 8);
+          drawText('사진 로드 실패', px + 4, y + photoH/2 - 5, 14, 'normal', '#999', photoW - 8);
         }
 
         colIdx++;
@@ -7272,7 +7285,7 @@ async function generateWOPdf(woId) {
       // 사진 없음
       if (y > PH - 20) { doc.addPage(); y = M; }
       y += 2;
-      y = sectionTitle('증빙 사진', y);
+      y = sectionTitle('첨부사진', y);
       const r = tableRow('사진 기록', '', y);
       y = r.nextY;
     }
@@ -7308,43 +7321,42 @@ async function generateWOPdf(woId) {
   y = sectionTitle('서명란', y);
 
   const woStatus = wo[12] || '';
-  const isApproved = woStatus === '출하승인';
+  const isApproved = woStatus === '출하승인' || woStatus === '출하가능';
 
   const sigEntries = [
     ['작업자 (생산담당)', wo[8] || '', (wo[10] || '').substring(0, 16), true],
-    ['승인자 (품질관리)', wo[15] || '', (wo[16] || '').substring(0, 16), isApproved],
+    ['출하 승인', wo[15] || '', (wo[16] || '').substring(0, 16), isApproved],
   ];
   for (const [role, name, dt, signed] of sigEntries) {
-    if (y > PH - 50) { doc.addPage(); y = M; }
-    const rr = drawText(role, M + 2, y, 9, 'bold', '#333', CW * 0.6);
+    if (y > PH - 70) { doc.addPage(); y = M; }
+    const rr = drawText(role, M + 2, y, 18, 'bold', '#333', CW * 0.6);
     // 승인 상태 배지
     const badgeText = signed && name ? '서명 완료' : '미서명';
     const badgeColor = signed && name ? [232,245,233] : [255,243,224];
     const badgeTextColor = signed && name ? '#2e7d32' : '#e65100';
     doc.setFillColor(...badgeColor);
-    const badgeW = 22, badgeH = 5.5;
-    doc.roundedRect(M + CW - badgeW - 2, y, badgeW, badgeH, 1.5, 1.5, 'F');
-    drawText(badgeText, M + CW - badgeW, y + 0.8, 6.5, 'bold', badgeTextColor, badgeW - 2);
-    y = rr.y + rr.h + 2;
+    const badgeW = 36, badgeH = 10;
+    doc.roundedRect(M + CW - badgeW - 2, y, badgeW, badgeH, 2, 2, 'F');
+    drawText(badgeText, M + CW - badgeW, y + 1, 13, 'bold', badgeTextColor, badgeW - 2);
+    y = rr.y + rr.h + 3;
     let r;
-    r = tableRow('성명', name || '-', y, 30); y = r.nextY;
-    r = tableRow('일시', dt || '-', y, 30); y = r.nextY;
+    r = tableRow('성명', name || '-', y, 40); y = r.nextY;
+    r = tableRow('일시', dt || '-', y, 40); y = r.nextY;
     // 서명란 박스 (전자확인 표시)
     doc.setDrawColor(180); doc.setLineWidth(0.3);
-    doc.rect(M, y, CW, 14);
+    doc.rect(M, y, CW, 22);
     if (signed && name) {
-      drawText('전자 확인', M + 3, y + 2, 7, 'normal', '#888', 25);
-      drawText(`${name} (${dt || '-'})`, M + 30, y + 2, 8, 'bold', '#1565c0', CW - 35);
-      // 확인 마크
+      drawText('전자 확인', M + 3, y + 3, 14, 'normal', '#888', 35);
+      drawText(`${name} (${dt || '-'})`, M + 42, y + 3, 16, 'bold', '#1565c0', CW - 48);
       doc.setFillColor(232, 245, 233);
-      doc.roundedRect(M + CW - 22, y + 2, 20, 10, 2, 2, 'F');
-      drawText('확인 완료', M + CW - 20, y + 4.5, 7, 'bold', '#2e7d32', 18);
+      doc.roundedRect(M + CW - 34, y + 3, 30, 16, 2, 2, 'F');
+      drawText('확인 완료', M + CW - 32, y + 7, 14, 'bold', '#2e7d32', 28);
     } else {
-      drawText('서명:', M + 3, y + 3, 7.5, 'normal', '#888', 20);
+      drawText('서명:', M + 3, y + 5, 15, 'normal', '#888', 25);
       doc.setDrawColor(200); doc.setLineWidth(0.15);
-      doc.line(M + 25, y + 11, M + CW - 5, y + 11);
+      doc.line(M + 30, y + 18, M + CW - 5, y + 18);
     }
-    y += 18;
+    y += 26;
   }
 
   /* ── 페이지 번호 + 푸터 ── */
@@ -7353,15 +7365,15 @@ async function generateWOPdf(woId) {
     doc.setPage(i);
     // 구분선
     doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.2);
-    doc.line(M, PH - 9, PW - M, PH - 9);
-    // 좌측: WO번호 (폰트 6pt)
-    doc.setFontSize(6); doc.setTextColor(170);
+    doc.line(M, PH - 14, PW - M, PH - 14);
+    // 좌측: WO번호
+    doc.setFontSize(10); doc.setTextColor(170);
     if (fontLoaded) doc.setFont('NanumGothic', 'normal');
-    doc.text(woId, M, PH - 5);
+    doc.text(woId, M, PH - 6);
     // 중앙: 페이지 번호
-    doc.text(`${i} / ${totalPages}`, PW / 2, PH - 5, { align: 'center' });
-    // 우측: 회사명 (축약)
-    doc.text('MAYTUTU · HACCP', PW - M, PH - 5, { align: 'right' });
+    doc.text(`${i} / ${totalPages}`, PW / 2, PH - 6, { align: 'center' });
+    // 우측: 회사명
+    doc.text('MAYTUTU · HACCP', PW - M, PH - 6, { align: 'right' });
   }
 
   /* ── PDF Blob 생성 ── */
