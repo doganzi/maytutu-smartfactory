@@ -7019,11 +7019,7 @@ async function approveWO(woId) {
         toast('⚠️ PDF 생성 실패 — 상세 화면에서 재시도 가능', 'warn', 4000);
       });
 
-      confirm('라벨 인쇄', `완제품 QR 라벨 ${packCount}매를 인쇄하시겠습니까?`, () => {
-        Router.go('label-print', { lotId: fgLotId, count: packCount, itemName: wo[4], type: 'fg' });
-      }, () => {
-        Router.go('production');
-      });
+      Router.go('production');
 
     } catch (e) {
       toast('승인 실패: ' + e.message, 'err');
