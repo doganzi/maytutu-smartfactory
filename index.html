@@ -4353,14 +4353,8 @@ function renderStepContent(step, stepType) {
         <button class="btn btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">📷 QR 스캔 시작</button>
         <div id="scanned-list-${stepNo}"></div>
 
-        <div class="row mb-12" style="gap:8px" id="use-type-row-${stepNo}">
-          <button class="btn btn-sm flex-1" id="btn-full-${stepNo}" style="border:2px solid var(--info);background:transparent;color:var(--info)"
-                  onclick="setUseType(${stepNo},'full')">전량 사용 (소진)</button>
-          <button class="btn btn-sm flex-1" id="btn-partial-${stepNo}" style="border:2px solid var(--warn);background:transparent;color:var(--warn)"
-                  onclick="setUseType(${stepNo},'partial')">잔여분 있음</button>
-        </div>
-        <div style="display:none" id="multi-lot-${stepNo}">
-          <button class="btn btn-sm btn-outline btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">+ 추가 LOT 스캔</button>
+        <div id="multi-lot-${stepNo}">
+          <button class="btn btn-sm btn-outline btn-info btn-full mb-8" onclick="startQRCamera(${stepNo}, '${rmCode}')">+ 추가 QR 스캔</button>
         </div>
       `;
     }
@@ -4490,7 +4484,8 @@ function renderStepContent(step, stepType) {
       <div class="fs-12 fw-6 c-txt-l mb-4 mt-8" style="border-top:1px solid var(--gray-l);padding-top:10px">체크항목</div>
       <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-0" onclick="toggleCheck(this);validateStepInputs(${stepNo})"></div><span>제품 라벨 부착 확인</span></div>
       <div class="check-item"><div class="check-box" id="check-seal-${stepNo}-1" onclick="toggleCheck(this);validateStepInputs(${stepNo})"></div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>
-      <div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 사진 촬영 <span class="c-err">*필수</span></div>
+      <div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 — 저울 위 사진 + 무게 기록 <span class="c-err">*필수</span></div>
+      <div class="fs-11 c-txt-l mb-8">저울 위에서 무게가 보이도록 제품 사진을 촬영하고, 무게를 입력하세요.</div>
     `;
     for (let n = 1; n <= 3; n++) {
       html += `
@@ -4498,8 +4493,15 @@ function renderStepContent(step, stepType) {
           <div class="fs-13 fw-6 mb-8">샘플 #${n}</div>
           <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
             <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}');validateStepInputs(${stepNo})">
-            <div class="photo-label" style="font-size:11px">📷 제품 #${n} 사진 *필수</div>
+            <div class="photo-label" style="font-size:11px">📷 저울 위 제품 사진 *필수</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-seal${n}"></div>
+          </div>
+          <div class="input-group mt-8">
+            <label style="font-size:12px">무게 (g) <span class="c-err">*필수</span></label>
+            <div class="input-suffix">
+              <input type="number" id="seal-weight-${stepNo}-${n}" placeholder="무게 입력" step="0.1" oninput="validateStepInputs(${stepNo})">
+              <span>g</span>
+            </div>
           </div>
         </div>
       `;
@@ -4845,6 +4847,13 @@ function restoreSavedStepData(stepNo, stepType, step) {
       if (data.sealCheck) {
         const el = $id(`check-seal-${stepNo}-1`);
         if (el) { el.classList.add('checked'); el.textContent = '✓'; }
+      }
+      // 샘플 무게 복원
+      if (data.samples) {
+        data.samples.forEach((s, si) => {
+          const wEl = $id(`seal-weight-${stepNo}-${si+1}`);
+          if (wEl && s.weight) wEl.value = s.weight;
+        });
       }
     }
 
@@ -5245,6 +5254,12 @@ function collectStepData(stepNo, stepType, step) {
     data.sealQty = $id(`seal-qty-${stepNo}`)?.value || '';
     data.labelCheck = $id(`check-seal-${stepNo}-0`)?.textContent === '✓';
     data.sealCheck = $id(`check-seal-${stepNo}-1`)?.textContent === '✓';
+    // 샘플별 무게 기록
+    data.samples = [];
+    for (let n = 1; n <= 3; n++) {
+      const w = $id(`seal-weight-${stepNo}-${n}`)?.value || '';
+      data.samples.push({ weight: w, photoKey: `seal${n}` });
+    }
   }
   else if (stepType === 'inspect') {
     data.ccpTotal = $id('ccp-total')?.value || '';
@@ -5622,6 +5637,13 @@ async function handleCompleteStep(isFinal = false) {
       if (prev && prev.innerHTML.trim()) photoCount++;
     }
     if (photoCount < 3) missing.push(`샘플 사진 (${3-photoCount}건 미촬영)`);
+    // 샘플 무게 확인
+    let sealWeightCount = 0;
+    for (let n = 1; n <= 3; n++) {
+      const wt = parseFloat($id(`seal-weight-${stepNo}-${n}`)?.value);
+      if (wt && wt > 0) sealWeightCount++;
+    }
+    if (sealWeightCount < 3) missing.push(`샘플 무게 (${3-sealWeightCount}건 미입력)`);
     // 수량 확인
     const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
     if (!sealQty || sealQty <= 0) missing.push('최종 완제품 수량');
@@ -5698,22 +5720,26 @@ async function completeStep() {
       }
     }
 
-    // input step: 원재료 재고 차감 (스캔된 LOT)
+    // input step: 원재료 재고 차감 (스캔된 LOT) — 개별 항목별 전량/잔여분 처리
     let usedLotIds = '';
     if (stepType === 'input') {
       const scannedItems = State.woExec._scannedLots?.[stepNo] || [];
+      const itemUseTypes = State.woExec._itemUseType?.[stepNo] || {};
       const qtyInput = $id(`input-qty-${stepNo}`);
       const consumedQty = parseFloat(qtyInput?.value) || 0;
 
-      // ① 모든 개별 항목 소진 처리 (병렬)
-      await Promise.all(scannedItems.map(item =>
-        SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: '소진' })
-      ));
+      // ① 개별 항목별 상태 업데이트 — 전량:'소진', 잔여분:'잔여'(활성 유지)
+      await Promise.all(scannedItems.map((item, idx) => {
+        const ut = itemUseTypes[idx] || 'full';
+        const newStatus = ut === 'partial' ? '잔여' : '소진';
+        return SheetsAPI.updateRow('원재료개별', 0, item.qrId, { 3: newStatus });
+      }));
 
-      // ② LOT별 그룹핑 → 잔량 차감 + 소진 판정 (LOT당 1회만 조회/업데이트)
+      // ② LOT별 그룹핑 → 전량 소진 항목만 카운트하여 잔량 차감
       const lotGroups = {};
-      scannedItems.forEach(item => {
-        if (item.lotId) {
+      scannedItems.forEach((item, idx) => {
+        const ut = itemUseTypes[idx] || 'full';
+        if (item.lotId && ut === 'full') {
           if (!lotGroups[item.lotId]) lotGroups[item.lotId] = 0;
           lotGroups[item.lotId]++;
         }
@@ -5727,14 +5753,13 @@ async function completeStep() {
       for (const [lotId, count] of Object.entries(lotGroups)) {
         const lot = lots.find(l => l[0] === lotId);
         if (!lot) continue;
-        // 개별 단위(perUnit) 기반 차감 — 투입량 편차에 의한 오차 방지
         const totalIndivCount = parseInt(lot[10]) || 1;
         const totalQty = parseFloat(lot[4]) || 0;
         const perUnit = totalQty / totalIndivCount;
         const prevRemain = parseFloat(lot[8]) || 0;
         const deductQty = perUnit * count;
         const newRemain = Math.max(0, prevRemain - deductQty);
-        // 활성 개별 수 기준 소진 판정
+        // 활성 개별 수 기준 소진 판정 (잔여 상태도 활성으로 간주)
         const activeIndivs = allIndivs.filter(iv => iv[1] === lotId && !['폐기','소진'].includes(iv[3]));
         const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
         await SheetsAPI.updateRow('원재료LOT', 0, lotId, {
@@ -5743,7 +5768,8 @@ async function completeStep() {
         });
         console.log(`[재고차감] ${lotId}: -${count}개(${deductQty.toFixed(2)}kg), 잔량 ${prevRemain}→${newRemain.toFixed(2)}, 활성 ${activeIndivs.length}개, 상태 ${newStatus}`);
       }
-      usedLotIds = scannedItems.map(s => s.lotId).filter(Boolean).join(',');
+      // 잔여분 항목도 기록에 포함 (개별 QR ID로 저장)
+      usedLotIds = scannedItems.map(s => s.qrId).filter(Boolean).join(',');
     }
 
     // qr-label step: QR 라벨 수량 저장
@@ -5979,9 +6005,18 @@ async function processScannedQR(stepNo, rmCode, qrId) {
 
   try {
     showLoading();
+    SheetsAPI.invalidateCache('원재료개별');
     const indivs = await SheetsAPI.getAll('원재료개별');
     const indiv = indivs.find(r => r[0] === qrId);
     if (!indiv) { toast('해당 QR을 찾을 수 없습니다', 'err'); hideLoading(); return; }
+
+    // 소진/폐기 상태는 스캔 거부, 잔여 상태는 재사용 허용
+    const indivStatus = (indiv[3] || '').trim();
+    if (['소진','폐기'].includes(indivStatus)) {
+      toast(`이 제품은 "${indivStatus}" 상태입니다. 사용할 수 없습니다.`, 'err');
+      hideLoading();
+      return;
+    }
 
     const lots = await SheetsAPI.getAll('원재료LOT');
     const lot = lots.find(l => l[0] === indiv[1]);
@@ -6019,61 +6054,70 @@ function renderScannedList(stepNo) {
 
   if (items.length === 0) { listEl.innerHTML = ''; return; }
 
-  const useType = State.woExec._useType?.[stepNo];
+  // 개별 항목별 useType 초기화 (기본: 'full')
+  if (!State.woExec._itemUseType) State.woExec._itemUseType = {};
+  if (!State.woExec._itemUseType[stepNo]) State.woExec._itemUseType[stepNo] = {};
+  items.forEach((_, i) => {
+    if (State.woExec._itemUseType[stepNo][i] === undefined) State.woExec._itemUseType[stepNo][i] = 'full';
+  });
+
   listEl.innerHTML = `
     <div class="fs-12 fw-6 c-txt-l mb-4">투입 제품 목록 (${items.length}건)</div>
-    ${items.map((item, i) => `
-      <div class="card" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
-        <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
-        <div style="flex:1;min-width:0">
-          ${useType === 'full' ? `
-            <div class="lot-id" style="font-size:12px">${item.qrId}</div>
-            <div class="fs-11 c-txt-l">전량 소진</div>
-          ` : `
+    ${items.map((item, i) => {
+      const iut = State.woExec._itemUseType[stepNo][i] || 'full';
+      const isFull = iut === 'full';
+      return `
+      <div class="card" style="padding:8px 12px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:8px;height:8px;border-radius:50%;background:${isFull?'var(--suc)':'var(--warn)'};flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
             <div class="fs-12 fw-6">${item.name}</div>
             <div class="lot-id" style="font-size:11px;font-weight:600">${item.qrId}</div>
-            <div class="fs-11 c-txt-l">잔량 ${item.remain}kg · ${item.expiry}</div>
-          `}
+            <div class="fs-11 c-txt-l">${isFull ? '전량 소진' : `잔여분 — 남은량 ${item.remain}kg`} · ${item.expiry}</div>
+          </div>
+          <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--err);background:none;border:1px solid var(--err)"
+                  onclick="removeScannedItem(${stepNo},${i})">삭제</button>
         </div>
-        <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--err);background:none;border:1px solid var(--err)"
-                onclick="removeScannedItem(${stepNo},${i})">삭제</button>
-      </div>
-    `).join('')}
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm flex-1" style="padding:3px 6px;font-size:11px;border:1.5px solid var(--info);${isFull?'background:var(--info);color:#fff':'background:transparent;color:var(--info)'}"
+                  onclick="setItemUseType(${stepNo},${i},'full')">전량 소진</button>
+          <button class="btn btn-sm flex-1" style="padding:3px 6px;font-size:11px;border:1.5px solid var(--warn);${!isFull?'background:var(--warn);color:#fff':'background:transparent;color:var(--warn)'}"
+                  onclick="setItemUseType(${stepNo},${i},'partial')">잔여분</button>
+        </div>
+      </div>`;
+    }).join('')}
   `;
 }
 
 function removeScannedItem(stepNo, index) {
   if (State.woExec._scannedLots?.[stepNo]) {
     State.woExec._scannedLots[stepNo].splice(index, 1);
+    // _itemUseType 인덱스 재정렬
+    if (State.woExec._itemUseType?.[stepNo]) {
+      const old = State.woExec._itemUseType[stepNo];
+      const rebuilt = {};
+      const items = State.woExec._scannedLots[stepNo];
+      items.forEach((_, i) => {
+        rebuilt[i] = i < index ? (old[i] || 'full') : (old[i + 1] || 'full');
+      });
+      State.woExec._itemUseType[stepNo] = rebuilt;
+    }
     renderScannedList(stepNo);
     validateStepInputs(stepNo);
   }
 }
 
-function setUseType(stepNo, type) {
-  const btnFull = $id(`btn-full-${stepNo}`);
-  const btnPartial = $id(`btn-partial-${stepNo}`);
-  const multiLot = $id(`multi-lot-${stepNo}`);
-
-  if (!State.woExec._useType) State.woExec._useType = {};
-  State.woExec._useType[stepNo] = type;
-
-  // Reset both buttons
-  if (btnFull) { btnFull.style.background = 'transparent'; btnFull.style.color = 'var(--info)'; }
-  if (btnPartial) { btnPartial.style.background = 'transparent'; btnPartial.style.color = 'var(--warn)'; }
-
-  if (type === 'full') {
-    // Fill blue
-    if (btnFull) { btnFull.style.background = 'var(--info)'; btnFull.style.color = '#fff'; }
-    if (multiLot) multiLot.style.display = '';
-  } else {
-    // Fill orange
-    if (btnPartial) { btnPartial.style.background = 'var(--warn)'; btnPartial.style.color = '#fff'; }
-    if (multiLot) multiLot.style.display = 'none';
-  }
+// 개별 항목별 전량/잔여분 설정
+function setItemUseType(stepNo, index, type) {
+  if (!State.woExec._itemUseType) State.woExec._itemUseType = {};
+  if (!State.woExec._itemUseType[stepNo]) State.woExec._itemUseType[stepNo] = {};
+  State.woExec._itemUseType[stepNo][index] = type;
   renderScannedList(stepNo);
   validateStepInputs(stepNo);
 }
+
+// 하위 호환 — 기존 setUseType 호출 무시
+function setUseType(stepNo, type) {}
 
 function validateStepInputs(stepNo) {
   const step = State.woExec?.steps?.[State.woExec?.currentStep];
@@ -6189,6 +6233,8 @@ function validateStepInputs(stepNo) {
     for (let n = 1; n <= 3; n++) {
       const prev = $id(`photo-preview-${stepNo}-seal${n}`);
       if (!prev || !prev.innerHTML.trim()) allValid = false;
+      const wt = parseFloat($id(`seal-weight-${stepNo}-${n}`)?.value);
+      if (!wt || wt <= 0) allValid = false;
     }
     const sealQty = parseInt($id(`seal-qty-${stepNo}`)?.value);
     if (!sealQty || sealQty <= 0) allValid = false;
@@ -6296,50 +6342,159 @@ Screens['wo-detail'] = async (params = {}) => {
             const typeColor = {input:'#1565c0',process:'#7c3aed',seal:'#7c3aed',inspect:'#c62828','qr-label':'#1565c0',store:'#00695c',pack:'#e65100'}[type] || '#666';
             const lotList = usedLots ? usedLots.split(',').filter((v,i,a) => a.indexOf(v) === i) : [];
             const photoUrls = photoUrlsRaw ? photoUrlsRaw.split(' | ').filter(u => u.trim()) : [];
-
-            // Parse step data JSON
             let stepData = {};
             try { if (stepDataRaw) stepData = JSON.parse(stepDataRaw); } catch(e) {}
-
-            // Build detail HTML for step data
-            let dataHtml = '';
-            if (type === 'input' && stepData.inputQty) {
-              dataHtml += `<div class="fs-11 c-txt-l mt-4">투입량: <strong>${stepData.inputQty}kg</strong>${stepData.targetQty ? ` (목표: ${stepData.targetQty}kg)` : ''}</div>`;
-            }
-            if (stepData.checks && stepData.checks.length > 0) {
-              dataHtml += `<div class="fs-11 fw-6 mt-8 mb-4">체크항목</div>`;
-              dataHtml += stepData.checks.map(c => `<div class="fs-11" style="padding:1px 0">${c.checked?'✅':'⬜'} ${c.name}</div>`).join('');
-            }
-            if (type === 'pack' && stepData.packQty) {
-              dataHtml += `<div class="fs-11 c-txt-l mt-4">포장 수량: <strong>${stepData.packQty}개</strong></div>`;
-              if (stepData.samples) {
-                dataHtml += stepData.samples.map((s,i) => `<div class="fs-11 c-txt-l">샘플 #${i+1} 무게: ${s.weight||'-'}kg</div>`).join('');
-              }
-            }
-            if (type === 'seal' && stepData.sealQty) {
-              dataHtml += `<div class="fs-11 c-txt-l mt-4">최종 수량: <strong>${stepData.sealQty}개</strong></div>`;
-              dataHtml += `<div class="fs-11 c-txt-l">라벨: ${stepData.labelCheck?'✅':'⬜'} · 밀봉: ${stepData.sealCheck?'✅':'⬜'}</div>`;
-            }
-            if (type === 'inspect') {
-              if (stepData.ccpTotal) dataHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
-              if (stepData.times) {
-                const timeEntries = Object.entries(stepData.times);
-                if (timeEntries.length) dataHtml += `<div class="fs-11 c-txt-l">${timeEntries.map(([k,v])=>`${k}: ${v}`).join(' · ')}</div>`;
-              }
-            }
-            if (type === 'qr-label' && stepData.qrQty) {
-              dataHtml += `<div class="fs-11 c-txt-l mt-4">QR 라벨 수량: <strong>${stepData.qrQty}매</strong></div>`;
-            }
-            if (type === 'store' && stepData.freezeStart) {
-              dataHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
-            }
-
             const statusIcon = recordStatus === '완료' ? '✓' : (recordStatus === '임시저장' ? '⏸' : '✓');
             const statusBg = recordStatus === '임시저장' ? 'var(--warn)' : 'var(--suc)';
 
+            // ── 기입 당시 화면과 동일한 스타일 렌더링 ──
+            let bodyHtml = '';
+
+            // 투입 공정
+            if (type === 'input') {
+              bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
+                <div class="fs-12 fw-6" style="color:#1565c0">원재료 투입</div>
+                ${stepData.targetQty ? `<div class="fs-11 c-txt-l mt-4">목표 투입량: ${stepData.targetQty}kg</div>` : ''}
+              </div>`;
+              // 체크항목
+              if (stepData.checks?.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+              }
+              // 사용 원재료 QR
+              if (lotList.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12" style="border-top:1px solid var(--gray-l);padding-top:10px">투입 제품 목록 (${lotList.length}건)</div>`;
+                bodyHtml += lotList.map(id => `<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;align-items:center;gap:10px">
+                  <div style="width:8px;height:8px;border-radius:50%;background:var(--suc);flex-shrink:0"></div>
+                  <div class="lot-id" style="font-size:12px;flex:1">${id}</div>
+                </div>`).join('');
+              }
+              // 사진
+              if (photoUrls.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">저울 계량값 사진</div>`;
+                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+              }
+              // 투입량
+              if (stepData.inputQty) {
+                bodyHtml += `<div class="input-group mt-12"><label>실제 투입량</label><div class="input-suffix"><input type="number" value="${stepData.inputQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>`;
+              }
+            }
+
+            // 공정(믹싱 등)
+            else if (type === 'process') {
+              const isMixing = name.includes('믹싱');
+              bodyHtml += `<div class="info-box" style="background:rgba(${isMixing?'20,184,166':'59,130,246'},0.1)">
+                <div class="fs-12 fw-6" style="color:${isMixing?'#0d9488':'var(--pri)'}">${name}</div>
+              </div>`;
+              if (stepData.checks?.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+              }
+              if (photoUrls.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">공정 사진</div>`;
+                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+              }
+            }
+
+            // 밀봉/포장
+            else if (type === 'seal') {
+              bodyHtml += `<div class="info-box" style="background:rgba(124,58,237,0.1)">
+                <div class="fs-12 fw-6" style="color:#7c3aed">포장 공정</div>
+              </div>`;
+              // 체크항목
+              bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+              bodyHtml += `<div class="check-item"><div class="check-box ${stepData.labelCheck?'checked':''}" style="pointer-events:none">${stepData.labelCheck?'✓':''}</div><span>제품 라벨 부착 확인</span></div>`;
+              bodyHtml += `<div class="check-item"><div class="check-box ${stepData.sealCheck?'checked':''}" style="pointer-events:none">${stepData.sealCheck?'✓':''}</div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>`;
+              // 샘플 사진 + 무게
+              if (photoUrls.length || stepData.samples?.length) {
+                bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 — 저울 위 사진 + 무게 기록</div>`;
+                for (let n = 0; n < 3; n++) {
+                  const sampleWeight = stepData.samples?.[n]?.weight || '-';
+                  bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #7c3aed;margin-bottom:6px">
+                    <div class="fs-13 fw-6 mb-8">샘플 #${n+1}</div>
+                    ${photoUrls[n] ? `<a href="${photoUrls[n]}" target="_blank" rel="noopener"><img src="${photoUrls[n]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : '<div class="fs-11 c-txt-l" style="font-style:italic">사진 없음</div>'}
+                    <div class="input-group mt-8"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${sampleWeight}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>g</span></div></div>
+                  </div>`;
+                }
+              }
+              // 최종 수량
+              if (stepData.sealQty) {
+                bodyHtml += `<div class="input-group mt-12"><label>최종 완제품 수량</label><div class="input-suffix"><input type="number" value="${stepData.sealQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
+              }
+            }
+
+            // CCP 검사
+            else if (type === 'inspect') {
+              bodyHtml += `<div class="info-box" style="background:rgba(198,40,40,0.1)">
+                <div class="fs-12 fw-6" style="color:#c62828">CCP 금속검출 검사</div>
+              </div>`;
+              if (stepData.ccpTotal) bodyHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
+              if (stepData.passCount != null) bodyHtml += `<div class="fs-11 c-txt-l">합격: ${stepData.passCount}개 · 불합격: ${stepData.failCount||0}개</div>`;
+              if (stepData.checks?.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+              }
+              if (stepData.times) {
+                bodyHtml += `<div class="fs-11 fw-6 mt-8 mb-4">CCP 모니터링 시간</div>`;
+                bodyHtml += Object.entries(stepData.times).map(([k,v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
+              }
+              if (photoUrls.length) {
+                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
+              }
+            }
+
+            // QR 라벨
+            else if (type === 'qr-label') {
+              bodyHtml += `<div class="info-box" style="background:rgba(21,101,192,0.1)">
+                <div class="fs-12 fw-6" style="color:#1565c0">QR 라벨 인쇄</div>
+              </div>`;
+              if (stepData.qrQty) bodyHtml += `<div class="input-group mt-8"><label>QR 라벨 수량</label><div class="input-suffix"><input type="number" value="${stepData.qrQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>매</span></div></div>`;
+            }
+
+            // 보관
+            else if (type === 'store') {
+              bodyHtml += `<div class="info-box" style="background:rgba(0,105,92,0.1)">
+                <div class="fs-12 fw-6" style="color:#00695c">냉동 보관</div>
+              </div>`;
+              if (stepData.freezeStart) bodyHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
+              if (stepData.checks?.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+              }
+            }
+
+            // 계량
+            else if (type === 'pack') {
+              bodyHtml += `<div class="info-box" style="background:rgba(230,81,0,0.1)">
+                <div class="fs-12 fw-6" style="color:#e65100">계량 공정</div>
+              </div>`;
+              if (stepData.packQty) bodyHtml += `<div class="input-group mt-8"><label>포장 수량</label><div class="input-suffix"><input type="number" value="${stepData.packQty}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>개</span></div></div>`;
+              if (stepData.samples?.length) {
+                bodyHtml += `<div class="fs-13 fw-7 mb-8 mt-12">샘플 무게 기록</div>`;
+                stepData.samples.forEach((s,si) => {
+                  bodyHtml += `<div class="card" style="padding:10px;border-left:3px solid #e65100;margin-bottom:6px">
+                    <div class="fs-13 fw-6 mb-4">샘플 #${si+1}</div>
+                    ${photoUrls[si] ? `<a href="${photoUrls[si]}" target="_blank" rel="noopener"><img src="${photoUrls[si]}" style="width:100%;max-height:150px;object-fit:contain;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>` : ''}
+                    <div class="input-group mt-4"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" value="${s.weight||'-'}" readonly disabled style="background:var(--gray-l);opacity:0.8"><span>kg</span></div></div>
+                  </div>`;
+                });
+              }
+            }
+
+            // 기타 — fallback
+            else {
+              if (stepData.checks?.length) {
+                bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4">체크항목</div>`;
+                bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+              }
+              if (photoUrls.length) {
+                bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.style.display='none'"></a>`).join('')}</div>`;
+              }
+            }
+
             return `
-            <div class="card" style="padding:0;overflow:hidden;margin-bottom:6px">
-              <div style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px"
+            <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+              <div style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;background:${typeColor}08"
                    onclick="const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.arrow').textContent=d.style.display==='none'?'▸':'▾'">
                 <div style="width:28px;height:28px;border-radius:14px;background:${statusBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${statusIcon}</div>
                 <div style="flex:1">
@@ -6347,24 +6502,11 @@ Screens['wo-detail'] = async (params = {}) => {
                   <div class="fs-11 c-txt-l">${time} · ${worker.split('@')[0]}</div>
                 </div>
                 <span style="background:${typeColor}15;color:${typeColor};font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600">${typeLabel}</span>
-                <span class="arrow" style="color:var(--txt-l);font-size:12px">▸</span>
+                <span class="arrow" style="color:var(--txt-l);font-size:12px">▾</span>
               </div>
-              <div style="display:none;padding:0 12px 10px;border-top:1px solid var(--gray-l)">
-                <div class="fs-11 c-txt-l mt-8">공정 유형: <strong>${type}</strong> ${recordStatus ? `<span style="background:${recordStatus==='완료'?'var(--suc)':'var(--warn)'}22;color:${recordStatus==='완료'?'var(--suc)':'var(--warn)'};padding:1px 4px;border-radius:3px;font-size:10px;margin-left:4px">${recordStatus}</span>` : ''}</div>
-                <div class="fs-11 c-txt-l">기록 시간: ${r[11]||'-'}</div>
-                <div class="fs-11 c-txt-l">작업자: ${worker}</div>
-                ${lotList.length > 0 ? `
-                  <div class="fs-11 fw-6 mt-8 mb-4">사용 원재료 LOT (${lotList.length}건)</div>
-                  ${lotList.map(lot => `<div class="fs-11 c-info" style="padding:2px 0">📦 ${lot}</div>`).join('')}
-                ` : ''}
-                ${dataHtml}
-                ${photoUrls.length > 0 ? `
-                  <div class="fs-11 fw-6 mt-8 mb-4">📷 촬영 사진 (${photoUrls.length}장)</div>
-                  <div style="display:flex;gap:6px;flex-wrap:wrap">
-                    ${photoUrls.map((url, pi) => `<a href="${url}" target="_blank" rel="noopener" style="display:block;width:64px;height:64px;border-radius:6px;background:#f0f0f0;border:1px solid var(--gray-l);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri);text-decoration:none">사진${pi+1}</a>`).join('')}
-                  </div>
-                ` : ''}
-                ${!dataHtml && photoUrls.length === 0 && lotList.length === 0 ? `<div class="fs-11 c-txt-l mt-4" style="font-style:italic">저장된 상세 기록 없음</div>` : ''}
+              <div style="padding:12px;border-top:1px solid var(--gray-l)">
+                ${bodyHtml}
+                <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">기록: ${r[11]||'-'} · ${worker.split('@')[0]}</div>
               </div>
             </div>`;
           }).join('')}
@@ -6843,6 +6985,13 @@ async function generateWOPdf(woId) {
         r = tableRow('최종 수량', `${stepData.sealQty} 개`, y); y = r.nextY;
         r = tableRow('라벨 부착 확인', stepData.labelCheck ? '확인 완료 ✓' : '미확인 ✗', y); y = r.nextY;
         r = tableRow('밀봉 상태 확인', stepData.sealCheck ? '확인 완료 ✓' : '미확인 ✗', y); y = r.nextY;
+        // 샘플 무게 기록
+        if (stepData.samples && stepData.samples.length > 0) {
+          stepData.samples.forEach((s, si) => {
+            if (y > PH - 10) { doc.addPage(); y = M; }
+            r = tableRow(`샘플 #${si+1} 무게`, `${s.weight || '-'} g`, y); y = r.nextY;
+          });
+        }
       }
 
       // CCP 검사 (금속검출 — HACCP 핵심)
@@ -6924,9 +7073,9 @@ async function generateWOPdf(woId) {
 
     y += 4;
 
-    // ── 원재료 LOT (개별 코드 전체 나열) ──
+    // ── 원재료 사용 내역 (개별 QR ID 전체 나열) ──
     if (usedLots) {
-      y = sectionTitle('원재료 LOT 추적 (Traceability)', y);
+      y = sectionTitle('원재료 추적 (Traceability)', y);
 
       const allLots = usedLots.split(',').map(l => l.trim()).filter(l => l);
 
