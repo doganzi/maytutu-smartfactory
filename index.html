@@ -7585,7 +7585,7 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
         await SheetsAPI.updateRow('소모품LOT', 0, lotId, { 7: '폐기' });
       }
 
-      // LOT 잔량 업데이트 (개별 폐기 시) — 캐시 무효화 후 fresh 데이터 (CON-014)
+      // LOT 잔량 + 상태 업데이트 (개별 폐기 시) — 캐시 무효화 후 fresh 데이터 (CON-014)
       if ((isRM || isFG) && lotId) {
         const lotTab = isFG ? '완제품LOT' : '원재료LOT';
         const indivTab = isFG ? '완제품개별' : '원재료개별';
@@ -7596,9 +7596,18 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
         if (lot) {
           const indivs = await SheetsAPI.getAll(indivTab, false);
           const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','소진','출하완료'].includes(iv[3]));
-          if (activeIndivs.length === 0) {
-            const statusCol = isFG ? 9 : 9;
-            await SheetsAPI.updateRow(lotTab, 0, lotId, { [statusCol]: '소진' });
+          const newStatus = activeIndivs.length === 0 ? '소진' : lot[9];
+          if (isFG) {
+            // 완제품: 잔량 = 활성 개별 수
+            await SheetsAPI.updateRow(lotTab, 0, lotId, { 8: String(activeIndivs.length), 9: newStatus });
+          } else {
+            // 원재료: 잔량 = 활성 개별 수 × perUnit (개별 실제 수량 기반)
+            const sampleIndiv = indivs.find(iv => iv[1] === lotId);
+            const totalQty = parseFloat(lot[4]) || 0;
+            const perUnit = sampleIndiv ? (parseFloat(sampleIndiv[4]) || totalQty / (parseInt(lot[10]) || 1))
+                                        : totalQty / (parseInt(lot[10]) || 1);
+            const newRemain = Math.round(activeIndivs.length * perUnit * 100) / 100;
+            await SheetsAPI.updateRow(lotTab, 0, lotId, { 8: String(newRemain), 9: newStatus });
           }
         }
       }
