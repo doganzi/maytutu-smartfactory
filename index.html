@@ -6800,9 +6800,32 @@ async function generateWOPdf(woId) {
             if (attempt < MAX_RETRIES) continue;
             return null;
           }
-          return await new Promise(r => {
-            const rd = new FileReader(); rd.onload = () => r(rd.result); rd.readAsDataURL(blob);
-          });
+          // Canvas로 리사이즈 & 압축 (jsPDF 대용량 이미지 렌더링 오류 방지)
+          const rawUrl = URL.createObjectURL(blob);
+          try {
+            const img = await new Promise((resolve, reject) => {
+              const i = new Image();
+              i.onload = () => resolve(i);
+              i.onerror = reject;
+              i.src = rawUrl;
+            });
+            const MAX_DIM = 800; // PDF에 충분한 해상도
+            let w = img.width, h = img.height;
+            if (w > MAX_DIM || h > MAX_DIM) {
+              const scale = MAX_DIM / Math.max(w, h);
+              w = Math.round(w * scale);
+              h = Math.round(h * scale);
+            }
+            const cvs = document.createElement('canvas');
+            cvs.width = w; cvs.height = h;
+            const ctx = cvs.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            const compressed = cvs.toDataURL('image/jpeg', 0.85);
+            console.log(`[PDF] 사진 압축: ${(blob.size/1024).toFixed(0)}KB → ${(compressed.length*0.75/1024).toFixed(0)}KB (${w}x${h})`);
+            return compressed;
+          } finally {
+            URL.revokeObjectURL(rawUrl);
+          }
         } catch(e) {
           console.warn(`[PDF] 사진 로드 시도 ${attempt+1}/${MAX_RETRIES+1} 실패:`, e);
           if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, 1000)); continue; }
