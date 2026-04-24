@@ -472,7 +472,9 @@ async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0, mfgDate 
   const searchPrefix = `${prefix}-${itemNum}-${mfgYM}-`;
 
   try {
-    const rows = await SheetsAPI.getAll(tab);
+    // 캐시 무효화 후 fresh 데이터로 채번 (동일 날짜 중복 LOT ID 방지)
+    SheetsAPI.invalidateCache(tab);
+    const rows = await SheetsAPI.getAll(tab, false);
     let max = 0;
     rows.forEach(r => {
       if (r[idCol] && r[idCol].startsWith(searchPrefix)) {
