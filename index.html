@@ -6450,9 +6450,9 @@ Screens['approval-detail'] = async (params = {}) => {
 };
 
 /* ═══════════════════════════════════════════════
-   PDF 생성 (HACCP 작업지시서 보고서) v2
-   — 한글 폰트 동적 로드, 매 공정 1페이지,
-     전체 LOT 표시, 목표→실적 순서, 사진 첨부
+   PDF 생성 (HACCP 작업지시서 보고서) v3
+   — 한글 폰트, 축소 폰트, 넓은 표, 개별 LOT,
+     빈 데이터 "내용 없음" 표시
    ═══════════════════════════════════════════════ */
 async function generateWOPdf(woId) {
   const { jsPDF } = window.jspdf;
@@ -6465,12 +6465,11 @@ async function generateWOPdf(woId) {
   const records = (await SheetsAPI.getAll('공정기록', false)).filter(r => r[0] === woId);
   records.sort((a, b) => parseInt(a[1]) - parseInt(b[1]));
 
-  /* ── 한글 폰트 로드 (NanumGothic TTF → jsPDF 등록) ── */
+  /* ── 한글 폰트 로드 ── */
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const PW = 210, PH = 297, M = 14, CW = PW - M * 2;
+  const PW = 210, PH = 297, M = 15, CW = PW - M * 2;
   let y = M;
 
-  // 한글 폰트 로드 시도
   let fontLoaded = false;
   try {
     const fontUrls = [
@@ -6491,17 +6490,16 @@ async function generateWOPdf(woId) {
       const b64Font = btoa(binary);
       doc.addFileToVFS('NanumGothic.ttf', b64Font);
       doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal');
-      // Bold도 같은 폰트로 등록 (bold weight 없으면 normal로 fallback)
       doc.addFont('NanumGothic.ttf', 'NanumGothic', 'bold');
       doc.setFont('NanumGothic', 'normal');
       fontLoaded = true;
-      console.log('[PDF] 한글 폰트(NanumGothic) 로드 성공');
+      console.log('[PDF] 한글 폰트 로드 성공');
     }
-  } catch(e) { console.warn('[PDF] 한글 폰트 로드 실패, canvas fallback 사용:', e); }
+  } catch(e) { console.warn('[PDF] 폰트 로드 실패:', e); }
 
-  /* ── Canvas fallback 헬퍼 (폰트 로드 실패 시) ── */
+  /* ── Canvas fallback ── */
   const _cfont = '"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
-  const SC = 4; // canvas scale
+  const SC = 4;
 
   const canvasTextImg = (text, fs, fw, mw, color) => {
     const c = document.createElement('canvas'), ctx = c.getContext('2d');
@@ -6523,24 +6521,24 @@ async function generateWOPdf(woId) {
     return { d: c.toDataURL('image/png'), w: c.width / SC, h: c.height / SC, lines: lines.length };
   };
 
-  /* ── 통합 텍스트 렌더링 ── */
-  // drawText: 텍스트를 그리고 사용한 높이 반환 (페이지 넘김 포함)
+  /* ── 텍스트 렌더링 ── */
+  const LH_FACTOR = 0.4; // 줄 높이 계수 (축소)
+
   const drawText = (text, x, yy, fs, fw, color, mw, align) => {
     if (!text && text !== 0) return { h: 0, y: yy };
     const str = String(text);
     const maxW = mw || CW;
-
     if (fontLoaded) {
       doc.setFont('NanumGothic', fw === 'bold' ? 'bold' : 'normal');
       doc.setFontSize(fs); doc.setTextColor(color || '#000');
       const splitLines = doc.splitTextToSize(str, maxW);
-      const lineH = fs * 0.45;
+      const lineH = fs * LH_FACTOR;
       const totalH = splitLines.length * lineH;
       if (yy + totalH > PH - 12) { doc.addPage(); yy = M; }
       for (let i = 0; i < splitLines.length; i++) {
-        const tx = align === 'center' ? x + maxW / 2 : x;
-        const opt = align === 'center' ? { align: 'center' } : {};
-        doc.text(splitLines[i], tx, yy + i * lineH + fs * 0.3, opt);
+        const tx = align === 'center' ? x + maxW / 2 : (align === 'right' ? x + maxW : x);
+        const opt = align ? { align } : {};
+        doc.text(splitLines[i], tx, yy + i * lineH + fs * 0.28, opt);
       }
       return { h: totalH, y: yy };
     } else {
@@ -6551,14 +6549,13 @@ async function generateWOPdf(woId) {
     }
   };
 
-  // measureH: 텍스트 높이 측정 (렌더링 없이)
   const measureH = (text, fs, fw, mw) => {
     if (!text && text !== 0) return 0;
     const str = String(text); const maxW = mw || CW;
     if (fontLoaded) {
       doc.setFont('NanumGothic', fw === 'bold' ? 'bold' : 'normal');
       doc.setFontSize(fs);
-      return doc.splitTextToSize(str, maxW).length * fs * 0.45;
+      return doc.splitTextToSize(str, maxW).length * fs * LH_FACTOR;
     } else {
       const c = document.createElement('canvas'), ctx = c.getContext('2d');
       ctx.font = `${fw||'normal'} ${fs*SC}px ${_cfont}`;
@@ -6573,13 +6570,12 @@ async function generateWOPdf(woId) {
     }
   };
 
-  /* ── 구분선 ── */
   const hLine = (yy, color, w) => {
     doc.setDrawColor(...(color||[21,101,192])); doc.setLineWidth(w||0.4);
     doc.line(M, yy, PW - M, yy);
   };
 
-  /* ── Drive 사진 로드 (개선: 다양한 URL 형식 지원) ── */
+  /* ── Drive 사진 로드 ── */
   const loadPhoto = async (url) => {
     try {
       if (!url || !url.trim()) return null;
@@ -6592,7 +6588,6 @@ async function generateWOPdf(woId) {
       else if (m2) fileId = m2[1];
       else if (m3) fileId = m3[1];
       else return null;
-
       const resp = await fetch(`https://drive.google.com/thumbnail?id=${fileId}&sz=w800`);
       if (!resp.ok) return null;
       const blob = await resp.blob();
@@ -6602,75 +6597,68 @@ async function generateWOPdf(woId) {
     } catch { return null; }
   };
 
-  /* ── 테이블 행 (라벨 | 값) ── */
-  const ROW_FS = 8, ROW_PAD = 2, MIN_ROW_H = 7;
+  /* ── 테이블 행 ── */
+  const ROW_FS = 7, ROW_PAD = 1.5, MIN_ROW_H = 5.5;
+  const LABEL_W = 38; // 라벨 너비 (축소)
 
   const tableRow = (label, value, yy, labelW) => {
-    const lw = labelW || 48;
+    const lw = labelW || LABEL_W;
     const vw = CW - lw;
-    const valStr = String(value ?? '-');
-    const lh = measureH(label, ROW_FS, 'bold', lw - 4);
-    const vh = measureH(valStr, ROW_FS, 'normal', vw - 4);
+    const valStr = (!value && value !== 0) || value === '-' || value === '' ? '내용 없음' : String(value);
+    const lh = measureH(label, ROW_FS, 'bold', lw - 3);
+    const vh = measureH(valStr, ROW_FS, 'normal', vw - 3);
     const rh = Math.max(lh + ROW_PAD * 2, vh + ROW_PAD * 2, MIN_ROW_H);
-
     if (yy + rh > PH - 12) { doc.addPage(); yy = M; }
-
-    // 라벨 배경
     doc.setFillColor(240, 244, 250);
     doc.rect(M, yy, lw, rh, 'F');
-    // 전체 테두리
-    doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.2);
+    doc.setDrawColor(200, 210, 230); doc.setLineWidth(0.15);
     doc.rect(M, yy, CW, rh);
-    // 라벨/값 구분선
     doc.line(M + lw, yy, M + lw, yy + rh);
-
-    // 텍스트 (수직 가운데 정렬)
     const lTextY = yy + (rh - lh) / 2;
     const vTextY = yy + (rh - vh) / 2;
-    drawText(label, M + 2, lTextY, ROW_FS, 'bold', '#333', lw - 4);
-    drawText(valStr, M + lw + 2, vTextY, ROW_FS, 'normal', '#222', vw - 4);
-
+    drawText(label, M + 1.5, lTextY, ROW_FS, 'bold', '#333', lw - 3);
+    const vColor = valStr === '내용 없음' ? '#999' : '#222';
+    drawText(valStr, M + lw + 1.5, vTextY, ROW_FS, 'normal', vColor, vw - 3);
     return { nextY: yy + rh, height: rh };
   };
 
   /* ── 섹션 제목 ── */
   const sectionTitle = (text, yy, color) => {
-    const h = measureH(text, 10, 'bold', CW);
+    const h = measureH(text, 9, 'bold', CW);
     if (yy + h + 5 > PH - 12) { doc.addPage(); yy = M; }
-    const r = drawText(text, M, yy, 10, 'bold', color || '#1565c0', CW);
-    yy = r.y + r.h + 2;
-    hLine(yy); yy += 3;
+    const r = drawText(text, M, yy, 9, 'bold', color || '#1565c0', CW);
+    yy = r.y + r.h + 1.5;
+    hLine(yy); yy += 2;
     return yy;
   };
 
-  /* ── 공정 페이지 헤더 ── */
+  /* ── 공정 페이지 헤더 (높이 확대, 겹침 방지) ── */
   const processHeader = (title, subtitle) => {
+    const headerH = 28; // 높이 확대 (22→28)
     doc.setFillColor(21, 101, 192);
-    doc.rect(0, 0, PW, 22, 'F');
-
-    // 왼쪽: 공정명 (상단)
-    drawText(title, M, 4, 11, 'bold', '#ffffff', CW * 0.6);
-    // 왼쪽: 유형|상태 (하단)
-    if (subtitle) drawText(subtitle, M, 14, 7, 'normal', '#bbdefb', CW * 0.6);
-    // 오른쪽: WO번호
-    drawText(woId, PW - M - 55, 5, 7, 'normal', '#bbdefb', 55);
+    doc.rect(0, 0, PW, headerH, 'F');
+    // 왼쪽: 공정명 (1줄만, 크기 축소)
+    drawText(title, M, 4, 9, 'bold', '#ffffff', CW * 0.55);
+    // 왼쪽: 유형|상태 (아래쪽, 충분한 간격)
+    if (subtitle) drawText(subtitle, M, 16, 6, 'normal', '#bbdefb', CW * 0.55);
+    // 오른쪽: WO번호 (크기 축소)
+    drawText(woId, PW - M - 50, 5, 6, 'normal', '#bbdefb', 50);
     // 오른쪽: 제품명
-    drawText(wo[4]||'', PW - M - 55, 13, 7, 'normal', '#e3f2fd', 55);
-
-    return 26;
+    drawText(wo[4]||'', PW - M - 50, 14, 6, 'normal', '#e3f2fd', 50);
+    return headerH + 3;
   };
 
   /* ═══════════════════════════════════════════
      PAGE 1: 표지 + 기본 정보 + HACCP 요약
      ═══════════════════════════════════════════ */
-  // 표지 헤더
   doc.setFillColor(21, 101, 192);
-  doc.rect(0, 0, PW, 48, 'F');
-  drawText('HACCP 생산 기록서', M, 10, 18, 'bold', '#ffffff', CW);
-  drawText('작업지시서 (Work Order Report)', M, 24, 10, 'normal', '#bbdefb', CW);
-  drawText(woId, M, 34, 9, 'normal', '#e3f2fd', CW);
-  drawText(`문서 생성: ${formatDateTime()}`, PW - M - 65, 38, 7, 'normal', '#90caf9', 65);
-  y = 54;
+  doc.rect(0, 0, PW, 42, 'F');
+  drawText('HACCP 생산 기록서', M, 6, 14, 'bold', '#ffffff', CW);
+  drawText('작업지시서 (Work Order Report)', M, 18, 8, 'normal', '#bbdefb', CW);
+  drawText(woId, M, 27, 7, 'normal', '#e3f2fd', CW);
+  // 문서 생성 날짜 (오른쪽 정렬, 줄내림 방지)
+  drawText(`${formatDateTime()}`, PW - M - 50, 34, 6, 'normal', '#90caf9', 50, 'right');
+  y = 47;
 
   // ── 1. 기본 정보 ──
   y = sectionTitle('1. 기본 정보', y);
@@ -6688,8 +6676,8 @@ async function generateWOPdf(woId) {
     ['냉동 시작 시간', wo[11] || '-'],
     ['현재 상태', wo[12] || '-'],
     ['완제품 LOT', wo[14] || '-'],
-    ['승인자', wo[15] || '-'],
-    ['승인 일시', (wo[16] || '-').substring(0, 16)],
+    ['승인자', wo[15] || ''],
+    ['승인 일시', wo[16] ? wo[16].substring(0, 16) : ''],
   ];
   for (const [label, value] of infoData) {
     const r = tableRow(label, value, y);
@@ -6713,10 +6701,10 @@ async function generateWOPdf(woId) {
     ['작업 완료 여부', records.every(r => r[10] === '완료') ? '전체 완료' : '일부 미완료'],
   ];
   for (const [label, value] of hacInfo) {
-    const r = tableRow(label, value, y, 52);
+    const r = tableRow(label, value, y, 42);
     y = r.nextY;
   }
-  y += 5;
+  y += 4;
 
   // ── 3. 공정 목록 요약 ──
   y = sectionTitle('3. 공정 목록 요약', y);
@@ -6724,8 +6712,8 @@ async function generateWOPdf(woId) {
     const typeMap = {input:'투입',process:'믹싱',seal:'포장',inspect:'검사','qr-label':'라벨',store:'보관',pack:'계량'};
     const r = tableRow(
       `${rec[1]}. ${rec[2]||''}`,
-      `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'-'} | ${(rec[11]||'').substring(11,16)||'-'}`,
-      y, 52
+      `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'미완료'} | ${(rec[11]||'').substring(11,16)||'-'}`,
+      y, 42
     );
     y = r.nextY;
   }
@@ -6744,9 +6732,9 @@ async function generateWOPdf(woId) {
     const actualValue = rec[7] || '';
     const photoUrl = rec[8] || '';
     const checkResult = rec[9] || '';
-    const recordStatus = rec[10] || '';
+    const recordStatus = rec[10] || '내용 없음';
     const completedAt = rec[11] || '';
-    const worker = rec[12] || '';
+    const worker = rec[12] || '내용 없음';
 
     const typeLabel = {input:'원재료 투입',process:'믹싱 공정',seal:'포장/밀봉',inspect:'CCP 검사(금속검출)','qr-label':'QR 라벨 출력',store:'냉동보관',pack:'계량/소분'}[stepType] || stepType;
     const isCCP = stepType === 'inspect';
@@ -6902,40 +6890,43 @@ async function generateWOPdf(woId) {
           const r = tableRow(k, val, y); y = r.nextY;
         }
       }
+    } else {
+      // stepData 없음 → "내용 없음" 표시
+      y = sectionTitle('작업자 기입 내용', y);
+      const r = tableRow('기록 데이터', '', y);
+      y = r.nextY;
+      if (isCCP) {
+        const r2 = tableRow('CCP 검사 기록', '', y);
+        y = r2.nextY;
+      }
     }
 
     y += 4;
 
-    // ── 원재료 LOT (★ 전체 표시, 중복 제거 안함 + 개수 표시) ──
+    // ── 원재료 LOT (개별 코드 전체 나열) ──
     if (usedLots) {
       y = sectionTitle('원재료 LOT 추적 (Traceability)', y);
 
-      // 전체 LOT 목록 (중복 포함) → 그룹핑하여 개수 표시
       const allLots = usedLots.split(',').map(l => l.trim()).filter(l => l);
-      const lotCountMap = {};
-      for (const lot of allLots) { lotCountMap[lot] = (lotCountMap[lot] || 0) + 1; }
 
-      let lotIdx = 0;
-      for (const [lot, cnt] of Object.entries(lotCountMap)) {
-        if (y > PH - 12) { doc.addPage(); y = M; }
-        lotIdx++;
-        doc.setFillColor(232, 245, 253);
-        doc.rect(M, y, CW, 7, 'F');
-        doc.setDrawColor(200, 220, 240); doc.setLineWidth(0.15);
-        doc.rect(M, y, CW, 7);
-        const lotText = cnt > 1 ? `${lotIdx}. ${lot}  (× ${cnt}개)` : `${lotIdx}. ${lot}`;
-        drawText(lotText, M + 3, y + 1.5, 7.5, 'normal', '#0d47a1', CW - 6);
-        y += 7.5;
+      // 개별 LOT 전부 나열 (번호 매김)
+      for (let li = 0; li < allLots.length; li++) {
+        if (y > PH - 10) { doc.addPage(); y = M; }
+        const rowH = 5;
+        doc.setFillColor(li % 2 === 0 ? 242 : 232, li % 2 === 0 ? 247 : 245, 253);
+        doc.rect(M, y, CW, rowH, 'F');
+        doc.setDrawColor(210, 220, 240); doc.setLineWidth(0.1);
+        doc.rect(M, y, CW, rowH);
+        drawText(`${li + 1}. ${allLots[li]}`, M + 2, y + 0.8, 6, 'normal', '#0d47a1', CW - 4);
+        y += rowH;
       }
 
       // 총 투입 수량 요약
       y += 1;
-      const totalLots = allLots.length;
-      const uniqueLots = Object.keys(lotCountMap).length;
       doc.setFillColor(248, 250, 255);
-      doc.rect(M, y, CW, 7, 'F');
-      drawText(`총 투입: ${totalLots}건 (고유 LOT: ${uniqueLots}종)`, M + 3, y + 1.5, 7.5, 'bold', '#1565c0', CW - 6);
-      y += 9;
+      doc.rect(M, y, CW, 5.5, 'F');
+      drawText(`총 투입: ${allLots.length}건`, M + 2, y + 1, 6.5, 'bold', '#1565c0', CW - 4);
+      y += 7;
     }
 
     // ── 사진 영역 ──
@@ -6975,6 +6966,13 @@ async function generateWOPdf(woId) {
         }
       }
       if (colIdx > 0) y += photoH + 3;
+    } else {
+      // 사진 없음
+      if (y > PH - 20) { doc.addPage(); y = M; }
+      y += 2;
+      y = sectionTitle('증빙 사진', y);
+      const r = tableRow('사진 기록', '', y);
+      y = r.nextY;
     }
   } // end for each record
 
@@ -7008,8 +7006,8 @@ async function generateWOPdf(woId) {
   y = sectionTitle('서명란', y);
 
   const sigEntries = [
-    ['작업자 (생산담당)', wo[8] || '-', (wo[10] || '-').substring(0, 16)],
-    ['승인자 (품질관리)', wo[15] || '-', (wo[16] || '-').substring(0, 16)],
+    ['작업자 (생산담당)', wo[8] || '', (wo[10] || '').substring(0, 16)],
+    ['승인자 (품질관리)', wo[15] || '', (wo[16] || '').substring(0, 16)],
   ];
   for (const [role, name, dt] of sigEntries) {
     const rr = drawText(role, M + 2, y, 9, 'bold', '#333', CW);
