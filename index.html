@@ -2321,12 +2321,7 @@ Screens['receive-form'] = async () => {
       <div class="input-group" id="rcv-indiv-group" style="display:none">
         <input type="hidden" id="rcv-indiv-count" value="1">
       </div>
-      <div class="photo-upload" onclick="$id('rcv-photo-input').click()">
-        <input type="file" id="rcv-photo-input" accept="image/*" multiple onchange="previewReceivePhoto(this)">
-        <div class="photo-label">📷 입고 제품 상태 사진 <span class="c-err">*필수</span></div>
-        <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
-        <div class="photo-preview" id="rcv-photo-preview"></div>
-      </div>
+      <!-- 사진 촬영 기능 삭제됨 -->
       <div class="info-box suc mt-12" id="rcv-auto-info" style="display:none">
         <div class="fs-12 fw-6 c-suc">자동 생성 예정:</div>
         <div class="fs-12 c-suc" id="rcv-auto-lot"></div>
@@ -2431,15 +2426,7 @@ function updateReceiveConvert() {
   if (indivEl) indivEl.value = qty;
 }
 
-function previewReceivePhoto(input) {
-  const preview = $id('rcv-photo-preview');
-  preview.innerHTML = '';
-  Array.from(input.files).forEach(f => {
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(f);
-    preview.appendChild(img);
-  });
-}
+// previewReceivePhoto 삭제됨 — 입고 사진 기능 제거
 
 async function submitReceiving() {
   if (!acquireLock('submitReceiving')) return;
@@ -2454,8 +2441,6 @@ async function submitReceiving() {
   const inputQty = parseFloat($id('rcv-qty')?.value) || 0;
   const exp = $id('rcv-exp')?.value;
   const temp = $id('rcv-temp')?.value;
-  const photoInput = $id('rcv-photo-input');
-
   // SKU → kg 변환
   const parsed = parseSkuUnit(sku);
   const qtyKg = parsed ? Math.round(inputQty * parsed.perUnit * 100) / 100 : inputQty;
@@ -2469,7 +2454,6 @@ async function submitReceiving() {
   if (!supplier?.trim()) missing.push('공급업체');
   if (!inputQty || inputQty <= 0) missing.push('수량');
   if (!exp) missing.push('소비기한');
-  if (!photoInput?.files?.length) missing.push('입고 사진');
   if (missing.length > 0) {
     toast('미입력 항목: ' + missing.join(', '), 'err');
     releaseLock('submitReceiving');
@@ -2480,13 +2464,7 @@ async function submitReceiving() {
   try {
     showLoading();
 
-    // Upload photo
     let photoUrl = '';
-    try {
-      photoUrl = await DriveAPI.uploadPhoto(photoInput.files[0]);
-    } catch (e) {
-      console.warn('Photo upload failed:', e);
-    }
 
     // Generate IDs — 새 포맷: [대분류]-[품목번호]-[입고일]-[사용기한]-[입고순번]
     const prefix = type === '원재료' ? 'RM' : 'SP';
