@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a237e">
@@ -22,8 +22,12 @@
   --label-w: 60mm; --label-h: 40mm;
 }
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); -webkit-tap-highlight-color:transparent; overflow:hidden; height:100vh; height:100dvh; padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) 0 env(safe-area-inset-left,0); }
-input,select,textarea,button { font-family:inherit; font-size:14px; }
+html { font-size:16px; -webkit-text-size-adjust:100%; -moz-text-size-adjust:100%; text-size-adjust:100%; }
+body { font-family: system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; font-size:1rem; background:var(--bg); color:var(--txt); -webkit-tap-highlight-color:transparent; overflow:hidden; height:100vh; height:100dvh; padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) 0 env(safe-area-inset-left,0); }
+input,select,textarea,button { font-family:inherit; font-size:16px; }
+input[type="number"] { -moz-appearance:textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
 button { cursor:pointer; border:none; }
 a { text-decoration:none; color:inherit; }
 
@@ -32,6 +36,41 @@ a { text-decoration:none; color:inherit; }
    ═══════════════════════════════════════════════ */
 #app { display:flex; flex-direction:column; height:100vh; height:100dvh; width:100%; max-width:600px; margin:0 auto; background:var(--white); position:relative; }
 @media (max-width:600px) { #app { max-width:100%; } }
+
+/* ── 소형 안드로이드 (Galaxy A, 화면폭 ≤ 360px) ── */
+@media (max-width:360px) {
+  :root { font-size:15px; }
+  .fs-11 { font-size:12px; } .fs-12 { font-size:13px; } .fs-13 { font-size:14px; }
+  .btn { padding:12px 16px; font-size:15px; min-height:44px; }
+  .btn-sm { padding:8px 12px; font-size:13px; min-height:38px; }
+  .badge { font-size:12px; padding:3px 8px; }
+  .check-item .check-box { width:26px; height:26px; }
+  .check-item span { font-size:15px; }
+  .input-group label { font-size:13px; }
+  .input-group input, .input-group select, .input-group textarea { font-size:16px; padding:12px; min-height:44px; }
+  .input-group .input-suffix span { font-size:14px; }
+  .input-group .input-hint { font-size:12px; }
+  .tab-filter .tab { padding:10px 14px; font-size:14px; min-height:40px; }
+  #header .h-title { font-size:20px; }
+  #header .h-sub { font-size:13px; }
+  #bottom-nav .nav-item .nav-label { font-size:11px; }
+  .card { padding:16px; }
+  .photo-upload .photo-label { font-size:13px; }
+  .dialog .d-title { font-size:18px; }
+  .dialog .d-msg { font-size:14px; }
+  .toast { font-size:14px; }
+}
+
+/* ── 극소형 (화면폭 ≤ 320px, 구형 SE/Galaxy J) ── */
+@media (max-width:320px) {
+  :root { font-size:14px; }
+  .fs-11 { font-size:13px; } .fs-12 { font-size:14px; } .fs-13 { font-size:14px; } .fs-14 { font-size:15px; }
+  #header { padding:12px 12px 8px; }
+  .card { padding:12px; margin-bottom:8px; }
+  .tab-filter { gap:4px; padding:8px 10px; }
+  .tab-filter .tab { padding:8px 10px; font-size:13px; }
+  .grid-2 { grid-template-columns:1fr; }
+}
 #header { padding:14px 16px 10px; background:var(--pri); color:#fff; flex-shrink:0; z-index:10; }
 #header .h-title { font-size:18px; font-weight:700; }
 #header .h-sub { font-size:12px; opacity:0.8; margin-top:2px; }
@@ -45,6 +84,7 @@ a { text-decoration:none; color:inherit; }
 #bottom-nav .nav-item .nav-icon { width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
 #bottom-nav .nav-item .nav-icon svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 #bottom-nav .nav-item .nav-label { font-size:10px; font-weight:600; line-height:1; }
+#bottom-nav .nav-item { min-height:52px; min-width:48px; }
 
 /* ═══════════════════════════════════════════════
    COMPONENTS
@@ -59,7 +99,7 @@ a { text-decoration:none; color:inherit; }
 .badge-info { background:#1565c018; color:var(--info); }
 .badge-gray { background:#61616118; color:var(--gray-d); }
 .badge-teal { background:#00695c18; color:var(--teal); }
-.btn { display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; color:#fff; border:none; transition:opacity 0.15s; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; color:#fff; border:none; transition:opacity 0.15s; min-height:44px; }
 .btn:active { opacity:0.85; }
 .btn-pri { background:var(--pri); }
 .btn-suc { background:var(--suc); }
@@ -74,18 +114,18 @@ a { text-decoration:none; color:inherit; }
 .btn-outline.btn-warn { color:var(--warn); border-color:var(--warn); }
 .btn-outline.btn-gray { color:var(--gray-d); border-color:var(--gray-d); }
 .btn-full { width:100%; }
-.btn-sm { padding:6px 12px; font-size:12px; }
+.btn-sm { padding:6px 12px; font-size:12px; min-height:36px; }
 .btn:disabled { opacity:0.5; cursor:not-allowed; }
 .input-group { margin-bottom:14px; }
 .input-group label { display:block; font-size:12px; font-weight:600; color:var(--txt-l); margin-bottom:4px; }
-.input-group input, .input-group select, .input-group textarea { width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--gray-l); font-size:14px; color:var(--txt); background:var(--white); outline:none; }
+.input-group input, .input-group select, .input-group textarea { width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--gray-l); font-size:16px; color:var(--txt); background:var(--white); outline:none; min-height:44px; }
 .input-group input:focus, .input-group select:focus { border-color:var(--pri); }
 .input-group .input-suffix { display:flex; align-items:center; gap:6px; }
 .input-group .input-suffix input { flex:1; }
 .input-group .input-suffix span { font-size:12px; color:var(--txt-l); white-space:nowrap; }
 .input-group .input-hint { font-size:11px; color:var(--txt-l); margin-top:4px; }
-.check-item { display:flex; align-items:center; gap:8px; padding:8px 0; }
-.check-item .check-box { width:22px; height:22px; border-radius:4px; border:2px solid var(--gray-l); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; font-size:14px; font-weight:700; color:#fff; }
+.check-item { display:flex; align-items:center; gap:10px; padding:10px 0; min-height:44px; }
+.check-item .check-box { width:24px; height:24px; border-radius:4px; border:2px solid var(--gray-l); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; font-size:14px; font-weight:700; color:#fff; }
 .check-item .check-box.checked { background:var(--suc); border:none; }
 .check-item span { font-size:14px; }
 .tab-filter { display:flex; gap:6px; padding:10px 12px; overflow-x:auto; background:var(--white); border-bottom:1px solid var(--gray-l); flex-shrink:0; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
@@ -4535,7 +4575,7 @@ function renderStepContent(step, stepType) {
           <span class="fs-12 c-txt-l">시작 시간:</span>
           <input type="time" id="ccp-time-1" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" value="${formatTime()}" onchange="validateStepInputs(${stepNo})">
         </div>
-        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:8px">※ 기계 전원 ON 후 작동 시작 시간을 직접 입력하세요</div>
+        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:11px">※ 기계 전원 ON 후 작동 시작 시간을 직접 입력하세요</div>
       </div>
     `;
 
@@ -4598,7 +4638,7 @@ function renderStepContent(step, stepType) {
           <span class="fs-12 c-txt-l">시작 시간:</span>
           <input type="time" id="ccp-time-4" style="padding:6px 10px;border-radius:4px;border:1px solid var(--gray-l);font-size:13px" onchange="ccpCalcStep5Time(${stepNo});validateStepInputs(${stepNo})">
         </div>
-        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:8px">※ 생산 라인 통과 시작 시간을 입력하면 Step5 검증 시간이 자동 계산됩니다</div>
+        <div class="c-txt-l mt-4" style="opacity:0.6;font-size:11px">※ 생산 라인 통과 시작 시간을 입력하면 Step5 검증 시간이 자동 계산됩니다</div>
       </div>
     `;
 
