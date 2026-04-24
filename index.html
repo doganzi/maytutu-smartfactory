@@ -353,14 +353,24 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 const $id = (id) => document.getElementById(id);
 
-// ── 중복 제출 방지 유틸리티 ──
+// ── 중복 제출 방지 유틸리티 (타임아웃 안전장치 포함) ──
 const _actionLocks = {};
+const _lockTimers = {};
+const LOCK_TIMEOUT_MS = 30000; // 30초 후 자동 해제 (네트워크 장애 대비)
 function acquireLock(name) {
   if (_actionLocks[name]) { toast('처리 중입니다. 잠시만 기다려주세요.', 'warn'); return false; }
   _actionLocks[name] = true;
+  // 안전장치: 30초 후 자동 해제 (네트워크 끊김/예외 누락 시 영구 잠금 방지)
+  clearTimeout(_lockTimers[name]);
+  _lockTimers[name] = setTimeout(() => {
+    if (_actionLocks[name]) {
+      console.warn(`[Lock] ${name} 자동 해제 (${LOCK_TIMEOUT_MS/1000}초 타임아웃)`);
+      _actionLocks[name] = false;
+    }
+  }, LOCK_TIMEOUT_MS);
   return true;
 }
-function releaseLock(name) { _actionLocks[name] = false; }
+function releaseLock(name) { _actionLocks[name] = false; clearTimeout(_lockTimers[name]); }
 
 function showLoading() { $id('loading').classList.remove('hidden'); }
 function hideLoading() { $id('loading').classList.add('hidden'); }
@@ -2661,9 +2671,13 @@ async function onQRScanSuccess(decodedText) {
       return;
     }
 
+    // 이미 처리 완료된 항목 차단 (소진/폐기/출하완료)
+    const inactiveStatuses = ['소진', '폐기', '출하완료'];
+    const isInactive = inactiveStatuses.includes(data.status);
+
     // 완제품: 출하 가능 여부 체크 (냉동 12h 이상)
     let shipBtn = '';
-    if (type === '완제품') {
+    if (type === '완제품' && !isInactive) {
       const fgStatus = data.status || '';
       const canShip = fgStatus === '출하가능';
       if (canShip) {
@@ -2675,16 +2689,25 @@ async function onQRScanSuccess(decodedText) {
       }
     }
 
+    // 비활성 항목이면 경고 표시, 버튼 비활성
+    const inactiveWarning = isInactive
+      ? `<div class="fs-13 c-err fw-6 mt-8" style="text-align:center">⚠ 이미 ${data.status} 처리된 항목입니다</div>`
+      : '';
+    const disposalBtn = isInactive
+      ? `<button class="btn btn-outline btn-gray flex-1" disabled>폐기 불가</button>`
+      : `<button class="btn btn-outline btn-err flex-1" onclick="processDisposal('${data.id}','${data.lotId||''}','${type}','${data.itemName}')">폐기</button>`;
+
     resultEl.innerHTML = `
       <div class="fs-14 fw-7 mb-8">스캔 결과</div>
       <div class="card bl-info">
         <div class="lot-id" style="font-size:13px">${data.id}</div>
         <div class="fs-12 c-txt-l mt-4">${data.itemName} · ${data.remain ? data.remain + 'kg' : ''} · 소비기한 ${(data.exp||'').substring(0,10)}</div>
-        <div class="fs-11 ${data.status === '냉동보관중' ? 'c-warn' : 'c-suc'} mt-4">상태: ${data.status || '냉동보관중'}</div>
+        <div class="fs-11 ${isInactive ? 'c-err' : (data.status === '냉동보관중' ? 'c-warn' : 'c-suc')} mt-4">상태: ${data.status || '냉동보관중'}</div>
       </div>
+      ${inactiveWarning}
       <div class="row mt-12" style="gap:8px">
         ${shipBtn}
-        <button class="btn btn-outline btn-err flex-1" onclick="processDisposal('${data.id}','${data.lotId||''}','${type}','${data.itemName}')">폐기</button>
+        ${disposalBtn}
       </div>
       ${type !== '완제품' ? '<div class="fs-11 c-txt-l" style="text-align:center;margin-top:8px">* 생산 투입은 작업지시서 공정에서만 가능합니다</div>' : ''}
       <button class="btn btn-outline btn-gray btn-full mt-8" onclick="Router.go('qr-scan')">다시 스캔</button>
@@ -4169,13 +4192,14 @@ function updateWOCalc() {
 }
 
 async function startWorkOrder() {
+  if (!acquireLock('startWorkOrder')) return;
   const qty = parseFloat($id('wo-qty')?.value) || 0;
   const unitSize = parseInt($id('wo-unit')?.value) || 1;
   const reqId = $id('wo-req')?.value || '';
   const totalKg = qty * unitSize;
 
-  if (!_selectedSopId) { toast('SOP를 선택하세요', 'err'); return; }
-  if (qty <= 0) { toast('생산 수량을 입력하세요', 'err'); return; }
+  if (!_selectedSopId) { toast('SOP를 선택하세요', 'err'); releaseLock('startWorkOrder'); return; }
+  if (qty <= 0) { toast('생산 수량을 입력하세요', 'err'); releaseLock('startWorkOrder'); return; }
 
   try {
     showLoading();
@@ -4199,6 +4223,7 @@ async function startWorkOrder() {
     toast('생성 실패: ' + e.message, 'err');
   } finally {
     hideLoading();
+    releaseLock('startWorkOrder');
   }
 }
 
@@ -5770,6 +5795,19 @@ async function completeStep() {
       const qtyInput = $id(`input-qty-${stepNo}`);
       const consumedQty = parseFloat(qtyInput?.value) || 0;
 
+      // ── 서버 사이드 상태 재검증: 이미 소진/폐기된 재료 중복 투입 차단 ──
+      SheetsAPI.invalidateCache('원재료개별');
+      const freshRmIndivs = await SheetsAPI.getAll('원재료개별', false);
+      const alreadyUsed = scannedItems.filter(item => {
+        const fresh = freshRmIndivs.find(iv => iv[0] === item.qrId);
+        return fresh && ['소진','폐기'].includes(fresh[3]);
+      });
+      if (alreadyUsed.length > 0) {
+        const usedIds = alreadyUsed.map(i => i.qrId).join(', ');
+        toast(`⚠ 이미 사용/폐기된 원재료가 포함되어 있습니다:\n${usedIds}\n\n해당 항목을 제거 후 다시 시도하세요.`, 'err', 6000);
+        hideLoading(); releaseLock('completeStep'); return;
+      }
+
       // ① 개별 항목별 상태 업데이트 — 전량:'소진', 잔여분:'잔여'(활성 유지)
       await Promise.all(scannedItems.map((item, idx) => {
         const ut = itemUseTypes[idx] || 'full';
@@ -5983,6 +6021,7 @@ async function submitForApproval() {
 // ── 승인요청 취소 ──
 async function cancelApprovalRequest(woId) {
   confirm('승인요청 취소', `${woId}의 승인요청을 취소하시겠습니까?\n작업은 마지막 공정 상태로 복원됩니다.`, async () => {
+    if (!acquireLock('cancelApproval')) return;
     try {
       showLoading();
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
@@ -5995,6 +6034,7 @@ async function cancelApprovalRequest(woId) {
       toast('취소 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
+      releaseLock('cancelApproval');
     }
   });
 }
@@ -7414,9 +7454,17 @@ async function approveWO(woId) {
     if (!acquireLock('approveWO')) return;
     try {
       showLoading();
-      const wos = await SheetsAPI.getAll('작업지시서');
+      // 캐시 무효화 후 최신 상태 확인 (동시 승인/거부 경합 방지)
+      SheetsAPI.invalidateCache('작업지시서');
+      const wos = await SheetsAPI.getAll('작업지시서', false);
       const wo = wos.find(w => w[0] === woId && w[12] !== '삭제');
       if (!wo) throw new Error('WO not found');
+      // 상태 전이 검증: 냉동보관중/승인대기에서만 승인 가능
+      const validStatuses = ['냉동보관중', '승인대기'];
+      if (!validStatuses.includes(wo[12])) {
+        toast(`현재 상태가 "${wo[12]}"입니다. 승인할 수 없는 상태입니다.`, 'err', 4000);
+        hideLoading(); return;
+      }
 
       // 12시간 재검증
       const freezeStart = wo[11] ? new Date(wo[11]) : null;
@@ -7522,6 +7570,7 @@ Screens['reject-modal'] = (params = {}) => {
 async function rejectWO(woId, action) {
   const reason = $id('reject-reason')?.value || '';
   if (!reason.trim()) { toast('거부 사유를 입력하세요', 'err'); return; }
+  if (!acquireLock('rejectWO')) return;
 
   try {
     showLoading();
@@ -7537,6 +7586,7 @@ async function rejectWO(woId, action) {
     toast('처리 실패: ' + e.message, 'err');
   } finally {
     hideLoading();
+    releaseLock('rejectWO');
   }
 }
 
@@ -7571,6 +7621,7 @@ async function processDisposal(itemId, lotId, type, itemName) {
 async function _executeDisposal(itemId, lotId, type, itemName, reason) {
 
   confirm('폐기 처리', `${itemId}\n${itemName}\n사유: ${reason}\n\n정말 폐기하시겠습니까?`, async () => {
+    if (!acquireLock('executeDisposal')) return;
     try {
       showLoading();
       const isFG = type === '완제품';
@@ -7620,6 +7671,7 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
       toast('폐기 실패: ' + e.message, 'err');
     } finally {
       hideLoading();
+      releaseLock('executeDisposal');
     }
   });
 }
@@ -7660,6 +7712,17 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
   if (!acquireLock('executeShipment')) return;
   try {
     showLoading();
+
+    // ── 서버 사이드 상태 재검증 (중복 출하/이미 폐기된 항목 차단) ──
+    SheetsAPI.invalidateCache('완제품개별');
+    const freshIndivs = await SheetsAPI.getAll('완제품개별', false);
+    const currentIndiv = freshIndivs.find(iv => iv[0] === indivId);
+    if (!currentIndiv) { toast('해당 항목을 찾을 수 없습니다', 'err'); return; }
+    if (['출하완료','폐기','소진'].includes(currentIndiv[3])) {
+      toast(`이미 ${currentIndiv[3]} 처리된 항목입니다. 중복 처리가 방지되었습니다.`, 'err', 4000);
+      return;
+    }
+
     const shipTime = formatDateTime();
 
     // 1. 완제품개별 상태 + 출하기록을 병렬로 처리
@@ -7889,6 +7952,34 @@ async function initApp() {
     Router.go('login');
   }
 }
+
+// ── 네트워크 상태 감지 (오프라인 작업 방지) ──
+let _offlineBanner = null;
+window.addEventListener('offline', () => {
+  if (_offlineBanner) return;
+  _offlineBanner = document.createElement('div');
+  _offlineBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:var(--err,#e24b4a);color:#fff;text-align:center;padding:10px;font-size:14px;font-weight:600';
+  _offlineBanner.textContent = '⚠ 네트워크 연결이 끊겼습니다. 데이터 저장이 불가능합니다.';
+  document.body.prepend(_offlineBanner);
+  // 모든 잠금 해제 (오프라인 상태에서 영구 잠금 방지)
+  Object.keys(_actionLocks).forEach(k => { _actionLocks[k] = false; });
+});
+window.addEventListener('online', () => {
+  if (_offlineBanner) { _offlineBanner.remove(); _offlineBanner = null; }
+  toast('네트워크 연결이 복원되었습니다. 데이터를 새로고침합니다.', 'suc', 3000);
+  // 캐시 전체 무효화 + 현재 화면 새로고침
+  SheetsAPI.invalidateAllCache();
+  setTimeout(() => Router.go(State.currentScreen || 'dashboard'), 1000);
+});
+
+// ── 브라우저 닫기/새로고침 시 진행 중 작업 경고 ──
+window.addEventListener('beforeunload', (e) => {
+  const hasActiveLock = Object.values(_actionLocks).some(v => v);
+  if (hasActiveLock) {
+    e.preventDefault();
+    e.returnValue = '작업이 진행 중입니다. 페이지를 나가면 데이터가 손실될 수 있습니다.';
+  }
+});
 
 // Start the app
 initApp();
