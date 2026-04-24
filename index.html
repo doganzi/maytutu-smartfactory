@@ -259,6 +259,7 @@ const CONFIG = {
   SCOPES: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
   SHEET_ID: '1_koe58lReouU_ZZxzUh5SU8gUkuHjlwb1LNjZbJGSLU',
   DRIVE_FOLDER_ID: '1GwQpb9KBsXIwymKe5Ko6oqrz25BjeG4g',
+  PDF_FOLDER_ID: '1we1zPuzbOMhQGHkrzBE22xdfB5J_ptlU',
   API_KEY: '',
 };
 
@@ -883,7 +884,9 @@ const DriveAPI = {
       name: fileName,
       mimeType: 'application/pdf',
     };
-    if (CONFIG.DRIVE_FOLDER_ID) {
+    if (CONFIG.PDF_FOLDER_ID) {
+      metadata.parents = [CONFIG.PDF_FOLDER_ID];
+    } else if (CONFIG.DRIVE_FOLDER_ID) {
       metadata.parents = [CONFIG.DRIVE_FOLDER_ID];
     }
     const form = new FormData();
@@ -6450,9 +6453,9 @@ Screens['approval-detail'] = async (params = {}) => {
 };
 
 /* ═══════════════════════════════════════════════
-   PDF 생성 (HACCP 작업지시서 보고서) v3
-   — 한글 폰트, 축소 폰트, 넓은 표, 개별 LOT,
-     빈 데이터 "내용 없음" 표시
+   PDF 생성 (HACCP 작업지시서 보고서) v4
+   — 라벨 짤림 수정, 빈페이지 제거, 사진 Drive API,
+     CCP JSON 파싱, PDF 폴더 분리
    ═══════════════════════════════════════════════ */
 async function generateWOPdf(woId) {
   const { jsPDF } = window.jspdf;
@@ -6575,7 +6578,7 @@ async function generateWOPdf(woId) {
     doc.line(M, yy, PW - M, yy);
   };
 
-  /* ── Drive 사진 로드 ── */
+  /* ── Drive 사진 로드 (인증된 Drive API 사용) ── */
   const loadPhoto = async (url) => {
     try {
       if (!url || !url.trim()) return null;
@@ -6588,7 +6591,11 @@ async function generateWOPdf(woId) {
       else if (m2) fileId = m2[1];
       else if (m3) fileId = m3[1];
       else return null;
-      const resp = await fetch(`https://drive.google.com/thumbnail?id=${fileId}&sz=w800`);
+      const token = localStorage.getItem('mt_token') || State.token;
+      if (!token) return null;
+      const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!resp.ok) return null;
       const blob = await resp.blob();
       return await new Promise(r => {
@@ -6598,8 +6605,8 @@ async function generateWOPdf(woId) {
   };
 
   /* ── 테이블 행 ── */
-  const ROW_FS = 7, ROW_PAD = 1.5, MIN_ROW_H = 5.5;
-  const LABEL_W = 38; // 라벨 너비 (축소)
+  const ROW_FS = 6, ROW_PAD = 1.2, MIN_ROW_H = 4.5;
+  const LABEL_W = 28; // 라벨 너비 (축소하여 값 영역 확대)
 
   const tableRow = (label, value, yy, labelW) => {
     const lw = labelW || LABEL_W;
@@ -6624,9 +6631,9 @@ async function generateWOPdf(woId) {
 
   /* ── 섹션 제목 ── */
   const sectionTitle = (text, yy, color) => {
-    const h = measureH(text, 9, 'bold', CW);
+    const h = measureH(text, 8, 'bold', CW);
     if (yy + h + 5 > PH - 12) { doc.addPage(); yy = M; }
-    const r = drawText(text, M, yy, 9, 'bold', color || '#1565c0', CW);
+    const r = drawText(text, M, yy, 8, 'bold', color || '#1565c0', CW);
     yy = r.y + r.h + 1.5;
     hLine(yy); yy += 2;
     return yy;
@@ -6666,18 +6673,18 @@ async function generateWOPdf(woId) {
   const infoData = [
     ['제품명', wo[4] || '-'],
     ['제품코드', wo[3] || '-'],
-    ['SOP 번호', wo[1] || '-'],
-    ['생산량 (목표)', `${wo[5] || '-'} kg`],
-    ['포장 단위', wo[6] || '-'],
-    ['포장 수량', `${wo[7] || '-'} 개`],
+    ['SOP', wo[1] || '-'],
+    ['생산량', `${wo[5] || '-'} kg`],
+    ['포장단위', wo[6] || '-'],
+    ['포장수량', `${wo[7] || '-'} 개`],
     ['작업자', wo[8] || '-'],
-    ['생산 시작', (wo[9] || '-').substring(0, 16)],
-    ['생산 완료', (wo[10] || '-').substring(0, 16)],
-    ['냉동 시작 시간', wo[11] || '-'],
-    ['현재 상태', wo[12] || '-'],
-    ['완제품 LOT', wo[14] || '-'],
+    ['시작일시', (wo[9] || '-').substring(0, 16)],
+    ['완료일시', (wo[10] || '-').substring(0, 16)],
+    ['냉동시작', wo[11] || '-'],
+    ['상태', wo[12] || '-'],
+    ['완제품LOT', wo[14] || '-'],
     ['승인자', wo[15] || ''],
-    ['승인 일시', wo[16] ? wo[16].substring(0, 16) : ''],
+    ['승인일시', wo[16] ? wo[16].substring(0, 16) : ''],
   ];
   for (const [label, value] of infoData) {
     const r = tableRow(label, value, y);
@@ -6693,15 +6700,15 @@ async function generateWOPdf(woId) {
   y = sectionTitle('2. HACCP 관리 요약', y);
 
   const hacInfo = [
-    ['총 공정 수', `${records.length}단계`],
-    ['CCP 검사 공정 수', `${ccpRecords.length}건`],
-    ['원재료 투입 공정 수', `${inputRecords.length}건`],
-    ['냉동보관 공정 수', `${storeRecords.length}건`],
-    ['원재료 LOT 추적', inputRecords.length > 0 ? '기록됨' : '해당 없음'],
-    ['작업 완료 여부', records.every(r => r[10] === '완료') ? '전체 완료' : '일부 미완료'],
+    ['총 공정', `${records.length}단계`],
+    ['CCP 검사', `${ccpRecords.length}건`],
+    ['원재료투입', `${inputRecords.length}건`],
+    ['냉동보관', `${storeRecords.length}건`],
+    ['LOT 추적', inputRecords.length > 0 ? '기록됨' : '해당 없음'],
+    ['완료여부', records.every(r => r[10] === '완료') ? '전체 완료' : '일부 미완료'],
   ];
   for (const [label, value] of hacInfo) {
-    const r = tableRow(label, value, y, 42);
+    const r = tableRow(label, value, y);
     y = r.nextY;
   }
   y += 4;
@@ -6713,10 +6720,12 @@ async function generateWOPdf(woId) {
     const r = tableRow(
       `${rec[1]}. ${rec[2]||''}`,
       `${typeMap[rec[3]]||rec[3]} | ${rec[10]||'미완료'} | ${(rec[11]||'').substring(11,16)||'-'}`,
-      y, 42
+      y, 32
     );
     y = r.nextY;
   }
+  // 공정 목록 후 빈 공간이 남아도 불필요한 페이지 추가 방지
+  // (각 공정 페이지는 doc.addPage()로 시작하므로 여기서 여백 제거)
 
   /* ═══════════════════════════════════════════
      각 공정별 페이지
@@ -6739,8 +6748,10 @@ async function generateWOPdf(woId) {
     const typeLabel = {input:'원재료 투입',process:'믹싱 공정',seal:'포장/밀봉',inspect:'CCP 검사(금속검출)','qr-label':'QR 라벨 출력',store:'냉동보관',pack:'계량/소분'}[stepType] || stepType;
     const isCCP = stepType === 'inspect';
 
-    // ── 새 페이지 시작 ──
-    doc.addPage();
+    // ── 새 페이지 시작 (빈 페이지 방지: y가 상단이면 addPage 생략) ──
+    if (y > M + 5) {
+      doc.addPage();
+    }
     y = processHeader(`공정 ${stepNo}. ${stepName}`, `${typeLabel}  |  ${recordStatus}`);
 
     // CCP 배너
@@ -6756,11 +6767,11 @@ async function generateWOPdf(woId) {
     // ── 기록 정보 ──
     y = sectionTitle('기록 정보', y);
     const baseInfo = [
-      ['공정 번호', stepNo],
+      ['공정번호', stepNo],
       ['공정명', stepName],
-      ['공정 유형', typeLabel],
+      ['유형', typeLabel],
       ['작업자', worker],
-      ['기록 시간', completedAt ? completedAt.substring(0, 19) : '-'],
+      ['기록시간', completedAt ? completedAt.substring(0, 19) : '-'],
       ['상태', recordStatus],
     ];
     if (actualValue) baseInfo.push(['측정값', actualValue]);
@@ -6799,7 +6810,7 @@ async function generateWOPdf(woId) {
       // 체크항목 (HACCP 위생 점검)
       if (stepData.checks && stepData.checks.length > 0) {
         y += 3;
-        const chkR = drawText('체크항목 (위생/품질 점검)', M, y, 9, 'bold', '#333', CW);
+        const chkR = drawText('체크항목 (위생/품질 점검)', M, y, 8, 'bold', '#333', CW);
         y = chkR.y + chkR.h + 2;
         for (const c of stepData.checks) {
           if (y > PH - 12) { doc.addPage(); y = M; }
@@ -6809,8 +6820,8 @@ async function generateWOPdf(woId) {
           // 배경 박스
           doc.setFillColor(c.checked ? 232 : 255, c.checked ? 245 : 235, c.checked ? 233 : 238);
           doc.rect(M + 2, y, CW - 4, 7, 'F');
-          drawText(txt, M + 4, y + 1.5, 8, 'normal', chColor, CW - 8);
-          y += 8;
+          drawText(txt, M + 4, y + 1, 6, 'normal', chColor, CW - 8);
+          y += 6;
         }
         y += 2;
       }
@@ -6822,7 +6833,7 @@ async function generateWOPdf(woId) {
       }
       if (stepData.samples && stepData.samples.length > 0) {
         y += 2;
-        const sr = drawText('중량 검사 샘플 (HACCP 계량 검증)', M, y, 9, 'bold', '#333', CW);
+        const sr = drawText('중량 검사 샘플 (HACCP 계량 검증)', M, y, 8, 'bold', '#333', CW);
         y = sr.y + sr.h + 2;
         for (let si = 0; si < stepData.samples.length; si++) {
           if (y > PH - 12) { doc.addPage(); y = M; }
@@ -6848,7 +6859,7 @@ async function generateWOPdf(woId) {
         if (stepData.failCount != null) { const r = tableRow('불합격 수량', `${stepData.failCount} 개`, y); y = r.nextY; }
         if (stepData.times) {
           y += 2;
-          const tr = drawText('CCP 모니터링 시간 기록', M, y, 9, 'bold', '#c62828', CW);
+          const tr = drawText('CCP 모니터링 시간 기록', M, y, 8, 'bold', '#c62828', CW);
           y = tr.y + tr.h + 2;
           for (const [k, v] of Object.entries(stepData.times)) {
             if (y > PH - 12) { doc.addPage(); y = M; }
@@ -6862,7 +6873,7 @@ async function generateWOPdf(woId) {
         doc.setFillColor(isPass ? 232 : 255, isPass ? 245 : 235, isPass ? 233 : 238);
         doc.rect(M, y, CW, 9, 'F');
         if (!isPass) { doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 9); }
-        drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 9, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
+        drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 8, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
         y += 11;
       }
 
@@ -6876,18 +6887,35 @@ async function generateWOPdf(woId) {
         r = tableRow('냉동 온도', stepData.freezeTemp || '-18°C (기본)', y); y = r.nextY;
       }
 
-      // 기타 데이터 (누락 방지)
+      // 기타 데이터 (JSON 파싱하여 읽기 쉽게 표시)
       const shownKeys = ['inputQty','targetQty','useType','checks','packQty','samples','sealQty',
         'labelCheck','sealCheck','ccpTotal','passCount','failCount','times','qrQty','freezeStart','freezeTemp'];
       const extraKeys = Object.keys(stepData).filter(k => !shownKeys.includes(k));
       if (extraKeys.length > 0) {
         y += 2;
-        const er = drawText('기타 기록 데이터', M, y, 9, 'bold', '#666', CW);
+        const er = drawText('기타 기록 데이터', M, y, 8, 'bold', '#666', CW);
         y = er.y + er.h + 2;
         for (const k of extraKeys) {
           if (y > PH - 12) { doc.addPage(); y = M; }
-          const val = typeof stepData[k] === 'object' ? JSON.stringify(stepData[k]) : String(stepData[k]);
-          const r = tableRow(k, val, y); y = r.nextY;
+          let val = stepData[k];
+          // JSON 객체를 사람이 읽기 쉽게 포맷팅
+          if (typeof val === 'object' && val !== null) {
+            try {
+              if (val.fe || val.sus) {
+                // CCP 검사 결과 형식: {fe: {result, time}, sus: {result, time}}
+                const parts = [];
+                if (val.fe) parts.push(`Fe: ${val.fe.result||'-'} (${val.fe.time||'-'})`);
+                if (val.sus) parts.push(`SUS: ${val.sus.result||'-'} (${val.sus.time||'-'})`);
+                val = parts.join(' / ');
+              } else if (val.num != null) {
+                // 샘플 형식: {num, result, time}
+                val = `#${val.num} ${val.result||'-'} (${val.time||'-'})`;
+              } else {
+                val = JSON.stringify(val);
+              }
+            } catch { val = JSON.stringify(val); }
+          }
+          const r = tableRow(k, String(val), y); y = r.nextY;
         }
       }
     } else {
@@ -6986,18 +7014,18 @@ async function generateWOPdf(woId) {
   y = sectionTitle('HACCP 생산기록 확인', y);
 
   const confirmItems = [
-    ['문서 번호', woId],
+    ['문서번호', woId],
     ['제품명', wo[4] || '-'],
     ['생산량', `${wo[5]||'-'} kg / ${wo[7]||'-'} 개`],
-    ['생산 기간', `${(wo[9]||'-').substring(0,16)} ~ ${(wo[10]||'-').substring(0,16)}`],
-    ['CCP 검사 결과', ccpRecords.length > 0 ? '검사 완료' : '해당 없음'],
-    ['원재료 LOT 추적', inputRecords.filter(r => r[4]).length > 0 ? '전체 기록됨' : '해당 없음'],
-    ['냉동보관 기록', storeRecords.length > 0 ? '기록됨' : '해당 없음'],
-    ['총 공정 완료', `${records.filter(r=>r[10]==='완료').length} / ${records.length}단계`],
-    ['완제품 LOT', wo[14] || '-'],
+    ['생산기간', `${(wo[9]||'-').substring(0,16)} ~ ${(wo[10]||'-').substring(0,16)}`],
+    ['CCP결과', ccpRecords.length > 0 ? '검사 완료' : '해당 없음'],
+    ['LOT추적', inputRecords.filter(r => r[4]).length > 0 ? '전체 기록됨' : '해당 없음'],
+    ['냉동보관', storeRecords.length > 0 ? '기록됨' : '해당 없음'],
+    ['공정완료', `${records.filter(r=>r[10]==='완료').length} / ${records.length}단계`],
+    ['완제품LOT', wo[14] || '-'],
   ];
   for (const [l, v] of confirmItems) {
-    const r = tableRow(l, v, y, 50); y = r.nextY;
+    const r = tableRow(l, v, y); y = r.nextY;
   }
 
   y += 10;
@@ -7010,7 +7038,7 @@ async function generateWOPdf(woId) {
     ['승인자 (품질관리)', wo[15] || '', (wo[16] || '').substring(0, 16)],
   ];
   for (const [role, name, dt] of sigEntries) {
-    const rr = drawText(role, M + 2, y, 9, 'bold', '#333', CW);
+    const rr = drawText(role, M + 2, y, 8, 'bold', '#333', CW);
     y = rr.y + rr.h + 2;
     let r;
     r = tableRow('성명', name, y, 30); y = r.nextY;
