@@ -1299,7 +1299,7 @@ Screens.dashboard = async () => {
       const reorderPoint = parseFloat(item[9]) || parseFloat(item[6]) || 0;
       const threshold = reorderPoint;
       if (threshold <= 0) return;
-      const totalRemain = rmLots.filter(l => l[1] === code && l[9] !== '폐기').reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
+      const totalRemain = rmLots.filter(l => l[1] === code && !['폐기','입고취소'].includes(l[9])).reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
       const sku = item[3] || '';
       const skuP = parseSkuUnit(sku);
       let remainDisp = totalRemain + 'kg', threshDisp = threshold + 'kg';
@@ -1741,18 +1741,195 @@ async function deleteRequest(reqId) {
 }
 
 async function deleteWorkOrder(woId) {
-  confirm('작업지시서 삭제', `${woId}을(를) 삭제하시겠습니까?\n미시작 건만 삭제 가능합니다.`, async () => {
-    try {
-      showLoading();
-      await SheetsAPI.updateCell('작업지시서', 0, woId, 12, '삭제');
-      toast('삭제되었습니다', 'suc');
-      Router.go('production');
-    } catch (e) {
-      toast('삭제 실패: ' + e.message, 'err');
-    } finally {
-      hideLoading();
+  showLoading();
+  try {
+    SheetsAPI.invalidateCache('작업지시서');
+    const wos = await SheetsAPI.getAll('작업지시서', false);
+    const wo = wos.find(w => w[0] === woId);
+    if (!wo) { hideLoading(); toast('작업지시서를 찾을 수 없습니다', 'err'); return; }
+    if (wo[12] === '삭제') { hideLoading(); toast('이미 삭제된 작업지시서입니다', 'warn'); return; }
+
+    const isAdmin = State.user?.role === 'admin';
+    const isOwner = wo[8] === State.user?.email;
+    if (!isAdmin && !isOwner) { hideLoading(); toast('본인 또는 관리자만 삭제 가능합니다', 'err'); return; }
+
+    const status = wo[12] || '';
+    const fgLotId = wo[14] || '';
+    const dangerous = ['진행중','냉동보관중','출하가능','출하완료','승인완료'].includes(status);
+    hideLoading();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+      <div class="dialog" style="max-width:360px">
+        <div class="d-title">작업지시서 삭제</div>
+        <div class="d-msg">${woId} · ${wo[4]||''} ${wo[5]||''}kg<br><span class="fs-11 c-txt-l">현재 상태: ${status||'-'}</span></div>
+        ${dangerous ? `<div class="card bl-err" style="background:#fff0f0;padding:10px;margin-bottom:10px"><div class="fs-12 c-err fw-7">⚠ 위험: 진행/완료 상태</div><div class="fs-11 c-txt-l mt-4">통계·HACCP 보고서에서 누락됩니다. 사유를 명확히 기입하세요.</div></div>` : ''}
+        ${fgLotId ? `<div class="check-item" id="cascade-row" style="margin-bottom:10px;cursor:pointer"><div class="check-box checked" id="cascade-fg" style="background:var(--err)">✓</div><span class="fs-12">연결된 완제품 LOT (${fgLotId}) 도 함께 삭제</span></div>` : ''}
+        <div class="input-group" style="margin-bottom:8px">
+          <label>삭제 사유 (필수)</label>
+          <select id="del-reason-preset" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+            <option value="">— 사유 선택 —</option>
+            <option value="오등록">오등록</option>
+            <option value="중복">중복 등록</option>
+            <option value="테스트">테스트</option>
+            <option value="현장사정">현장 사정</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="input-group" style="margin-bottom:12px">
+          <textarea id="del-reason-detail" rows="2" placeholder="상세 사유 (선택)" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></textarea>
+        </div>
+        <div class="d-actions">
+          <button class="btn btn-sm btn-outline btn-gray" id="del-cancel">취소</button>
+          <button class="btn btn-sm btn-err" id="del-ok">삭제</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cascadeRow = overlay.querySelector('#cascade-row');
+    if (cascadeRow) {
+      cascadeRow.onclick = () => {
+        const box = overlay.querySelector('#cascade-fg');
+        const checked = box.classList.toggle('checked');
+        box.style.background = checked ? 'var(--err)' : '';
+        box.textContent = checked ? '✓' : '';
+      };
     }
-  });
+    overlay.querySelector('#del-cancel').onclick = () => overlay.remove();
+    overlay.querySelector('#del-ok').onclick = () => {
+      const preset = overlay.querySelector('#del-reason-preset').value;
+      const detail = overlay.querySelector('#del-reason-detail').value?.trim();
+      if (!preset) { toast('삭제 사유를 선택하세요', 'err'); return; }
+      const reason = detail ? `${preset} — ${detail}` : preset;
+      const cascadeFg = !!(fgLotId && overlay.querySelector('#cascade-fg')?.classList.contains('checked'));
+      overlay.remove();
+
+      confirm('정말 삭제하시겠습니까?', `${woId}\n사유: ${reason}${cascadeFg ? `\n+ 완제품 LOT ${fgLotId} 동시 삭제` : ''}`, async () => {
+        if (!acquireLock('deleteWO')) return;
+        try {
+          showLoading();
+          await SheetsAPI.updateRow('작업지시서', 0, woId, {
+            12: '삭제',
+            15: State.user?.email || '',
+            16: formatDateTime(),
+            17: `[삭제] ${reason}`
+          });
+          if (cascadeFg && fgLotId) {
+            await SheetsAPI.updateRow('완제품LOT', 0, fgLotId, { 9: '삭제' });
+            const fgIndivs = (await SheetsAPI.getAll('완제품개별').catch(()=>[])).filter(iv=>iv[1]===fgLotId && iv[3]!=='출하완료');
+            for (const iv of fgIndivs) {
+              await SheetsAPI.updateRow('완제품개별', 0, iv[0], { 3: '삭제' });
+            }
+            SheetsAPI.invalidateCache('완제품LOT');
+            SheetsAPI.invalidateCache('완제품개별');
+          }
+          SheetsAPI.invalidateCache('작업지시서');
+          toast('삭제되었습니다', 'suc');
+          Router.go('production');
+        } catch (e) {
+          toast('삭제 실패: ' + e.message, 'err');
+        } finally {
+          hideLoading();
+          releaseLock('deleteWO');
+        }
+      });
+    };
+  } catch (e) {
+    hideLoading();
+    toast('로드 실패: ' + e.message, 'err');
+  }
+}
+
+/* ─── 원재료 LOT 입고취소 (오입고 정정용) ───
+   '폐기'와 별도 상태값 — HACCP 추적 보고서에서 분리 집계
+   조건: 미사용 LOT만 (사용된 개별이 1개라도 있으면 거부) */
+async function cancelLotIntake(lotId, itemName) {
+  showLoading();
+  try {
+    SheetsAPI.invalidateCache('원재료LOT');
+    SheetsAPI.invalidateCache('원재료개별');
+    const lots = await SheetsAPI.getAll('원재료LOT', false);
+    const lot = lots.find(l => l[0] === lotId);
+    if (!lot) { hideLoading(); toast('LOT을 찾을 수 없습니다', 'err'); return; }
+    if (['입고취소','폐기'].includes(lot[9])) { hideLoading(); toast(`이미 ${lot[9]} 처리된 LOT입니다`, 'warn'); return; }
+
+    const indivs = (await SheetsAPI.getAll('원재료개별', false)).filter(iv => iv[1] === lotId);
+    const consumedIndivs = indivs.filter(iv => ['사용중','소진','폐기'].includes(iv[3]));
+    if (consumedIndivs.length > 0) {
+      hideLoading();
+      toast(`이미 ${consumedIndivs.length}건이 사용/소진/폐기되어 입고취소 불가합니다.\n잔여만 폐기 처리하세요.`, 'err', 5000);
+      return;
+    }
+    if (lot[9] === '사용중' || lot[9] === '소진') {
+      hideLoading();
+      toast(`LOT 상태가 "${lot[9]}"여서 입고취소 불가합니다`, 'err');
+      return;
+    }
+    hideLoading();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+      <div class="dialog" style="max-width:360px">
+        <div class="d-title">입고 취소 (오입고 정정)</div>
+        <div class="d-msg">${lotId}<br>${itemName} · ${lot[4]||''}${lot[5]||''}<br><span class="fs-11 c-txt-l">개별 ${indivs.length}건 모두 미사용 — 취소 가능</span></div>
+        <div class="card bl-warn" style="background:#fff8e1;padding:10px;margin-bottom:10px">
+          <div class="fs-11 c-txt-l">입고취소는 <strong>실수로 잘못 등록된 입고를 무효화</strong>하는 기능입니다.<br>HACCP 보고서에서 '폐기'와 분리되어 집계됩니다.</div>
+        </div>
+        <div class="input-group" style="margin-bottom:8px">
+          <label>취소 사유 (필수)</label>
+          <select id="cancel-reason-preset" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+            <option value="">— 사유 선택 —</option>
+            <option value="수량 오입력">수량 오입력</option>
+            <option value="잘못된 LOT">잘못된 LOT</option>
+            <option value="중복 입고">중복 입고</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="input-group" style="margin-bottom:12px">
+          <textarea id="cancel-reason-detail" rows="2" placeholder="상세 사유 (선택)" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></textarea>
+        </div>
+        <div class="d-actions">
+          <button class="btn btn-sm btn-outline btn-gray" id="cancel-no">아니오</button>
+          <button class="btn btn-sm btn-err" id="cancel-yes">입고취소</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#cancel-no').onclick = () => overlay.remove();
+    overlay.querySelector('#cancel-yes').onclick = () => {
+      const preset = overlay.querySelector('#cancel-reason-preset').value;
+      const detail = overlay.querySelector('#cancel-reason-detail').value?.trim();
+      if (!preset) { toast('사유를 선택하세요', 'err'); return; }
+      const reason = detail ? `${preset} — ${detail}` : preset;
+      overlay.remove();
+
+      confirm('입고를 취소하시겠습니까?', `${lotId}\n사유: ${reason}\n\n해당 LOT과 개별 ${indivs.length}건이 모두 무효화됩니다.`, async () => {
+        if (!acquireLock('cancelLotIntake')) return;
+        try {
+          showLoading();
+          const auditNote = `[입고취소] ${reason} | ${State.user?.email||''} | ${formatDateTime()}`;
+          await SheetsAPI.updateRow('원재료LOT', 0, lotId, { 8: '0', 9: '입고취소', 11: auditNote });
+          for (const iv of indivs) {
+            await SheetsAPI.updateRow('원재료개별', 0, iv[0], { 3: '입고취소', 4: formatDateTime(), 5: `입고취소:${reason}` });
+          }
+          SheetsAPI.invalidateCache('원재료LOT');
+          SheetsAPI.invalidateCache('원재료개별');
+          toast(`입고 취소 완료: ${lotId}`, 'suc');
+          Router.go('inventory');
+        } catch (e) {
+          toast('입고취소 실패: ' + e.message, 'err');
+        } finally {
+          hideLoading();
+          releaseLock('cancelLotIntake');
+        }
+      });
+    };
+  } catch (e) {
+    hideLoading();
+    toast('로드 실패: ' + e.message, 'err');
+  }
 }
 
 // ─── PRODUCTION REQUEST FORM ───
@@ -1876,13 +2053,13 @@ async function renderInventoryContent(activeTab) {
 
         // Calculate remain from LOTs
         const totalRemain = isWater ? '-' :
-          (State.rawMaterialLots || []).filter(l => l[1] === code && l[9] !== '폐기')
+          (State.rawMaterialLots || []).filter(l => l[1] === code && !['폐기','입고취소'].includes(l[9]))
             .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
 
         const needsOrder = !isWater && reorderPoint > 0 && totalRemain <= reorderPoint;
 
         // Find earliest expiry
-        const lots = (State.rawMaterialLots || []).filter(l => l[1] === code && l[9] !== '폐기' && l[9] !== '소진');
+        const lots = (State.rawMaterialLots || []).filter(l => l[1] === code && !['폐기','소진','입고취소'].includes(l[9]));
         const earliestExp = lots.reduce((min, l) => {
           if (!l[7]) return min;
           return !min || l[7] < min ? l[7] : min;
@@ -1930,7 +2107,7 @@ async function renderInventoryContent(activeTab) {
     try { fgIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []); } catch(e) {}
     const activeStatuses = ['냉동보관중','출하가능'];
 
-    const fgLots = (State.finishedGoodsLots || []).filter(l => l[9] !== '폐기' && l[9] !== '소진' && l[9] !== '출하완료');
+    const fgLots = (State.finishedGoodsLots || []).filter(l => !['폐기','소진','출하완료','삭제'].includes(l[9]));
     // Group by itemCode
     const grouped = {};
     fgLots.forEach(l => {
@@ -2085,7 +2262,8 @@ Screens['lot-detail'] = async (params = {}) => {
   }
 
   // 완제품: 출하완료 LOT 제외
-  const displayLots = isFG ? lots.filter(l => l[9] !== '출하완료' && l[9] !== '폐기' && l[9] !== '소진') : lots;
+  const displayLots = isFG ? lots.filter(l => !['출하완료','폐기','소진','삭제'].includes(l[9]))
+                                   : lots.filter(l => l[9] !== '입고취소');
 
   const lotBadgeClass = needsOrder ? 'warn' : 'suc';
   const lotBadgeText = needsOrder ? '발주필요' : '정상';
@@ -2138,6 +2316,10 @@ Screens['lot-detail'] = async (params = {}) => {
         const stColor = status === '미사용' ? 'suc' : status === '사용중' ? 'info' : 'gray';
         const canPrint = ['미사용','사용중'].includes(status);
         const printableIndivs = lotIndivs.filter(iv => ['미사용','사용중'].includes(iv[3]));
+        // 입고취소 가능 조건: 미사용 LOT + 모든 개별이 미사용 상태 (원재료만)
+        const isRMLot = !isFG && !isSP;
+        const canCancelIntake = isRMLot && status === '미사용' && lotIndivs.length > 0
+          && lotIndivs.every(iv => iv[3] === '미사용' || !iv[3]);
         // SKU 단위 변환 for LOT display — unit이 이미 비-kg 단위이면 이중 변환 방지
         const lotUnit = (l[5]||'kg').trim();
         let lotQtyDisp = qty + lotUnit, lotRemDisp = remain + lotUnit;
@@ -2168,6 +2350,10 @@ Screens['lot-detail'] = async (params = {}) => {
                 <div class="fill" style="width:${Math.min(100, (remain/qty)*100)}%;background:var(--info)"></div>
               </div>
             ` : ''}
+            ${canCancelIntake ? `
+              <div class="row" style="gap:6px;margin-top:8px">
+                <button class="btn btn-sm btn-outline btn-err" style="font-size:11px;padding:4px 10px" onclick="event.stopPropagation();cancelLotIntake('${l[0]}','${(itemName||'').replace(/'/g,"\\'")}')">🗑 입고취소 (오입고 정정)</button>
+              </div>` : ''}
             <div id="indiv-list-${l[0].replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
           </div>
         `;
@@ -2203,7 +2389,7 @@ async function showLotIndividuals(lotId, itemName, type) {
       return;
     }
 
-    const activeIndivs = indivs.filter(iv => !['출하완료','폐기'].includes(iv[3]));
+    const activeIndivs = indivs.filter(iv => !['출하완료','폐기','입고취소','삭제'].includes(iv[3]));
     const shippedIndivs = indivs.filter(iv => iv[3] === '출하완료');
     container.innerHTML = `
       <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
@@ -2672,7 +2858,7 @@ async function onQRScanSuccess(decodedText) {
     }
 
     // 이미 처리 완료된 항목 차단 (소진/폐기/출하완료)
-    const inactiveStatuses = ['소진', '폐기', '출하완료'];
+    const inactiveStatuses = ['소진', '폐기', '출하완료', '입고취소'];
     const isInactive = inactiveStatuses.includes(data.status);
 
     // 완제품: 출하 가능 여부 체크 (냉동 12h 이상)
@@ -3816,7 +4002,7 @@ Screens['items-rm'] = async () => {
           const orderCycle = item[11] || '';
           const isWater = code === 'RM002';
           const totalRemain = isWater ? '-' :
-            lots.filter(l => l[1] === code && l[9] !== '폐기' && l[9] !== '소진')
+            lots.filter(l => l[1] === code && !['폐기','소진','입고취소'].includes(l[9]))
               .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
           const rmNeedsOrder = !isWater && rpVal > 0 && totalRemain <= rpVal;
           return `
@@ -5800,11 +5986,11 @@ async function completeStep() {
       const freshRmIndivs = await SheetsAPI.getAll('원재료개별', false);
       const alreadyUsed = scannedItems.filter(item => {
         const fresh = freshRmIndivs.find(iv => iv[0] === item.qrId);
-        return fresh && ['소진','폐기'].includes(fresh[3]);
+        return fresh && ['소진','폐기','입고취소'].includes(fresh[3]);
       });
       if (alreadyUsed.length > 0) {
         const usedIds = alreadyUsed.map(i => i.qrId).join(', ');
-        toast(`⚠ 이미 사용/폐기된 원재료가 포함되어 있습니다:\n${usedIds}\n\n해당 항목을 제거 후 다시 시도하세요.`, 'err', 6000);
+        toast(`⚠ 이미 사용/폐기/입고취소된 원재료가 포함되어 있습니다:\n${usedIds}\n\n해당 항목을 제거 후 다시 시도하세요.`, 'err', 6000);
         hideLoading(); releaseLock('completeStep'); return;
       }
 
@@ -5839,7 +6025,7 @@ async function completeStep() {
         const perUnit = sampleIndiv ? (parseFloat(sampleIndiv[4]) || totalQty / (parseInt(lot[10]) || 1))
                                     : totalQty / (parseInt(lot[10]) || 1);
         // 활성 개별 수 기준으로 잔량 직접 산출 (누적 오차 방지)
-        const activeIndivs = allIndivs.filter(iv => iv[1] === lotId && !['폐기','소진'].includes(iv[3]));
+        const activeIndivs = allIndivs.filter(iv => iv[1] === lotId && !['폐기','소진','입고취소'].includes(iv[3]));
         const newRemain = Math.round(activeIndivs.length * perUnit * 100) / 100;
         const prevRemain = parseFloat(lot[8]) || 0;
         const newStatus = activeIndivs.length === 0 ? '소진' : '사용중';
@@ -6095,7 +6281,7 @@ async function processScannedQR(stepNo, rmCode, qrId) {
 
     // 소진/폐기 상태는 스캔 거부, 잔여 상태는 재사용 허용
     const indivStatus = (indiv[3] || '').trim();
-    if (['소진','폐기'].includes(indivStatus)) {
+    if (['소진','폐기','입고취소'].includes(indivStatus)) {
       toast(`이 제품은 "${indivStatus}" 상태입니다. 사용할 수 없습니다.`, 'err');
       hideLoading();
       return;
@@ -6595,6 +6781,13 @@ Screens['wo-detail'] = async (params = {}) => {
         <div class="fs-14 fw-7 mb-8">공정 기록 (${records.length}단계)</div>
         ${records.length === 0 ? '<div class="fs-12 c-txt-l">아직 기록된 공정이 없습니다</div>' :
           records.map(r => renderProcessRecordCard(r)).join('')}
+
+        ${(woStatus !== '삭제' && (State.user?.role === 'admin' || wo[8] === State.user?.email)) ? `
+          <div class="card bl-err" style="background:#fff5f5;margin-top:16px">
+            <div class="fs-12 c-err fw-7 mb-4">⚠ 작업지시서 삭제</div>
+            <div class="fs-11 c-txt-l mb-8">${State.user?.role === 'admin' ? '관리자 권한으로 모든 작업지시서를 삭제할 수 있습니다.' : '본인이 등록한 작업지시서만 삭제 가능합니다.'} 삭제 사유와 감사 로그가 기록됩니다.</div>
+            <button class="btn btn-outline btn-err" style="width:100%" onclick="deleteWorkOrder('${woId}')">🗑 작업지시서 삭제</button>
+          </div>` : ''}
       </div>
     `;
 
@@ -7653,7 +7846,7 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
         const lot = lots.find(l => l[0] === lotId);
         if (lot) {
           const indivs = await SheetsAPI.getAll(indivTab, false);
-          const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','소진','출하완료'].includes(iv[3]));
+          const activeIndivs = indivs.filter(iv => iv[1] === lotId && !['폐기','소진','출하완료','입고취소'].includes(iv[3]));
           const newStatus = activeIndivs.length === 0 ? '소진' : lot[9];
           if (isFG) {
             // 완제품: 잔량 = 활성 개별 수
@@ -7752,7 +7945,7 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     SheetsAPI.invalidateCache('완제품개별');
     const allIndivs = await SheetsAPI.getAll('완제품개별', false);
     const lotIndivs = allIndivs.filter(iv => iv[1] === lotId);
-    const activeCount = lotIndivs.filter(iv => !['출하완료','폐기'].includes(iv[3])).length;
+    const activeCount = lotIndivs.filter(iv => !['출하완료','폐기','입고취소','삭제'].includes(iv[3])).length;
 
     // 4. LOT remain + 상태를 한 번에 업데이트
     const lotRowIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
@@ -7913,7 +8106,7 @@ async function initApp() {
           const remain = parseFloat(lot[8]) || 0;
           const status = lot[9] || '';
           const myIndivs = rmIndivs.filter(iv => iv[1] === lotId);
-          const active = myIndivs.filter(iv => !['폐기','소진'].includes(iv[3]));
+          const active = myIndivs.filter(iv => !['폐기','소진','입고취소'].includes(iv[3]));
           const consumed = myIndivs.filter(iv => iv[3] === '소진');
           // perUnit: 개별 항목의 실제 수량 우선 사용 (lot[10] 의존 제거)
           const sampleIndiv = myIndivs[0];
