@@ -4495,6 +4495,7 @@ Screens['bom-calc'] = async () => {
             </div>
           </div>
         </div>
+        <div id="bom-rec"></div>
         <div id="bom-result"></div>
       </div>
     `;
@@ -4515,6 +4516,8 @@ function renderBomResult() {
   if (lblEl) lblEl.textContent = unit === 'bag' ? '생산 봉수' : '완제품 kg';
   if (unitEl) unitEl.textContent = unit === 'bag' ? '봉' : 'kg';
   const result = $id('bom-result');
+  const recEl = $id('bom-rec');
+  if (recEl) recEl.innerHTML = '';
   if (!result || !State._bom || qty <= 0 || !sopId) {
     if (result) result.innerHTML = '<div class="fs-12 c-txt-l mt-12">입력값을 확인하세요</div>';
     return;
@@ -4525,6 +4528,58 @@ function renderBomResult() {
     result.innerHTML = '<div class="card bl-warn" style="background:#fff8e1;margin-top:12px"><div class="fs-12 c-warn">선택한 SOP에 레시피가 없습니다</div></div>';
     return;
   }
+
+  // ─── 권장 배치 사이즈 (200~350kg, 정수 포대) — 입력 바로 아래에 표시 ───
+  if (recEl) {
+    const mainRecipe = sopRecipes.find(r => r[1]==='RM003')
+                    || sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
+    const mainItem = rmItems.find(i => i[0] === mainRecipe[1]);
+    const mainSkuP = parseSkuUnit(mainItem?.[3] || '');
+    const mainRatio = parseFloat(mainRecipe[3]) || 0;
+    const candidates = [];
+    if (mainSkuP && mainSkuP.perUnit > 0 && mainRatio > 0) {
+      for (let units = 1; units <= 50; units++) {
+        const totalMixKg = units * mainSkuP.perUnit;
+        const maxFinishedKg = totalMixKg / (mainRatio * 1.01);
+        if (maxFinishedKg < 200) continue;
+        if (maxFinishedKg > 360) break;
+        const bags = Math.floor(maxFinishedKg / 5);
+        const finishedKg = bags * 5;
+        if (finishedKg < 200 || finishedKg > 350) continue;
+        const mixUsed = mainRatio * finishedKg * 1.01;
+        const waste = totalMixKg - mixUsed;
+        candidates.push({ units, totalMixKg, finishedKg, bags, waste });
+      }
+      candidates.sort((a, b) => (a.waste - b.waste) || (b.bags - a.bags));
+    }
+    const top3 = candidates.slice(0, 3);
+    const curBags = unit === 'bag' ? qty : Math.round(qty / 5);
+    if (top3.length > 0) {
+      recEl.innerHTML = `
+        <div class="card" style="background:#f0f7ff;border-left:3px solid var(--pri);margin-top:12px">
+          <div class="fs-13 fw-7 mb-4">📐 권장 배치 (${mainRecipe[2]} 정수 ${mainSkuP.unitName} 단위)</div>
+          <div class="fs-11 c-txt-l mb-8">200~350kg 범위 · 잔여 자재 최소 순 상위 3건</div>
+          ${top3.map((r, i) => {
+            const isCurrent = (curBags === r.bags);
+            const applyVal = unit === 'bag' ? r.bags : r.finishedKg;
+            return `
+              <div class="row between" style="padding:8px 0;${i < top3.length-1 ? 'border-bottom:1px solid var(--bg)' : ''};align-items:center">
+                <div style="flex:1">
+                  <div class="fs-13 fw-7">${r.bags}봉 (${r.finishedKg}kg)</div>
+                  <div class="fs-11 c-txt-l">${mainRecipe[2]} ${r.units}${mainSkuP.unitName} (${r.totalMixKg}kg) · 잔여 ${r.waste.toFixed(2)}kg</div>
+                </div>
+                ${isCurrent ? '<span class="badge badge-suc">현재 입력</span>' :
+                  `<button class="btn btn-sm btn-pri" onclick="document.getElementById('bom-qty').value=${applyVal};renderBomResult()" style="white-space:nowrap">적용</button>`}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    } else if (mainSkuP && mainSkuP.perUnit > 0) {
+      recEl.innerHTML = `<div class="card bl-warn" style="background:#fff8e1;margin-top:12px;padding:10px"><div class="fs-12 c-warn">⚠ 200~350kg 범위에서 ${mainRecipe[2]} 정수 ${mainSkuP.unitName} 조합 없음</div></div>`;
+    }
+  }
+
   const targetKg = unit === 'bag' ? qty * 5 : qty;
   const bagCount = unit === 'bag' ? qty : (qty / 5);
   const ratioSum = sopRecipes.reduce((s, r) => s + (parseFloat(r[3])||0), 0);
@@ -4604,43 +4659,6 @@ function renderBomResult() {
       </div>
     </div>
 
-    <div class="card" style="margin-top:8px;background:#f8f9fa">
-      <div class="fs-12 fw-6 mb-4">📐 권장 배치 사이즈 (200~350kg, 정수 ${(()=>{
-        const mainR = sopRecipes.find(r => r[1]==='RM003') || sopRecipes.reduce((a,b)=> parseFloat(a[3]||0)>parseFloat(b[3]||0)?a:b, sopRecipes[0]);
-        const it = rmItems.find(i => i[0]===mainR[1]);
-        const sk = parseSkuUnit(it?.[3]||'');
-        return sk?.unitName || '단위';
-      })()} 단위)</div>
-      <div class="fs-11 c-txt-l">
-        ${(() => {
-          // 마미만쥬믹스 우선, 없으면 비중 최대
-          const mainRecipe = sopRecipes.find(r => r[1]==='RM003')
-                          || sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
-          const item = rmItems.find(i => i[0] === mainRecipe[1]);
-          const skuP = parseSkuUnit(item?.[3] || '');
-          if (!skuP || !skuP.perUnit) return '주 자재 SKU 정보 없음 — 권장 계산 불가';
-          const ratio = parseFloat(mainRecipe[3]);
-          // 정수 포대 단위로 200~350kg 완제품 후보 탐색 (5kg/봉)
-          const candidates = [];
-          for (let units = 1; units <= 50; units++) {
-            const totalMixKg = units * skuP.perUnit;
-            const maxFinishedKg = totalMixKg / (ratio * 1.01);
-            if (maxFinishedKg < 200) continue;
-            if (maxFinishedKg > 360) break;
-            const bags = Math.floor(maxFinishedKg / 5);
-            const finishedKg = bags * 5;
-            if (finishedKg < 200 || finishedKg > 350) continue;
-            const mixUsed = ratio * finishedKg * 1.01;
-            const waste = totalMixKg - mixUsed;
-            candidates.push({ units, totalMixKg, finishedKg, bags, waste });
-          }
-          candidates.sort((a, b) => (a.waste - b.waste) || (b.bags - a.bags));
-          const top = candidates.slice(0, 3);
-          if (top.length === 0) return `200~350kg 범위에서 ${mainRecipe[2]} 정수 ${skuP.unitName} 조합 없음`;
-          return `${mainRecipe[2]} 기준 잔여 최소 배치:<br>` + top.map(t => `<strong>${t.bags}봉</strong>(${t.finishedKg}kg) → ${t.units}${skuP.unitName} 잔여 ${t.waste.toFixed(2)}kg`).join('<br>');
-        })()}
-      </div>
-    </div>
   `;
 }
 
