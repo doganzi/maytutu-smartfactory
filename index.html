@@ -1311,7 +1311,15 @@ Screens.dashboard = async () => {
       }
       if (totalRemain <= threshold) {
         lowStock++;
-        orderAlertItems.push({ name: item[1], code, remain: totalRemain, threshold, remainDisp, threshDisp });
+        // 부족분(kg) 및 권장 발주량(= 발주점까지 채움 + 50% 안전여유)
+        const gapKg = Math.max(0, threshold - totalRemain);
+        const recommendOrderKg = Math.ceil(gapKg + threshold * 0.5);
+        let gapDisp = gapKg.toFixed(1) + 'kg', recDisp = recommendOrderKg + 'kg';
+        if (skuP && skuP.perUnit > 0) {
+          gapDisp = Math.ceil(gapKg / skuP.perUnit) + skuP.unitName;
+          recDisp = Math.ceil(recommendOrderKg / skuP.perUnit) + skuP.unitName;
+        }
+        orderAlertItems.push({ name: item[1], code, remain: totalRemain, threshold, remainDisp, threshDisp, gapDisp, recDisp });
       }
     });
 
@@ -1438,13 +1446,14 @@ Screens.dashboard = async () => {
       })() : ''}
 
       ${orderAlertItems.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8 mt-8">📦 발주 필요</div>
+        <div class="fs-14 fw-7 mb-8 mt-8">📦 발주 필요 (${orderAlertItems.length}건)</div>
         ${orderAlertItems.map(item => `
           <div class="card clickable" onclick="Router.go('inventory')" style="border-left:3px solid var(--warn)">
             <div class="row between">
-              <div>
-                <div class="fs-14 fw-6" style="color:var(--warn)">${item.name} 발주 필요</div>
+              <div style="flex:1">
+                <div class="fs-14 fw-6" style="color:var(--warn)">${item.name}</div>
                 <div class="fs-12 c-txt-l">현재고 ${item.remainDisp} / 발주점 ${item.threshDisp}</div>
+                <div class="fs-12 c-err mt-2 fw-6">부족 ${item.gapDisp} · 권장 발주 ${item.recDisp}</div>
               </div>
               <span class="badge badge-warn">발주</span>
             </div>
@@ -1481,6 +1490,7 @@ Screens.dashboard = async () => {
               <span class="badge badge-warn" style="font-size:10px">발주필요</span>
             </div>
             <div style="font-size:12px;color:var(--txt-l);margin-top:4px">현재고 ${item.remainDisp} / 발주점 ${item.threshDisp}</div>
+            <div style="font-size:12px;color:var(--err);margin-top:2px;font-weight:600">부족 ${item.gapDisp} · 권장 발주 ${item.recDisp}</div>
           </div>`).join('');
 
       // 팝업 닫기 함수를 전역에 등록 (inline onclick에서 호출)
@@ -2175,7 +2185,37 @@ async function renderInventoryContent(activeTab) {
     if (items.length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="es-icon">📦</div><div class="es-title">원재료 품목이 없습니다</div></div>`;
     } else {
-      listEl.innerHTML = items.map(item => {
+      // 최근 7일 이내 입고된 미사용 LOT (입고취소 가능 후보) — 상단 강조
+      const now = Date.now();
+      const recentLots = (State.rawMaterialLots || []).filter(l => {
+        if (l[9] !== '미사용') return false;
+        const totalQty = parseFloat(l[4]) || 0, remain = parseFloat(l[8]) || 0;
+        if (Math.abs(totalQty - remain) > 0.01) return false;  // 부분 소비된 건 제외
+        if (!l[6]) return false;
+        const days = (now - new Date(l[6]).getTime()) / 86400000;
+        return days <= 7 && days >= 0;
+      }).sort((a,b) => new Date(b[6]) - new Date(a[6])).slice(0, 5);
+
+      const recentBanner = recentLots.length > 0 ? `
+        <div class="card bl-info" style="background:#e3f2fd;margin-bottom:12px">
+          <div class="fs-13 fw-7 c-info mb-4">📥 최근 입고 LOT (7일 내 · ${recentLots.length}건)</div>
+          <div class="fs-11 c-txt-l mb-8">잘못 입고된 건은 LOT 상세 → '입고취소 (오입고 정정)' 버튼으로 무효화 가능</div>
+          ${recentLots.map(l => {
+            const item = items.find(i => i[0] === l[1]);
+            return `
+              <div class="row between clickable" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:center" onclick="Router.go('lot-detail', {itemCode:'${l[1]}', itemName:'${(item?.[1]||'').replace(/'/g,"\\'")}'})">
+                <div style="flex:1;min-width:0">
+                  <div class="fs-12 fw-6" style="font-family:monospace;word-break:break-all">${l[0]}</div>
+                  <div class="fs-11 c-txt-l">${item?.[1]||l[1]} · 입고 ${(l[4]||'')}${(l[5]||'')} · ${(l[6]||'').substring(0,10)}</div>
+                </div>
+                <span class="fs-10 c-info" style="white-space:nowrap;margin-left:8px">상세 ▸</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : '';
+
+      listEl.innerHTML = recentBanner + items.map(item => {
         const code = item[0], name = item[1];
         const sku = item[3] || '';
         const storageTemp = item[8] || '실온';
@@ -2429,7 +2469,7 @@ Screens['lot-detail'] = async (params = {}) => {
               <div class="lot-card-header mb-4">
                 <span class="lot-id">${l[0]}</span>
                 <div class="lot-actions">
-                  ${canPrint ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','fg')">🖨️ 전체 ${activeIndivs.length}매</button>` : ''}
+                  ${canPrint ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','fg')">🖨️ 인쇄가능 ${activeIndivs.length}매</button>` : ''}
                   <span class="badge badge-${stColor}">${status}</span>
                 </div>
               </div>
@@ -2468,7 +2508,7 @@ Screens['lot-detail'] = async (params = {}) => {
             <div class="lot-card-header mb-4">
               <span class="lot-id">${l[0]}</span>
               <div class="lot-actions">
-                ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">🖨️ 전체 ${printableIndivs.length}매</button>` : ''}
+                ${canPrint && printableIndivs.length > 0 ? `<button class="btn btn-sm btn-pri" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();printLotLabels('${l[0]}','${itemName}','${isSP?'sp':'rm'}')">🖨️ 인쇄가능 ${printableIndivs.length}매</button>` : ''}
                 <span class="badge badge-${stColor}">${status}</span>
               </div>
             </div>
