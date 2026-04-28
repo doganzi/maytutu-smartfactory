@@ -4160,28 +4160,39 @@ function renderBomResult() {
     </div>
 
     <div class="card" style="margin-top:8px;background:#f8f9fa">
-      <div class="fs-12 fw-6 mb-4">📐 권장 배치 사이즈 (잔여 최소화)</div>
+      <div class="fs-12 fw-6 mb-4">📐 권장 배치 사이즈 (200~350kg, 정수 ${(()=>{
+        const mainR = sopRecipes.find(r => r[1]==='RM003') || sopRecipes.reduce((a,b)=> parseFloat(a[3]||0)>parseFloat(b[3]||0)?a:b, sopRecipes[0]);
+        const it = rmItems.find(i => i[0]===mainR[1]);
+        const sk = parseSkuUnit(it?.[3]||'');
+        return sk?.unitName || '단위';
+      })()} 단위)</div>
       <div class="fs-11 c-txt-l">
         ${(() => {
-          // 마미만쥬믹스 (가장 큰 비중) 기준 — 포대 정수 배수에 가까운 봉수 추천
-          const mainRecipe = sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
+          // 마미만쥬믹스 우선, 없으면 비중 최대
+          const mainRecipe = sopRecipes.find(r => r[1]==='RM003')
+                          || sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
           const item = rmItems.find(i => i[0] === mainRecipe[1]);
           const skuP = parseSkuUnit(item?.[3] || '');
           if (!skuP || !skuP.perUnit) return '주 자재 SKU 정보 없음 — 권장 계산 불가';
           const ratio = parseFloat(mainRecipe[3]);
-          // bag → mainKg = bag × 5 × ratio × 1.01
-          // mainKg / perUnit = 정수가 되는 bag을 찾음
+          // 정수 포대 단위로 200~350kg 완제품 후보 탐색 (5kg/봉)
           const candidates = [];
-          for (let b = 10; b <= 100; b++) {
-            const mainKg = b * 5 * ratio * 1.01;
-            const units = mainKg / skuP.perUnit;
-            const diff = Math.abs(units - Math.round(units));
-            if (diff < 0.05) candidates.push({ bag: b, units, diff });
+          for (let units = 1; units <= 50; units++) {
+            const totalMixKg = units * skuP.perUnit;
+            const maxFinishedKg = totalMixKg / (ratio * 1.01);
+            if (maxFinishedKg < 200) continue;
+            if (maxFinishedKg > 360) break;
+            const bags = Math.floor(maxFinishedKg / 5);
+            const finishedKg = bags * 5;
+            if (finishedKg < 200 || finishedKg > 350) continue;
+            const mixUsed = ratio * finishedKg * 1.01;
+            const waste = totalMixKg - mixUsed;
+            candidates.push({ units, totalMixKg, finishedKg, bags, waste });
           }
-          candidates.sort((a, b) => a.diff - b.diff);
+          candidates.sort((a, b) => (a.waste - b.waste) || (b.bags - a.bags));
           const top = candidates.slice(0, 3);
-          if (top.length === 0) return `이 SOP·SKU 조합으로 깔끔한 배치 추천 없음 (10~100봉 범위)`;
-          return `${mainRecipe[2]} 기준 잔여 최소 배치:<br>` + top.map(t => `<strong>${t.bag}봉</strong> (${(t.bag*5).toFixed(0)}kg) → 주자재 ${t.units.toFixed(2)} ${skuP.unitName}`).join(' · ');
+          if (top.length === 0) return `200~350kg 범위에서 ${mainRecipe[2]} 정수 ${skuP.unitName} 조합 없음`;
+          return `${mainRecipe[2]} 기준 잔여 최소 배치:<br>` + top.map(t => `<strong>${t.bags}봉</strong>(${t.finishedKg}kg) → ${t.units}${skuP.unitName} 잔여 ${t.waste.toFixed(2)}kg`).join('<br>');
         })()}
       </div>
     </div>
@@ -4570,6 +4581,14 @@ Screens['wo-create'] = async () => {
     if (!State.sopRecipes.length) State.sopRecipes = await SheetsAPI.getAll('SOP레시피').catch(() => []);
     if (!State.sopSteps.length) State.sopSteps = await SheetsAPI.getAll('SOP공정단계').catch(() => []);
     State.productionRequests = await SheetsAPI.getAll('생산요청').catch(() => []);
+    // BOM 검증·추천에 필요 — 미로드 상태면 즉시 로드
+    if (!State.rawMaterialItems?.length) {
+      const rmItems = await SheetsAPI.getAll('원재료품목').catch(() => []);
+      State.rawMaterialItems = rmItems.filter(i => i[12] !== '비활성');
+    }
+    if (!State.rawMaterialLots?.length) {
+      State.rawMaterialLots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
+    }
   } catch(e) {}
 
   const activeSops = State.sops.filter(s => s[4] === '활성');
@@ -4605,6 +4624,8 @@ Screens['wo-create'] = async () => {
       </div>
 
       <div id="wo-calc" style="display:none"></div>
+
+      <div id="wo-bom-rec" style="display:none"></div>
 
       <div class="card mt-12">
         <div class="fs-13 fw-7 mb-8">공정 미리보기</div>
@@ -4683,6 +4704,115 @@ function updateWOCalc() {
       }).join('')}
       <div class="fs-11 c-txt-l mt-8">예상 포장 수: ${qty}개</div>
     </div>
+  `;
+
+  updateWOBomCheck();
+}
+
+/* ─── BOM 검증 + 권장 배치 사이즈 (200~350kg, 마미만쥬믹스 정수 포대) ───
+   - 자재 부족 자재 빨간 카드로 경고 (작업 시작 차단 X — 정보 제공만)
+   - 주 자재(마미만쥬믹스 RM003 또는 최대 비중) 기준 정수 ${포대} 단위로 가능한
+     봉수 후보 중 200~350kg 범위 + 잔여 자재 최소 순 상위 3개 표시
+   - "적용" 버튼으로 wo-qty input 갱신 → updateWOCalc 재호출 */
+function updateWOBomCheck() {
+  const bomEl = $id('wo-bom-rec');
+  if (!bomEl) return;
+  const qty = parseFloat($id('wo-qty')?.value) || 0;
+  const unitSize = parseInt($id('wo-unit')?.value) || 5;
+  const totalKg = qty * unitSize;
+  if (!_selectedSopId || qty <= 0) { bomEl.style.display = 'none'; return; }
+
+  const recipes = State.sopRecipes.filter(r => r[0] === _selectedSopId);
+  if (recipes.length === 0) { bomEl.style.display = 'none'; return; }
+
+  const rmLots = State.rawMaterialLots || [];
+  const rmItems = State.rawMaterialItems || [];
+
+  // 자재별 재고 비교
+  const checks = recipes.map(r => {
+    const code = r[1];
+    const ratio = parseFloat(r[3]) || 0;
+    const need = ratio * totalKg * 1.01;
+    const stock = rmLots.filter(l => l[1] === code && !['폐기','입고취소'].includes(l[9]))
+                       .reduce((s, l) => s + (parseFloat(l[8])||0), 0);
+    return { code, name: r[2], ratio, need, stock,
+             isShort: stock < need, shortKg: Math.max(0, need - stock) };
+  });
+  const shortItems = checks.filter(c => c.isShort);
+
+  // 주 자재 = 마미만쥬믹스 우선, 없으면 비중 최대
+  const main = recipes.find(r => r[1] === 'RM003')
+            || recipes.reduce((a, b) => parseFloat(a[3]||0) > parseFloat(b[3]||0) ? a : b, recipes[0]);
+  const mainItem = rmItems.find(i => i[0] === main[1]);
+  const mainSkuP = parseSkuUnit(mainItem?.[3] || '');
+  const mainRatio = parseFloat(main[3]) || 0;
+
+  const recommendations = [];
+  if (mainSkuP && mainSkuP.perUnit > 0 && mainRatio > 0) {
+    // 정수 포대 단위로 200~350kg 완제품 가능한 후보 탐색
+    for (let units = 1; units <= 50; units++) {
+      const totalMixKg = units * mainSkuP.perUnit;
+      // 이 포대 수로 만들 수 있는 최대 완제품 kg
+      const maxFinishedKg = totalMixKg / (mainRatio * 1.01);
+      if (maxFinishedKg < 200) continue;
+      if (maxFinishedKg > 360) break;  // 후보 초과
+      // 정수 봉수 (내림) — 잔여 자재 발생
+      const bags = Math.floor(maxFinishedKg / unitSize);
+      const finishedKg = bags * unitSize;
+      if (finishedKg < 200 || finishedKg > 350) continue;
+      const mixUsed = mainRatio * finishedKg * 1.01;
+      const waste = totalMixKg - mixUsed;
+      recommendations.push({ units, totalMixKg, finishedKg, bags, mixUsed, waste });
+    }
+    // 잔여 최소 → bags 큰 순으로 동률 분리
+    recommendations.sort((a, b) => (a.waste - b.waste) || (b.bags - a.bags));
+  }
+  const top3 = recommendations.slice(0, 3);
+
+  bomEl.style.display = '';
+  bomEl.innerHTML = `
+    <div class="card ${shortItems.length ? 'bl-err' : 'bl-suc'}" style="background:${shortItems.length ? '#fff5f5' : '#e8f5e9'};margin-top:12px">
+      <div class="fs-13 fw-7 ${shortItems.length ? 'c-err' : 'c-suc'} mb-4">
+        ${shortItems.length ? '⚠ 자재 재고 부족' : '✓ 자재 재고 충분'}
+      </div>
+      ${shortItems.length ? `
+        ${shortItems.map(c => `
+          <div class="fs-12" style="padding:3px 0">
+            <span class="fw-6">${c.name} (${c.code})</span>
+            <span class="c-err"> · 부족 ${c.shortKg.toFixed(2)}kg</span>
+            <div class="fs-11 c-txt-l" style="margin-left:8px">필요 ${c.need.toFixed(2)}kg / 재고 ${c.stock.toFixed(2)}kg</div>
+          </div>
+        `).join('')}
+        <div class="fs-11 c-txt-l mt-8" style="font-style:italic">⚠ 부족해도 작업 시작은 가능합니다 — 시작 전 입고 권장</div>
+      ` : `
+        <div class="fs-11 c-txt-l">필요 자재 모두 현재고 내 충족 (총 ${checks.length}종)</div>
+      `}
+    </div>
+
+    ${top3.length > 0 ? `
+      <div class="card" style="background:#f0f7ff;border-left:3px solid var(--pri);margin-top:8px">
+        <div class="fs-13 fw-7 mb-4">📐 권장 배치 (${main[2]} 정수 ${mainSkuP.unitName} 단위)</div>
+        <div class="fs-11 c-txt-l mb-8">200~350kg 범위 · 잔여 자재 최소 순 상위 3건</div>
+        ${top3.map((r, i) => {
+          const isCurrent = (qty === r.bags);
+          return `
+            <div class="row between" style="padding:8px 0;${i < top3.length-1 ? 'border-bottom:1px solid var(--bg)' : ''};align-items:center">
+              <div style="flex:1">
+                <div class="fs-13 fw-7">${r.bags}봉 (${r.finishedKg}kg)</div>
+                <div class="fs-11 c-txt-l">${main[2]} ${r.units}${mainSkuP.unitName} (${r.totalMixKg}kg) · 잔여 ${r.waste.toFixed(2)}kg</div>
+              </div>
+              ${isCurrent ? '<span class="badge badge-suc">현재 입력</span>' :
+                `<button class="btn btn-sm btn-pri" onclick="document.getElementById('wo-qty').value=${r.bags};updateWOCalc()" style="white-space:nowrap">적용</button>`}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : (mainSkuP && mainSkuP.perUnit > 0 ? `
+      <div class="card bl-warn" style="background:#fff8e1;margin-top:8px;padding:10px">
+        <div class="fs-12 c-warn">⚠ 200~350kg 범위에서 ${main[2]} 정수 ${mainSkuP.unitName} 조합이 없습니다</div>
+        <div class="fs-11 c-txt-l mt-4">SOP·SKU 조합 또는 안전계수 확인 필요</div>
+      </div>
+    ` : '')}
   `;
 }
 
