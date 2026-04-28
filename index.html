@@ -2296,7 +2296,7 @@ async function renderInventoryContent(activeTab) {
     try { fgIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []); } catch(e) {}
     const activeStatuses = ['냉동보관중','출하가능'];
 
-    const fgLots = (State.finishedGoodsLots || []).filter(l => !['폐기','소진','출하완료','삭제'].includes(l[9]));
+    const fgLots = (State.finishedGoodsLots || []).filter(l => !['폐기','소진','출하완료','삭제','채번예약'].includes(l[9]));
     // Group by itemCode
     const grouped = {};
     fgLots.forEach(l => {
@@ -2451,7 +2451,7 @@ Screens['lot-detail'] = async (params = {}) => {
   }
 
   // 완제품: 출하완료 LOT 제외
-  const displayLots = isFG ? lots.filter(l => !['출하완료','폐기','소진','삭제'].includes(l[9]))
+  const displayLots = isFG ? lots.filter(l => !['출하완료','폐기','소진','삭제','채번예약'].includes(l[9]))
                                    : lots.filter(l => l[9] !== '입고취소');
 
   const lotBadgeClass = needsOrder ? 'warn' : 'suc';
@@ -3440,9 +3440,9 @@ async function loadReprintLots(type, itemCode, itemName) {
   try {
     const cache = window._reprintCache || {};
     let lots = [];
-    if (type === 'rm') lots = (cache.rmLots || await SheetsAPI.getAll('원재료LOT')).filter(l => l[1] === itemCode && (parseFloat(l[8]) || 0) > 0);
-    else if (type === 'fg') lots = (cache.fgLots || await SheetsAPI.getAll('완제품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[7]) || 0) > 0);
-    else if (type === 'sp') lots = (cache.spLots || await SheetsAPI.getAll('소모품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[6]) || 0) > 0);
+    if (type === 'rm') lots = (cache.rmLots || await SheetsAPI.getAll('원재료LOT')).filter(l => l[1] === itemCode && (parseFloat(l[8]) || 0) > 0 && !['폐기','입고취소'].includes(l[9]));
+    else if (type === 'fg') lots = (cache.fgLots || await SheetsAPI.getAll('완제품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[7]) || 0) > 0 && !['삭제','채번예약','출하완료','폐기','소진'].includes(l[9]));
+    else if (type === 'sp') lots = (cache.spLots || await SheetsAPI.getAll('소모품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[6]) || 0) > 0 && l[7] !== '폐기');
 
     area.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
@@ -4118,6 +4118,7 @@ async function runDataAudit() {
       auditFgLotRemain(fgLots, fgIndivs),
       auditDuplicateLotIds(rmLots, fgLots, rmIndivs, fgIndivs, wos),
       auditDuplicateIndivIds(rmIndivs, fgIndivs),
+      auditStaleReserved(fgLots, wos),
       auditWoFgLotLink(wos, fgLots),
       auditWoStatusStep(wos, records),
       auditOrphanRecords(wos, records),
@@ -4387,6 +4388,29 @@ function auditDuplicateLotIds(rmLots, fgLots, rmIndivs, fgIndivs, wos) {
     desc: '동시 채번으로 같은 ID 가 2회 이상 — 자동 분리는 데이터 무결성 위험으로 수동 처리만 안내',
     issues
   };
+}
+
+/* 채번예약 placeholder 가 24시간 이상 stale — 거부됐는데 정리 안된 경우 또는 채번 후 작업 미완료 */
+function auditStaleReserved(fgLots, wos) {
+  const issues = [];
+  const now = Date.now();
+  for (const lot of fgLots) {
+    if (lot[9] !== '채번예약') continue;
+    const woId = lot[7] || '';
+    const wo = wos.find(w => w[0] === woId);
+    const woStatus = wo?.[12] || '(WO 없음)';
+    const prodDate = lot[5] ? new Date(lot[5]).getTime() : 0;
+    const ageH = prodDate ? (now - prodDate) / 3600000 : 999;
+    if (ageH < 24 && ['진행중','승인대기','냉동보관중'].includes(woStatus)) continue;  // 정상 진행중
+    issues.push({
+      id: lot[0],
+      message: `WO ${woId} 상태 "${woStatus}" / 채번 ${ageH.toFixed(0)}시간 경과 — placeholder 정리 필요`,
+      autoFix: woStatus.startsWith('거부') || woStatus === '삭제' || !wo ? async () => {
+        await SheetsAPI.updateRow('완제품LOT', 0, lot[0], { 9: woStatus.startsWith('거부') ? woStatus : '삭제' });
+      } : undefined
+    });
+  }
+  return { name: '채번예약 placeholder 잔여', desc: 'atomic claim 후 거부/삭제로 정리 안 된 placeholder', issues };
 }
 
 /* 중복 개별 ID 검사 */
@@ -6480,10 +6504,28 @@ async function previewQRLabels(stepNo) {
 
   try {
     // FG LOT ID 사전 채번 — approveWO에서 동일 ID 재사용됨
+    // ★ 동시 채번 race condition 차단을 위해 채번 직후 placeholder row 즉시 적재 (atomic claim).
+    //   다른 WO가 같은 시점에 generateLotId 를 호출해도 이 placeholder 를 보고 다음 일련번호로 발급.
     let fgLotId = wo ? wo[14] : '';
     if (!fgLotId || !fgLotId.startsWith('FG-')) {
       fgLotId = await generateLotId('FG', fgItemCode, expStr, '완제품LOT', 0, productionDate);
-      // WO에 사전 저장 — 승인 시 이 ID를 그대로 사용
+      // 채번 즉시 placeholder row 적재 — 다른 동시 호출이 즉시 인지 가능
+      try {
+        SheetsAPI.invalidateCache('완제품LOT');
+        const existing = (await SheetsAPI.getAll('완제품LOT', false)).find(l => l[0] === fgLotId);
+        if (!existing) {
+          await SheetsAPI.append('완제품LOT', [
+            fgLotId, fgItemCode, productName, '0', '5kg',
+            productionDate, expStr, woId, '0', '채번예약', '0', '냉동 -18°C'
+          ]);
+          console.log(`[QR라벨] placeholder row 적재 완료: ${fgLotId}`);
+        } else {
+          console.log(`[QR라벨] placeholder row 이미 존재: ${fgLotId} (status=${existing[9]||'-'})`);
+        }
+      } catch (e) {
+        console.warn('[QR라벨] placeholder 적재 실패 (계속 진행):', e.message);
+      }
+      // WO에 ID 저장 — 승인 시 이 ID 의 placeholder row 를 갱신
       await SheetsAPI.updateCell('작업지시서', 0, woId, 14, fgLotId);
       if (wo) wo[14] = fgLotId;
       console.log(`[QR라벨] FG LOT ID 사전 채번 및 저장: ${fgLotId}`);
@@ -8545,11 +8587,40 @@ async function approveWO(woId) {
         16: formatDateTime(),
       });
 
-      // 2. Create FG LOT — status '출하가능', remainQty = 실제 개별 수(packCount)
-      await SheetsAPI.append('완제품LOT', [
-        fgLotId, fgItemCode, wo[4] || '앙호두 (호두과자 전용반죽)', qty, wo[6] || '1kg',
-        productionDate, expDate, woId, String(packCount), '출하가능', packCount, '냉동 -18°C'
-      ]);
+      // 2. FG LOT 생성 또는 placeholder 갱신
+      //    QR라벨 단계에서 atomic claim으로 placeholder('채번예약') 적재된 경우 → updateRow
+      //    없으면(레거시 경로) → append
+      SheetsAPI.invalidateCache('완제품LOT');
+      const existingFgLot = (await SheetsAPI.getAll('완제품LOT', false)).find(l => l[0] === fgLotId);
+      if (existingFgLot && existingFgLot[9] === '채번예약') {
+        // placeholder 행 갱신 — 이미 row 존재 (race-safe)
+        await SheetsAPI.updateRow('완제품LOT', 0, fgLotId, {
+          2: wo[4] || '앙호두 (호두과자 전용반죽)',
+          3: qty,
+          4: wo[6] || '1kg',
+          5: productionDate,
+          6: expDate,
+          7: woId,
+          8: String(packCount),
+          9: '출하가능',
+          10: packCount,
+          11: '냉동 -18°C'
+        });
+        console.log(`[승인] placeholder 갱신: ${fgLotId}`);
+      } else if (!existingFgLot) {
+        // 레거시 경로 — placeholder 없으면 신규 append
+        await SheetsAPI.append('완제품LOT', [
+          fgLotId, fgItemCode, wo[4] || '앙호두 (호두과자 전용반죽)', qty, wo[6] || '1kg',
+          productionDate, expDate, woId, String(packCount), '출하가능', packCount, '냉동 -18°C'
+        ]);
+        console.log(`[승인] FG LOT 신규 append: ${fgLotId}`);
+      } else {
+        // 같은 ID 의 row 가 '채번예약' 이외 상태로 있음 — 중복 방지: append 하지 않고 갱신
+        console.warn(`[승인] FG LOT 이미 존재 (status=${existingFgLot[9]}) — append 스킵, 갱신만`);
+        await SheetsAPI.updateRow('완제품LOT', 0, fgLotId, {
+          3: qty, 7: woId, 8: String(packCount), 9: '출하가능', 10: packCount
+        });
+      }
 
       // 3. Create FG individual QR records
       const indivRows = [];
@@ -8615,6 +8686,21 @@ async function rejectWO(woId, action) {
 
   try {
     showLoading();
+    // 거부 처리 전 — 연결된 FG LOT placeholder 가 있으면 정리 (atomic claim 잔여물 방지)
+    const wos = await SheetsAPI.getAll('작업지시서').catch(() => []);
+    const wo = wos.find(w => w[0] === woId);
+    const fgLotId = wo?.[14] || '';
+    if (fgLotId && fgLotId.startsWith('FG-')) {
+      try {
+        SheetsAPI.invalidateCache('완제품LOT');
+        const fgLots = await SheetsAPI.getAll('완제품LOT', false);
+        const fgLot = fgLots.find(l => l[0] === fgLotId);
+        if (fgLot && fgLot[9] === '채번예약') {
+          await SheetsAPI.updateRow('완제품LOT', 0, fgLotId, { 9: `거부-${action}` });
+          console.log(`[거부] placeholder 정리: ${fgLotId} → 거부-${action}`);
+        }
+      } catch (e) { console.warn('[거부] placeholder 정리 실패:', e.message); }
+    }
     await SheetsAPI.updateRow('작업지시서', 0, woId, {
       12: `거부-${action}`,
       15: State.user?.email,
