@@ -1020,6 +1020,7 @@ const Router = {
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
+      'data-audit': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -3041,6 +3042,7 @@ Screens.more = () => {
   const items = [
     { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
     { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
+    { icon: '🔍', label: '데이터 정합성 검증', desc: 'LOT·잔량·상태·고아 데이터 진단 (관리자)', target: 'data-audit', adminOnly: true },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
@@ -3051,9 +3053,11 @@ Screens.more = () => {
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
     { icon: '⚙️', label: '설정', desc: '계정, 앱 설정, 로그아웃', target: 'settings' },
   ];
+  const isAdmin = State.user?.role === 'admin';
+  const visible = items.filter(m => !m.adminOnly || isAdmin);
   $id('content').innerHTML = `
     <div style="padding:16px">
-      ${items.map(m => `
+      ${visible.map(m => `
         <div class="card clickable" onclick="${m.target === 'db-sheet' ? `window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')` : `Router.go('${m.target}')`}">
           <div class="row" style="gap:12px">
             <span style="font-size:24px">${m.icon}</span>
@@ -4008,6 +4012,280 @@ function printTestLabel() {
   }]);
 
   toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — 인쇄 버튼을 누르세요`, 'suc');
+}
+
+/* ─── 데이터 정합성 검증 (관리자) ───
+   읽기 전용 진단 + 명시적 클릭으로만 자동 수정 트리거.
+   매 로그인 시 백그라운드 자동 검증과 별도로, 수동 점검·고아 데이터까지 포함. */
+Screens['data-audit'] = async () => {
+  renderHeader('데이터 정합성 검증', '읽기 전용 진단 · 수정은 명시 클릭', { back: 'more' });
+  if (State.user?.role !== 'admin') {
+    $id('content').innerHTML = '<div style="padding:16px"><div class="card bl-err"><div class="c-err fw-7">관리자 권한 필요</div></div></div>';
+    return;
+  }
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="card">
+        <div class="fs-13 fw-7 mb-4">🔍 6종 항목 검사</div>
+        <div class="fs-11 c-txt-l mb-8">원재료/완제품 LOT 잔량·상태, 입고취소·폐기 일관성, WO↔FG LOT 연결, 공정기록 고아, lastStep 정합성</div>
+        <button class="btn btn-pri btn-full" onclick="runDataAudit()">검사 실행</button>
+      </div>
+      <div id="audit-result"></div>
+    </div>
+  `;
+};
+
+async function runDataAudit() {
+  const resultEl = $id('audit-result');
+  resultEl.innerHTML = '<div class="card"><div class="loading-inline"><div class="spinner-s"></div> 데이터 로드 중…</div></div>';
+  try {
+    SheetsAPI.invalidateCache('원재료LOT');
+    SheetsAPI.invalidateCache('원재료개별');
+    SheetsAPI.invalidateCache('완제품LOT');
+    SheetsAPI.invalidateCache('완제품개별');
+    SheetsAPI.invalidateCache('작업지시서');
+    SheetsAPI.invalidateCache('공정기록');
+    const [rmLots, rmIndivs, fgLots, fgIndivs, wos, records] = await Promise.all([
+      SheetsAPI.getAll('원재료LOT', false).catch(()=>[]),
+      SheetsAPI.getAll('원재료개별', false).catch(()=>[]),
+      SheetsAPI.getAll('완제품LOT', false).catch(()=>[]),
+      SheetsAPI.getAll('완제품개별', false).catch(()=>[]),
+      SheetsAPI.getAll('작업지시서', false).catch(()=>[]),
+      SheetsAPI.getAll('공정기록', false).catch(()=>[]),
+    ]);
+    State._auditData = { rmLots, rmIndivs, fgLots, fgIndivs, wos, records };
+    const sections = [
+      auditRmLotRemain(rmLots, rmIndivs),
+      auditRmLotCanceled(rmLots, rmIndivs),
+      auditFgLotRemain(fgLots, fgIndivs),
+      auditWoFgLotLink(wos, fgLots),
+      auditWoStatusStep(wos, records),
+      auditOrphanRecords(wos, records),
+    ];
+    State._auditSections = sections;
+    renderAuditResult();
+  } catch (e) {
+    resultEl.innerHTML = `<div class="card bl-err"><div class="c-err">로드 실패: ${e.message}</div></div>`;
+  }
+}
+
+function renderAuditResult() {
+  const sections = State._auditSections || [];
+  const totalIssues = sections.reduce((s, sec) => s + sec.issues.length, 0);
+  const fixableIssues = sections.reduce((s, sec) => s + sec.issues.filter(i => i.autoFix).length, 0);
+  const resultEl = $id('audit-result');
+  resultEl.innerHTML = `
+    <div class="card ${totalIssues===0 ? 'bl-suc' : 'bl-warn'}" style="background:${totalIssues===0 ? '#e8f5e9' : '#fff8e1'};margin-top:12px">
+      <div class="row between">
+        <div>
+          <div class="fs-14 fw-7 ${totalIssues===0 ? 'c-suc' : 'c-warn'}">${totalIssues===0 ? '✓ 모든 항목 정상' : `⚠ ${totalIssues}건 이슈 발견`}</div>
+          <div class="fs-11 c-txt-l">자동 수정 가능: ${fixableIssues}건</div>
+        </div>
+        ${fixableIssues > 0 ? '<button class="btn btn-pri" onclick="runAuditAutoFix()">전체 자동 수정</button>' : ''}
+      </div>
+    </div>
+    ${sections.map((sec, si) => {
+      const cnt = sec.issues.length;
+      return `
+        <div class="card" style="padding:0;overflow:hidden;margin-top:8px">
+          <div style="padding:10px 12px;cursor:pointer;background:${cnt===0?'#f0fff4':'#fffbf0'}" onclick="const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.audit-arrow').textContent=d.style.display==='none'?'▸':'▾'">
+            <div class="row between">
+              <span class="fs-13 fw-7">${cnt===0?'✓':'⚠'} ${sec.name}</span>
+              <span><span class="badge badge-${cnt===0?'suc':'warn'}">${cnt}건</span> <span class="audit-arrow" style="color:var(--txt-l)">${cnt>0?'▾':'▸'}</span></span>
+            </div>
+            <div class="fs-11 c-txt-l mt-2">${sec.desc||''}</div>
+          </div>
+          <div style="padding:10px 12px;border-top:1px solid var(--gray-l);${cnt===0?'display:none':''}">
+            ${cnt===0 ? '<div class="fs-12 c-suc">이상 없음</div>' :
+              sec.issues.map((iss, ii) => `
+                <div class="row between" style="padding:6px 0;${ii<sec.issues.length-1?'border-bottom:1px solid var(--bg)':''};align-items:flex-start;gap:8px">
+                  <div style="flex:1">
+                    <div class="fs-12 fw-6">${iss.id}</div>
+                    <div class="fs-11 c-txt-l">${iss.message}</div>
+                  </div>
+                  ${iss.autoFix ? `<button class="btn btn-sm btn-pri" onclick="runAuditFixOne(${si},${ii})" style="white-space:nowrap">🔧 수정</button>` : '<span class="fs-10 c-txt-l">수동 확인</span>'}
+                </div>
+              `).join('')
+            }
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
+async function runAuditFixOne(secIdx, issIdx) {
+  const sec = State._auditSections?.[secIdx];
+  const iss = sec?.issues?.[issIdx];
+  if (!iss?.autoFix) return;
+  confirm('자동 수정', `${iss.id}\n${iss.message}\n\n수정하시겠습니까?`, async () => {
+    try {
+      showLoading();
+      await iss.autoFix();
+      sec.issues.splice(issIdx, 1);  // 수정 완료 항목 제거
+      toast(`수정 완료: ${iss.id}`, 'suc');
+      renderAuditResult();
+    } catch (e) {
+      toast('수정 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
+async function runAuditAutoFix() {
+  const sections = State._auditSections || [];
+  const fixable = sections.flatMap((sec, si) => sec.issues.map((iss, ii) => ({ sec, iss, si, ii })).filter(x => x.iss.autoFix));
+  if (fixable.length === 0) { toast('수정 가능 항목 없음', 'info'); return; }
+  confirm('전체 자동 수정', `${fixable.length}건을 일괄 수정하시겠습니까?\n각 항목은 데이터 정합성을 자동 보정합니다.`, async () => {
+    try {
+      showLoading();
+      let okCount = 0, errCount = 0;
+      for (const { iss, sec } of fixable) {
+        try { await iss.autoFix(); okCount++; sec.issues = sec.issues.filter(i => i !== iss); }
+        catch (e) { errCount++; console.error('수정 실패:', iss.id, e); }
+      }
+      // 캐시 무효화 후 재진단 권장
+      SheetsAPI.invalidateAllCache();
+      toast(`수정 ${okCount}건 완료${errCount?` · 실패 ${errCount}건`:''}`, errCount?'warn':'suc');
+      renderAuditResult();
+    } catch (e) {
+      toast('일괄 수정 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
+// ─── 검사 함수들 (각각 { name, desc, issues:[{id, message, autoFix?}] }) ───
+function auditRmLotRemain(rmLots, rmIndivs) {
+  const issues = [];
+  for (const lot of rmLots) {
+    const lotId = lot[0], totalQty = parseFloat(lot[4])||0;
+    const remain = parseFloat(lot[8])||0, status = lot[9]||'';
+    if (['폐기','입고취소'].includes(status)) continue;  // 종결 상태 제외
+    const myIndivs = rmIndivs.filter(iv => iv[1] === lotId);
+    if (myIndivs.length === 0) continue;
+    const active = myIndivs.filter(iv => !['폐기','소진','입고취소'].includes(iv[3]));
+    const consumed = myIndivs.filter(iv => iv[3] === '소진');
+    const sample = myIndivs[0];
+    const perUnit = sample ? (parseFloat(sample[4])||totalQty/(parseInt(lot[10])||1)) : totalQty/(parseInt(lot[10])||1);
+    const correctRemain = Math.round(active.length * perUnit * 100)/100;
+    const correctStatus = active.length === 0 ? '소진' : (consumed.length > 0 ? '사용중' : '미사용');
+    const remainOff = Math.abs(remain - correctRemain) > 0.01;
+    const statusOff = status !== correctStatus;
+    if (remainOff || statusOff) {
+      const msg = [];
+      if (remainOff) msg.push(`잔량 ${remain}→${correctRemain}`);
+      if (statusOff) msg.push(`상태 "${status}"→"${correctStatus}"`);
+      issues.push({
+        id: lotId,
+        message: msg.join(' / '),
+        autoFix: async () => {
+          await SheetsAPI.updateRow('원재료LOT', 0, lotId, { 8: String(correctRemain), 9: correctStatus });
+        }
+      });
+    }
+  }
+  return { name: '원재료 LOT 잔량·상태 정합성', desc: '활성 개별 수 × perUnit = 잔량, 상태 일치 검증', issues };
+}
+
+function auditRmLotCanceled(rmLots, rmIndivs) {
+  const issues = [];
+  for (const lot of rmLots) {
+    const lotId = lot[0], status = lot[9]||'';
+    if (!['폐기','입고취소'].includes(status)) continue;
+    const myIndivs = rmIndivs.filter(iv => iv[1] === lotId);
+    const wrong = myIndivs.filter(iv => iv[3] !== status && iv[3] !== '소진');
+    if (wrong.length > 0) {
+      issues.push({
+        id: lotId,
+        message: `LOT 상태 "${status}"인데 개별 ${wrong.length}건이 다른 상태 (${wrong.map(w=>w[3]||'(빈값)').join(', ')})`,
+        autoFix: async () => {
+          for (const iv of wrong) {
+            await SheetsAPI.updateRow('원재료개별', 0, iv[0], { 3: status });
+          }
+        }
+      });
+    }
+  }
+  return { name: '입고취소·폐기 LOT 개별 일관성', desc: 'LOT이 종결 상태면 모든 개별도 동일/소진 상태여야 함', issues };
+}
+
+function auditFgLotRemain(fgLots, fgIndivs) {
+  const issues = [];
+  for (const lot of fgLots) {
+    const lotId = lot[0];
+    const status = lot[9]||'';
+    if (['삭제','폐기','출하완료'].includes(status)) continue;
+    const dbRemain = parseInt(lot[8])||0;
+    const active = fgIndivs.filter(iv => iv[1] === lotId && ['냉동보관중','출하가능'].includes(iv[3]));
+    if (dbRemain !== active.length) {
+      issues.push({
+        id: lotId,
+        message: `잔량 ${dbRemain}개 → 실제 활성 ${active.length}개`,
+        autoFix: async () => {
+          await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 8: String(active.length) });
+        }
+      });
+    }
+  }
+  return { name: '완제품 LOT 잔량 정합성', desc: 'remainQty = 활성(냉동보관중+출하가능) 개별 수', issues };
+}
+
+function auditWoFgLotLink(wos, fgLots) {
+  const issues = [];
+  const fgLotById = new Map(fgLots.map(l => [l[0], l]));
+  for (const wo of wos) {
+    const status = wo[12]||'', fgLotId = wo[14]||'';
+    if (['출하가능','출하완료','승인완료'].includes(status) && fgLotId && !fgLotById.has(fgLotId)) {
+      issues.push({
+        id: wo[0],
+        message: `WO 상태 "${status}" / fgLotId "${fgLotId}" 가 완제품LOT 시트에 없음 (orphan reference)`
+      });
+    }
+  }
+  return { name: 'WO ↔ 완제품 LOT 연결', desc: '출하 단계 WO의 fgLotId 가 실제 LOT으로 존재해야 함', issues };
+}
+
+function auditWoStatusStep(wos, records) {
+  const issues = [];
+  const stepsByWo = new Map();
+  for (const r of records) {
+    const woId = r[0], step = parseInt(r[1])||0;
+    const cur = stepsByWo.get(woId) || 0;
+    if (step > cur) stepsByWo.set(woId, step);
+  }
+  for (const wo of wos) {
+    const woId = wo[0], status = wo[12]||'', dbLastStep = parseInt(wo[13])||0;
+    if (['삭제'].includes(status)) continue;
+    const realMax = stepsByWo.get(woId) || 0;
+    if (dbLastStep !== realMax) {
+      issues.push({
+        id: woId,
+        message: `lastStep DB ${dbLastStep} → 실제 공정기록 max ${realMax}`,
+        autoFix: async () => {
+          await SheetsAPI.updateRow('작업지시서', 0, woId, { 13: String(realMax) });
+        }
+      });
+    }
+  }
+  return { name: 'WO lastStep 정합성', desc: 'wo[13] 이 실제 공정기록의 최대 단계와 일치', issues };
+}
+
+function auditOrphanRecords(wos, records) {
+  const issues = [];
+  const woIds = new Set(wos.map(w => w[0]));
+  for (const r of records) {
+    const woId = r[0];
+    if (!woIds.has(woId)) {
+      issues.push({
+        id: `${woId}/${r[1]||'?'}.${r[2]||'?'}`,
+        message: `공정기록의 woId "${woId}" 가 작업지시서에 없음`
+      });
+    }
+  }
+  return { name: '공정기록 고아 (orphan)', desc: '공정기록의 woId 가 작업지시서에 존재해야 함', issues };
 }
 
 // ─── BOM 계산기 (배치 사이징 + 자재 필요량 + 재고 비교) ───
