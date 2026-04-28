@@ -4593,23 +4593,30 @@ function renderBomResult() {
     const item = rmItems.find(i => i[0] === rmCode);
     const sku = item?.[3] || '';
     const skuP = parseSkuUnit(sku);
+    const isWater = rmCode === 'RM002';  // 물은 재고 추적 대상 외 (수도 공급)
     let needConv = '—', stockKg = 0, stockConv = '—', isShort = false;
     if (skuP && skuP.perUnit > 0) {
       const u = needKg / skuP.perUnit;
       needConv = `${u.toFixed(2)} ${skuP.unitName}`;
     }
-    // 재고 (활성 LOT 합계)
-    stockKg = rmLots.filter(l => l[1] === rmCode && !['폐기','입고취소'].includes(l[9]))
-                   .reduce((sum, l) => sum + (parseFloat(l[8])||0), 0);
-    if (skuP && skuP.perUnit > 0) {
-      const su = stockKg / skuP.perUnit;
-      stockConv = `${su.toFixed(2)} ${skuP.unitName}`;
+    // 재고 (활성 LOT 합계) — 물은 무제한 가용으로 간주
+    if (isWater) {
+      stockKg = Infinity;
+      stockConv = '관리대상 외';
+      isShort = false;
     } else {
-      stockConv = `${stockKg.toFixed(2)} kg`;
+      stockKg = rmLots.filter(l => l[1] === rmCode && !['폐기','입고취소'].includes(l[9]))
+                     .reduce((sum, l) => sum + (parseFloat(l[8])||0), 0);
+      if (skuP && skuP.perUnit > 0) {
+        const su = stockKg / skuP.perUnit;
+        stockConv = `${su.toFixed(2)} ${skuP.unitName}`;
+      } else {
+        stockConv = `${stockKg.toFixed(2)} kg`;
+      }
+      isShort = stockKg < needKg;
     }
-    isShort = stockKg < needKg;
     const shortKg = isShort ? needKg - stockKg : 0;
-    return { rmCode, rmName, ratio, needKg, needConv, stockKg, stockConv, isShort, shortKg, sku };
+    return { rmCode, rmName, ratio, needKg, needConv, stockKg, stockConv, isShort, shortKg, sku, isWater };
   });
 
   const anyShort = rows.some(r => r.isShort);
@@ -4636,7 +4643,8 @@ function renderBomResult() {
         <div style="padding:10px 12px;border-bottom:1px solid var(--bg);${r.isShort ? 'background:#fff5f5' : ''}">
           <div class="row between mb-4">
             <span class="fs-13 fw-6">${r.rmCode} · ${r.rmName}</span>
-            ${r.isShort ? `<span class="badge badge-err">부족 ${r.shortKg.toFixed(2)}kg</span>` : '<span class="badge badge-suc">충분</span>'}
+            ${r.isWater ? '<span class="badge badge-gray">관리대상 외</span>' :
+              r.isShort ? `<span class="badge badge-err">부족 ${r.shortKg.toFixed(2)}kg</span>` : '<span class="badge badge-suc">충분</span>'}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
             <div>
@@ -4646,8 +4654,8 @@ function renderBomResult() {
             </div>
             <div>
               <div class="fs-11 c-txt-l">현재고</div>
-              <div class="fs-13 fw-7" style="${r.isShort ? 'color:var(--err)' : ''}">${r.stockKg.toFixed(2)} kg</div>
-              <div class="fs-11 c-txt-l">≈ ${r.stockConv}</div>
+              <div class="fs-13 fw-7" style="${r.isWater ? 'color:var(--txt-l)' : r.isShort ? 'color:var(--err)' : ''}">${r.isWater ? '—' : r.stockKg.toFixed(2) + ' kg'}</div>
+              <div class="fs-11 c-txt-l">${r.isWater ? '수도 공급 · 추적 안함' : '≈ ' + r.stockConv}</div>
             </div>
           </div>
           <div class="fs-10 c-txt-l mt-4">배합비 ${r.ratio.toFixed(4)} · SKU "${r.sku || '-'}"</div>
@@ -5192,15 +5200,19 @@ function updateWOBomCheck() {
   const rmLots = State.rawMaterialLots || [];
   const rmItems = State.rawMaterialItems || [];
 
-  // 자재별 재고 비교
+  // 자재별 재고 비교 (물 RM002 는 관리대상 외 — 부족 표시 안 함)
   const checks = recipes.map(r => {
     const code = r[1];
     const ratio = parseFloat(r[3]) || 0;
     const need = ratio * totalKg * 1.01;
+    const isWater = code === 'RM002';
+    if (isWater) {
+      return { code, name: r[2], ratio, need, stock: Infinity, isShort: false, shortKg: 0, isWater: true };
+    }
     const stock = rmLots.filter(l => l[1] === code && !['폐기','입고취소'].includes(l[9]))
                        .reduce((s, l) => s + (parseFloat(l[8])||0), 0);
     return { code, name: r[2], ratio, need, stock,
-             isShort: stock < need, shortKg: Math.max(0, need - stock) };
+             isShort: stock < need, shortKg: Math.max(0, need - stock), isWater: false };
   });
   const shortItems = checks.filter(c => c.isShort);
 

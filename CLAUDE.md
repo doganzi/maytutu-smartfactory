@@ -1,0 +1,68 @@
+# 메이투투 스마트팩토리 — 프로젝트 메모리
+
+이 파일의 내용은 모든 Claude Code 세션 시작 시 자동 로드됩니다.
+
+## 핵심 도메인 규칙
+
+### 자재 / 레시피
+- **SOP-002 (앙호두 / 호두과자 전용반죽)** 배합비 (`SOP레시피` 시트):
+  - RM001 계란 — 0.1765 (정밀) / 0.18 (반올림 — 시트 정정 필요)
+  - RM002 물    — 0.1765 / 0.18
+  - RM003 마미만쥬믹스 — 0.5882 / 0.59
+  - RM006 식용유 — 0.0588 / 0.06
+  - 합계 정밀 = 1.0000, 반올림 = 1.01 (안전계수 중복 적용 위험)
+- **공식**: `목표 투입량 = 배합비 × 완제품kg × 1.01` (코드 line 4570)
+
+### RM002 물 — 재고 추적 외
+- **수도 공급 자재** — 시트에 LOT 안 만듦, 잔량 0 이 정상
+- BOM 계산기 / WO 생성 BOM 검증에서 **부족 표시 금지**
+- 표시: "관리대상 외" 또는 "수도 공급 · 추적 안함"
+
+### 마미만쥬믹스 (RM003) 투입 제약
+- **10kg 단위(=정수 포대)로만 투입 가능** — 물리적 제약
+- 권장 배치 추천 시 정수 포대로 떨어지는 봉수만 후보
+
+### 표준 배치 사이즈
+- 봉당 5kg (포장 단위 고정)
+- **추천 범위**: 200~350kg = 40~70봉
+- 정밀 배합비 적용 후 47봉(235kg, 14포대) 이 최우수 (잔여 0.41kg)
+
+### HACCP 운영 규칙
+- 냉동 보관 최소 12시간 후 출하 승인 가능
+- 소비기한 = 생산일 + 6개월
+- 공정기록·LOT 추적 무결성 필수 (자동 정합성 검증 + 수동 audit)
+
+## 데이터 모델
+
+### 시트 컬럼 인덱스
+- `작업지시서`: [0]=woId, [1]=sopId, [3]=fgItemCode, [4]=name, [5]=targetQty, [7]=packCount, [8]=email, [9]=시작, [10]=완료, [11]=냉동시작, [12]=상태, [13]=lastStep, [14]=fgLotId, [15]=승인자, [16]=승인시각, [17]=비고, [19]=pdfUrl
+- `원재료LOT`: [0]=ID, [1]=itemCode, [4]=qty, [5]=unit, [6]=mfgDate, [7]=expDate, [8]=remain, [9]=status, [10]=indivCount, [11]=temp
+- `완제품LOT`: [0]=ID, [1]=itemCode, [3]=qty, [5]=prodDate, [6]=expDate, [7]=woId, [8]=remain, [9]=status, [10]=packCount
+- `원재료개별 / 완제품개별`: [0]=indivId, [1]=lotId, [2]=itemCode, [3]=status, [4]=qty/dt, [5]=note
+
+### 상태값 (status 필드)
+- WO `[12]`: 진행중 / 승인대기 / 냉동보관중 / 출하가능 / 출하완료 / 승인완료 / 거부-재작업 / 거부-폐기 / **삭제**
+- 원재료 LOT `[9]`: 미사용 / 사용중 / 소진 / 폐기 / **입고취소**
+- 완제품 LOT `[9]`: 냉동보관중 / 출하가능 / 출하완료 / 폐기 / 소진 / **삭제** / **채번예약** (atomic claim placeholder)
+
+### LOT ID 규칙 (`generateLotId`)
+- 형식: `{prefix}-{itemNum}-{mfgYY MM DD}-{expYY MM DD}-{NNN}`
+- 예: `FG-002-260427-261027-001` (FG002, 2026-04-27 제조, 2026-10-27 만료, 1번)
+- **Atomic Claim**: QR라벨 단계에서 채번 즉시 placeholder row 적재 → 동시 채번 충돌 방지
+
+## 환경
+
+- **Repo**: `doganzi/maytutu-smartfactory` (private)
+- **배포**: GitHub Pages 자동 (main 브랜치) → https://doganzi.github.io/maytutu-smartfactory/
+- **백엔드**: Google Sheets + Drive (사용자 OAuth, 클라이언트 사이드)
+- **단일 파일**: `index.html` (~430KB) + `manifest.json` (PWA)
+- **소스 외 접근**: Sheets ID `1_koe58lReouU_ZZxzUh5SU8gUkuHjlwb1LNjZbJGSLU`
+  - Claude Code 환경에서 직접 접근 불가 (OAuth 자격증명 없음)
+  - 데이터 확인 필요 시 사용자가 시트 일부를 채팅에 붙여넣어 줘야 함
+
+## 개발 / PR 규칙
+
+- 개발 브랜치: `claude/continue-smart-factory-eiuWj`
+- 머지: PR → squash merge (선형 히스토리)
+- 모든 변경 전 진행중 작업 영향 점검 — wo-execute / 진행중 WO 데이터 보존 우선
+- LiveSync 자동 재렌더는 입력 화면 (`wo-create`, `bom-calc`, `req-form`, `data-audit`)에서 스킵 — 입력값 보존
