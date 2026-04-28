@@ -1019,7 +1019,7 @@ const Router = {
       more: 'more', 'sop-list': 'more', 'sop-detail': 'more',
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
-      vendors: 'more', haccp: 'more',
+      vendors: 'more', haccp: 'more', 'bom-calc': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -3040,6 +3040,7 @@ Screens.more = () => {
   renderHeader('더보기');
   const items = [
     { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
+    { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
@@ -4007,6 +4008,184 @@ function printTestLabel() {
   }]);
 
   toast(`테스트 라벨 생성됨 (${sz.w}×${sz.h}mm) — 인쇄 버튼을 누르세요`, 'suc');
+}
+
+// ─── BOM 계산기 (배치 사이징 + 자재 필요량 + 재고 비교) ───
+Screens['bom-calc'] = async () => {
+  renderHeader('BOM 계산기', '봉수/kg 입력 → 자재 필요량 자동 계산', { back: 'more' });
+  showLoading();
+  try {
+    const [sops, recipes, rmItems, rmLots] = await Promise.all([
+      SheetsAPI.getAll('SOP').catch(() => []),
+      SheetsAPI.getAll('SOP레시피').catch(() => []),
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('원재료LOT').catch(() => [])
+    ]);
+    const activeSops = sops.filter(s => s[4] === '활성');
+    State._bom = { recipes, rmItems, rmLots };
+    const defaultSop = activeSops.find(s => s[0] === 'SOP-002')?.[0] || activeSops[0]?.[0] || '';
+
+    $id('content').innerHTML = `
+      <div style="padding:16px">
+        <div class="card">
+          <div class="input-group">
+            <label>SOP 선택</label>
+            <select id="bom-sop" onchange="renderBomResult()">
+              ${activeSops.map(s => `<option value="${s[0]}" ${s[0]===defaultSop?'selected':''}>${s[0]} · ${s[1]||''}</option>`).join('')}
+              ${activeSops.length===0 ? '<option value="">활성 SOP 없음</option>' : ''}
+            </select>
+          </div>
+          <div class="input-group">
+            <label>입력 단위</label>
+            <div class="row" style="gap:6px">
+              <button class="btn btn-sm btn-pri" id="bom-unit-bag" onclick="window._bomUnit='bag';document.getElementById('bom-unit-bag').className='btn btn-sm btn-pri';document.getElementById('bom-unit-kg').className='btn btn-sm btn-outline btn-gray';renderBomResult()">봉수 (5kg/봉)</button>
+              <button class="btn btn-sm btn-outline btn-gray" id="bom-unit-kg" onclick="window._bomUnit='kg';document.getElementById('bom-unit-kg').className='btn btn-sm btn-pri';document.getElementById('bom-unit-bag').className='btn btn-sm btn-outline btn-gray';renderBomResult()">완제품 kg</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label id="bom-input-label">생산 봉수</label>
+            <div class="input-suffix">
+              <input type="number" id="bom-qty" min="1" value="40" oninput="renderBomResult()">
+              <span id="bom-input-unit">봉</span>
+            </div>
+          </div>
+        </div>
+        <div id="bom-result"></div>
+      </div>
+    `;
+    window._bomUnit = 'bag';
+    renderBomResult();
+    hideLoading();
+  } catch (e) {
+    hideLoading();
+    toast('로드 실패: ' + e.message, 'err');
+  }
+};
+
+function renderBomResult() {
+  const sopId = $id('bom-sop')?.value || '';
+  const unit = window._bomUnit || 'bag';
+  const qty = parseFloat($id('bom-qty')?.value) || 0;
+  const lblEl = $id('bom-input-label'), unitEl = $id('bom-input-unit');
+  if (lblEl) lblEl.textContent = unit === 'bag' ? '생산 봉수' : '완제품 kg';
+  if (unitEl) unitEl.textContent = unit === 'bag' ? '봉' : 'kg';
+  const result = $id('bom-result');
+  if (!result || !State._bom || qty <= 0 || !sopId) {
+    if (result) result.innerHTML = '<div class="fs-12 c-txt-l mt-12">입력값을 확인하세요</div>';
+    return;
+  }
+  const { recipes, rmItems, rmLots } = State._bom;
+  const sopRecipes = recipes.filter(r => r[0] === sopId);
+  if (sopRecipes.length === 0) {
+    result.innerHTML = '<div class="card bl-warn" style="background:#fff8e1;margin-top:12px"><div class="fs-12 c-warn">선택한 SOP에 레시피가 없습니다</div></div>';
+    return;
+  }
+  const targetKg = unit === 'bag' ? qty * 5 : qty;
+  const bagCount = unit === 'bag' ? qty : (qty / 5);
+  const ratioSum = sopRecipes.reduce((s, r) => s + (parseFloat(r[3])||0), 0);
+
+  // 자재별 계산
+  const rows = sopRecipes.map(r => {
+    const rmCode = r[1];
+    const rmName = r[2];
+    const ratio = parseFloat(r[3]) || 0;
+    const needKg = ratio * targetKg * 1.01;  // index.html:4570 동일 공식
+    const item = rmItems.find(i => i[0] === rmCode);
+    const sku = item?.[3] || '';
+    const skuP = parseSkuUnit(sku);
+    let needConv = '—', stockKg = 0, stockConv = '—', isShort = false;
+    if (skuP && skuP.perUnit > 0) {
+      const u = needKg / skuP.perUnit;
+      needConv = `${u.toFixed(2)} ${skuP.unitName}`;
+    }
+    // 재고 (활성 LOT 합계)
+    stockKg = rmLots.filter(l => l[1] === rmCode && !['폐기','입고취소'].includes(l[9]))
+                   .reduce((sum, l) => sum + (parseFloat(l[8])||0), 0);
+    if (skuP && skuP.perUnit > 0) {
+      const su = stockKg / skuP.perUnit;
+      stockConv = `${su.toFixed(2)} ${skuP.unitName}`;
+    } else {
+      stockConv = `${stockKg.toFixed(2)} kg`;
+    }
+    isShort = stockKg < needKg;
+    const shortKg = isShort ? needKg - stockKg : 0;
+    return { rmCode, rmName, ratio, needKg, needConv, stockKg, stockConv, isShort, shortKg, sku };
+  });
+
+  const anyShort = rows.some(r => r.isShort);
+  const totalNeed = rows.reduce((s, r) => s + r.needKg, 0);
+
+  result.innerHTML = `
+    <div class="card bl-${anyShort ? 'err' : 'suc'}" style="background:${anyShort ? '#fff5f5' : '#e8f5e9'};margin-top:12px">
+      <div class="row between">
+        <div>
+          <div class="fs-13 fw-7">생산 목표</div>
+          <div class="fs-16 fw-8">${targetKg.toFixed(1)} kg / ${bagCount.toFixed(1)} 봉</div>
+        </div>
+        <div style="text-align:right">
+          <div class="fs-11 c-txt-l">SOP ${sopId}</div>
+          <div class="fs-11 c-txt-l">자재 합계: ${totalNeed.toFixed(2)} kg</div>
+        </div>
+      </div>
+      ${anyShort ? '<div class="fs-12 c-err mt-4 fw-6">⚠ 재고 부족 자재가 있습니다 (아래 빨간색 표시)</div>' : '<div class="fs-12 c-suc mt-4 fw-6">✓ 모든 자재 재고 충분</div>'}
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;margin-top:8px">
+      <div class="fs-13 fw-7" style="padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--gray-l)">자재별 필요량 / 재고 비교</div>
+      ${rows.map(r => `
+        <div style="padding:10px 12px;border-bottom:1px solid var(--bg);${r.isShort ? 'background:#fff5f5' : ''}">
+          <div class="row between mb-4">
+            <span class="fs-13 fw-6">${r.rmCode} · ${r.rmName}</span>
+            ${r.isShort ? `<span class="badge badge-err">부족 ${r.shortKg.toFixed(2)}kg</span>` : '<span class="badge badge-suc">충분</span>'}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <div>
+              <div class="fs-11 c-txt-l">필요량 (배합비 × kg × 1.01)</div>
+              <div class="fs-13 fw-7">${r.needKg.toFixed(2)} kg</div>
+              ${r.needConv !== '—' ? `<div class="fs-11 c-txt-l">≈ ${r.needConv}</div>` : ''}
+            </div>
+            <div>
+              <div class="fs-11 c-txt-l">현재고</div>
+              <div class="fs-13 fw-7" style="${r.isShort ? 'color:var(--err)' : ''}">${r.stockKg.toFixed(2)} kg</div>
+              <div class="fs-11 c-txt-l">≈ ${r.stockConv}</div>
+            </div>
+          </div>
+          <div class="fs-10 c-txt-l mt-4">배합비 ${r.ratio.toFixed(4)} · SKU "${r.sku || '-'}"</div>
+        </div>
+      `).join('')}
+      <div class="row between" style="padding:10px 12px;background:#eef5ff">
+        <span class="fs-12 fw-6">배합비 합계</span>
+        <span class="fs-12 fw-7">${ratioSum.toFixed(4)} ${Math.abs(ratioSum-1.0)<0.005 ? '✓ (정밀)' : Math.abs(ratioSum-1.01)<0.005 ? '⚠ 1.01 (반올림 — 안전계수 중복 적용)' : '⚠ 비정상'}</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:8px;background:#f8f9fa">
+      <div class="fs-12 fw-6 mb-4">📐 권장 배치 사이즈 (잔여 최소화)</div>
+      <div class="fs-11 c-txt-l">
+        ${(() => {
+          // 마미만쥬믹스 (가장 큰 비중) 기준 — 포대 정수 배수에 가까운 봉수 추천
+          const mainRecipe = sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
+          const item = rmItems.find(i => i[0] === mainRecipe[1]);
+          const skuP = parseSkuUnit(item?.[3] || '');
+          if (!skuP || !skuP.perUnit) return '주 자재 SKU 정보 없음 — 권장 계산 불가';
+          const ratio = parseFloat(mainRecipe[3]);
+          // bag → mainKg = bag × 5 × ratio × 1.01
+          // mainKg / perUnit = 정수가 되는 bag을 찾음
+          const candidates = [];
+          for (let b = 10; b <= 100; b++) {
+            const mainKg = b * 5 * ratio * 1.01;
+            const units = mainKg / skuP.perUnit;
+            const diff = Math.abs(units - Math.round(units));
+            if (diff < 0.05) candidates.push({ bag: b, units, diff });
+          }
+          candidates.sort((a, b) => a.diff - b.diff);
+          const top = candidates.slice(0, 3);
+          if (top.length === 0) return `이 SOP·SKU 조합으로 깔끔한 배치 추천 없음 (10~100봉 범위)`;
+          return `${mainRecipe[2]} 기준 잔여 최소 배치:<br>` + top.map(t => `<strong>${t.bag}봉</strong> (${(t.bag*5).toFixed(0)}kg) → 주자재 ${t.units.toFixed(2)} ${skuP.unitName}`).join(' · ');
+        })()}
+      </div>
+    </div>
+  `;
 }
 
 // ─── SOP LIST ───
