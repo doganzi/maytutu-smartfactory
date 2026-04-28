@@ -5052,6 +5052,9 @@ Screens['wo-create'] = async () => {
         <label>생산 목표 수량 (총 수량)</label>
           <input type="number" id="wo-qty" placeholder="수량 입력" oninput="updateWOCalc()">
         </div>
+
+        <div id="wo-bom-rec" style="display:none"></div>
+
         <div class="input-group">
           <label>포장 단위</label>
           <select id="wo-unit" onchange="updateWOCalc()">
@@ -5069,8 +5072,6 @@ Screens['wo-create'] = async () => {
       </div>
 
       <div id="wo-calc" style="display:none"></div>
-
-      <div id="wo-bom-rec" style="display:none"></div>
 
       <div class="card mt-12">
         <div class="fs-13 fw-7 mb-8">공정 미리보기</div>
