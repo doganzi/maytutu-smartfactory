@@ -1665,13 +1665,14 @@ function renderProductionContent(activeTab, isAdmin) {
   }
 
   else if (activeTab === '전체작업') {
-    const all = State.workOrders.filter(r => r[12] !== '삭제');
+    // 관리자: 삭제 포함 전체 / 일반: 삭제 제외
+    const all = isAdmin ? State.workOrders : State.workOrders.filter(r => r[12] !== '삭제');
 
     // 상태별 건수 집계
     const statusCounts = {};
     all.forEach(wo => { const s = wo[12] || '미지정'; statusCounts[s] = (statusCounts[s] || 0) + 1; });
-    const statusOrder = ['진행중','승인대기','냉동보관중','출하가능','출하완료','승인완료'];
-    const statusBadgeMap = { '진행중':'info','승인대기':'warn','냉동보관중':'warn','출하가능':'suc','출하완료':'suc','승인완료':'suc' };
+    const statusOrder = ['진행중','승인대기','냉동보관중','출하가능','출하완료','승인완료','삭제'];
+    const statusBadgeMap = { '진행중':'info','승인대기':'warn','냉동보관중':'warn','출하가능':'suc','출하완료':'suc','승인완료':'suc','삭제':'gray' };
 
     // 필터/정렬 상태
     const curFilter = window._allWoFilter || '전체';
@@ -1711,15 +1712,32 @@ function renderProductionContent(activeTab, isAdmin) {
       </div>
       <div class="fs-11 c-txt-l mb-8">${curFilter !== '전체' ? curFilter + ' · ' : ''}${filtered.length}건</div>
       ${filtered.length === 0 ? `<div class="empty-state"><div class="es-icon">📝</div><div class="es-title">${curFilter} 작업 없음</div></div>` :
-        filtered.map(wo => `
-          <div class="card clickable" onclick="Router.go('wo-detail',{woId:'${wo[0]}'})">
-            <div class="row between mb-4">
-              <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
-              <span class="badge badge-${statusBadgeMap[wo[12]]||'err'}">${wo[12]}</span>
+        filtered.map(wo => {
+          const isDeleted = wo[12] === '삭제';
+          if (isDeleted) {
+            const auditNote = wo[17] || '';
+            return `
+              <div class="card bl-gray" style="opacity:0.85;background:#f8f8f8">
+                <div class="row between mb-4">
+                  <span class="fs-13 fw-6" style="text-decoration:line-through;color:var(--txt-l)">${wo[4] || ''} ${wo[5] || ''}kg</span>
+                  <span class="badge badge-gray">삭제</span>
+                </div>
+                <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · ${(wo[9]||'').substring(0,10)}</div>
+                ${auditNote ? `<div class="fs-10 c-txt-l mt-4" style="font-style:italic">${auditNote}</div>` : ''}
+                ${isAdmin ? `<button class="btn btn-sm btn-suc mt-8" style="width:100%" onclick="restoreWorkOrder('${wo[0]}')">↩ 복구</button>` : ''}
+              </div>
+            `;
+          }
+          return `
+            <div class="card clickable" onclick="Router.go('wo-detail',{woId:'${wo[0]}'})">
+              <div class="row between mb-4">
+                <span class="fs-13 fw-6">${wo[4] || ''} ${wo[5] || ''}kg</span>
+                <span class="badge badge-${statusBadgeMap[wo[12]]||'err'}">${wo[12]}</span>
+              </div>
+              <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · ${(wo[9]||'').substring(0,10)}</div>
             </div>
-            <div class="fs-11 c-txt-l">${wo[0]} · ${wo[8] || ''} · ${(wo[9]||'').substring(0,10)}</div>
-          </div>
-        `).join('')}
+          `;
+        }).join('')}
     `;
   }
 }
@@ -1832,6 +1850,118 @@ async function deleteWorkOrder(woId) {
         } finally {
           hideLoading();
           releaseLock('deleteWO');
+        }
+      });
+    };
+  } catch (e) {
+    hideLoading();
+    toast('로드 실패: ' + e.message, 'err');
+  }
+}
+
+/* ─── 작업지시서 복구 (실수 삭제 정정용) ───
+   관리자 전용. 삭제된 WO를 선택한 상태로 되돌리고
+   감사 노트(wo[17])에 [복구→상태] 항목을 누적 기록.
+   캐스케이드 삭제된 FG LOT 도 동시 복구 옵션 제공. */
+async function restoreWorkOrder(woId) {
+  showLoading();
+  try {
+    SheetsAPI.invalidateCache('작업지시서');
+    const wos = await SheetsAPI.getAll('작업지시서', false);
+    const wo = wos.find(w => w[0] === woId);
+    if (!wo) { hideLoading(); toast('작업지시서를 찾을 수 없습니다', 'err'); return; }
+    if (wo[12] !== '삭제') { hideLoading(); toast(`삭제 상태가 아닙니다 (현재: ${wo[12]||'-'})`, 'warn'); return; }
+
+    const isAdmin = State.user?.role === 'admin';
+    if (!isAdmin) { hideLoading(); toast('관리자만 복구할 수 있습니다', 'err'); return; }
+
+    const lastStep = parseInt(wo[13]) || 0;
+    const fgLotId = wo[14] || '';
+    let fgLotDeleted = false;
+    if (fgLotId) {
+      try {
+        SheetsAPI.invalidateCache('완제품LOT');
+        const fgLots = await SheetsAPI.getAll('완제품LOT', false);
+        const fgLot = fgLots.find(l => l[0] === fgLotId);
+        fgLotDeleted = !!(fgLot && fgLot[9] === '삭제');
+      } catch(e) {}
+    }
+    hideLoading();
+
+    let suggested = '진행중';
+    if (lastStep >= 11 && wo[11]) suggested = '냉동보관중';
+    const auditNote = wo[17] || '';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+      <div class="dialog" style="max-width:360px">
+        <div class="d-title">작업지시서 복구</div>
+        <div class="d-msg">${woId} · ${wo[4]||''} ${wo[5]||''}kg<br><span class="fs-11 c-txt-l">현재: 삭제 / 마지막 공정 단계: ${lastStep}/11</span></div>
+        ${auditNote ? `<div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:10px"><div class="fs-11 c-txt-l">기존 감사 기록:<br>${auditNote}</div></div>` : ''}
+        <div class="input-group" style="margin-bottom:8px">
+          <label>복구 후 상태</label>
+          <select id="restore-status" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+            <option value="진행중" ${suggested==='진행중'?'selected':''}>진행중</option>
+            <option value="승인대기" ${suggested==='승인대기'?'selected':''}>승인대기</option>
+            <option value="냉동보관중" ${suggested==='냉동보관중'?'selected':''}>냉동보관중</option>
+          </select>
+        </div>
+        ${fgLotDeleted ? `<div class="check-item" id="cascade-row" style="margin-bottom:10px;cursor:pointer"><div class="check-box checked" id="cascade-fg" style="background:var(--suc)">✓</div><span class="fs-12">연결된 완제품 LOT (${fgLotId}) 도 함께 복구</span></div>` : ''}
+        <div class="input-group" style="margin-bottom:12px">
+          <label>복구 사유 (선택, 감사용)</label>
+          <textarea id="restore-reason" rows="2" placeholder="예: 실수 삭제 / 잘못 등록 정정" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></textarea>
+        </div>
+        <div class="d-actions">
+          <button class="btn btn-sm btn-outline btn-gray" id="restore-cancel">취소</button>
+          <button class="btn btn-sm btn-suc" id="restore-ok">복구</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cascadeRow = overlay.querySelector('#cascade-row');
+    if (cascadeRow) {
+      cascadeRow.onclick = () => {
+        const box = overlay.querySelector('#cascade-fg');
+        const checked = box.classList.toggle('checked');
+        box.style.background = checked ? 'var(--suc)' : '';
+        box.textContent = checked ? '✓' : '';
+      };
+    }
+    overlay.querySelector('#restore-cancel').onclick = () => overlay.remove();
+    overlay.querySelector('#restore-ok').onclick = () => {
+      const newStatus = overlay.querySelector('#restore-status').value;
+      const reason = overlay.querySelector('#restore-reason').value?.trim() || '(사유 없음)';
+      const cascadeFg = !!(fgLotDeleted && overlay.querySelector('#cascade-fg')?.classList.contains('checked'));
+      overlay.remove();
+
+      confirm('복구하시겠습니까?', `${woId}\n새 상태: ${newStatus}${cascadeFg ? `\n+ 완제품 LOT ${fgLotId} 동시 복구` : ''}\n사유: ${reason}`, async () => {
+        if (!acquireLock('restoreWO')) return;
+        try {
+          showLoading();
+          const restoreNote = `${auditNote ? auditNote + ' | ' : ''}[복구→${newStatus}] ${reason} | ${State.user?.email||''} | ${formatDateTime()}`;
+          await SheetsAPI.updateRow('작업지시서', 0, woId, {
+            12: newStatus,
+            17: restoreNote
+          });
+          if (cascadeFg && fgLotId) {
+            const fgRestoreStatus = newStatus === '냉동보관중' ? '냉동보관중' : '출하가능';
+            await SheetsAPI.updateRow('완제품LOT', 0, fgLotId, { 9: fgRestoreStatus });
+            const fgIndivs = (await SheetsAPI.getAll('완제품개별').catch(()=>[])).filter(iv => iv[1]===fgLotId && iv[3]==='삭제');
+            for (const iv of fgIndivs) {
+              await SheetsAPI.updateRow('완제품개별', 0, iv[0], { 3: fgRestoreStatus });
+            }
+            SheetsAPI.invalidateCache('완제품LOT');
+            SheetsAPI.invalidateCache('완제품개별');
+          }
+          SheetsAPI.invalidateCache('작업지시서');
+          toast(`복구 완료: ${woId} → ${newStatus}`, 'suc');
+          Router.go('production');
+        } catch (e) {
+          toast('복구 실패: ' + e.message, 'err');
+        } finally {
+          hideLoading();
+          releaseLock('restoreWO');
         }
       });
     };
