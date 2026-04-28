@@ -4707,63 +4707,208 @@ Screens['sop-detail'] = async (params = {}) => {
 
   const sop = State.sops.find(s => s[0] === sopId) || State.sops[0];
   const sid = sop?.[0] || sopId;
-  const steps = State.sopSteps.filter(s => s[0] === sid);
+  const steps = State.sopSteps.filter(s => s[0] === sid).sort((a,b) => parseInt(a[1])-parseInt(b[1]));
   const recipes = State.sopRecipes.filter(r => r[0] === sid);
+
+  // 미리보기 기준 (사용자가 변경 가능)
+  if (!State._sopPrev) State._sopPrev = { kg: 200, bags: 40 };
 
   renderHeader('SOP 상세', `${sid} · ${sop?.[1] || ''}`, { back: 'sop-list' });
 
-  const typeColorBase = { input: 'info', process: 'pri', inspect: 'warn', pack: 'gray', store: 'teal' };
-  const typeLabelBase = { input: '투입', process: '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  function renderAll() {
+    const previewKg = State._sopPrev.kg;
+    const previewBags = State._sopPrev.bags;
 
-  $id('content').innerHTML = `
-    <div style="padding:16px">
-      <div class="card">
-        <div class="row between mb-8">
-          <div>
-            <div class="fs-16 fw-7">${sop?.[1] || ''}</div>
-            <div class="fs-12 c-txt-l">${sid} · v${sop?.[3]||'1.0'} · 대상: ${sop?.[2]||''}</div>
-          </div>
-          <span class="badge badge-${sop?.[4]==='활성'?'suc':'err'}">${sop?.[4] || ''}</span>
-        </div>
-        ${State.user?.role === 'admin' ? '<div class="row" style="gap:8px"><button class="btn btn-sm btn-pri">수정</button><button class="btn btn-sm btn-outline btn-err">폐기</button></div>' : ''}
-      </div>
-
-      ${recipes.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8">레시피 (BOM) — 완제품 1kg당</div>
+    $id('content').innerHTML = `
+      <div style="padding:12px">
         <div class="card">
-          ${recipes.map((r, i) => `
-            <div class="row between" style="padding:6px 0;${i < recipes.length-1 ? 'border-bottom:1px solid var(--bg)' : ''}">
-              <span class="fs-13">${r[2] || ''} (${r[1] || ''})</span>
-              <span class="fs-13 c-txt-l">${r[3] || ''} ${r[4] || ''} · 공정${r[5] || ''}</span>
+          <div class="row between mb-8">
+            <div>
+              <div class="fs-16 fw-7">${sop?.[1] || ''}</div>
+              <div class="fs-12 c-txt-l">${sid} · v${sop?.[3]||'1.0'} · 대상: ${sop?.[2]||''}</div>
             </div>
-          `).join('')}
-        </div>
-      ` : ''}
-
-      <div class="fs-14 fw-7 mb-8">공정단계 (${steps.length}단계)</div>
-      ${steps.map(s => {
-        const t = s[3] || 'input';
-        const isMix = t === 'process' && (s[2]||'').includes('믹싱');
-        const color = isMix ? 'teal' : (typeColorBase[t]||'gray');
-        const label = isMix ? '믹싱' : (typeLabelBase[t]||t);
-        return `
-          <div class="card bl-${color}" style="padding:10px">
-            <div class="row between">
-              <div class="row" style="gap:8px">
-                <span class="fs-12 fw-7 c-gray-d" style="width:20px">${s[1]||''}</span>
-                <div>
-                  <div class="fs-13 fw-6">${s[2]||''}</div>
-                  <div class="fs-11 c-txt-l">${s[6]||''}</div>
-                </div>
-              </div>
-              <span class="badge badge-${color}">${label}</span>
-            </div>
+            <span class="badge badge-${sop?.[4]==='활성'?'suc':'err'}">${sop?.[4] || ''}</span>
           </div>
-        `;
-      }).join('')}
+          ${State.user?.role === 'admin' ? '<div class="row" style="gap:8px"><button class="btn btn-sm btn-pri" disabled>수정 (준비중)</button><button class="btn btn-sm btn-outline btn-err" disabled>폐기 (준비중)</button></div>' : ''}
+        </div>
+
+        <div class="card bl-info" style="background:#e3f2fd;padding:10px">
+          <div class="fs-13 fw-7 c-info mb-4">📋 작업자 화면 미리보기 (관리자)</div>
+          <div class="fs-11 c-txt-l mb-8">실제 작업자가 보는 공정 화면입니다. 입력/스캔/사진은 비활성.</div>
+          <div class="row" style="gap:8px;align-items:center">
+            <span class="fs-11 c-txt-l">기준 수량:</span>
+            <input type="number" id="sop-prev-bags" value="${previewBags}" min="1" style="width:70px;padding:4px 8px;border:1px solid var(--gray-l);border-radius:4px" oninput="window._sopPrevSetBags(this.value)">
+            <span class="fs-11 c-txt-l">봉 = ${previewKg} kg</span>
+          </div>
+        </div>
+
+        ${recipes.length > 0 ? `
+          <div class="fs-14 fw-7 mb-8">레시피 (BOM) — 완제품 1kg당</div>
+          <div class="card">
+            ${recipes.map((r, i) => `
+              <div class="row between" style="padding:6px 0;${i < recipes.length-1 ? 'border-bottom:1px solid var(--bg)' : ''}">
+                <span class="fs-13">${r[2] || ''} (${r[1] || ''})</span>
+                <span class="fs-13 c-txt-l">${r[3] || ''} ${r[4] || ''} · 공정${r[5] || ''}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <div class="fs-14 fw-7 mb-8 mt-12">공정 단계 (${steps.length}단계) — 작업자 화면 그대로</div>
+        ${steps.map(s => renderSopStepPreview(s, recipes, previewKg, previewBags)).join('')}
+      </div>
+    `;
+  }
+
+  // 봉수 변경 핸들러
+  window._sopPrevSetBags = (v) => {
+    const n = parseInt(v) || 0;
+    if (n <= 0) return;
+    State._sopPrev = { bags: n, kg: n * 5 };
+    renderAll();
+  };
+
+  renderAll();
+};
+
+/* SOP 단계 미리보기 카드 — 작업자가 실제로 보는 화면 구조와 동일.
+   모든 입력·버튼은 비활성화. wo-execute 의 renderStepContent 와 동일한 스타일. */
+function renderSopStepPreview(step, recipes, targetKg, packCount) {
+  const stepNo = parseInt(step[1]);
+  const stepType = step[3] || 'input';
+  const isMixing = stepType === 'process' && (step[2]||'').includes('믹싱');
+  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', seal: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal', 'qr-label': 'info' };
+  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', seal: '포장(밀봉)', inspect: '검사(CCP)', pack: '포장', store: '보관', 'qr-label': 'QR라벨' };
+  const color = typeColor[stepType] || 'gray';
+  const label = typeLabel[stepType] || stepType;
+  const checks = (step[6] || '').split(',').filter(c => c.trim());
+  const desc = step[6] || '';
+
+  // disabled 입력 공통 스타일
+  const dis = 'readonly disabled style="background:var(--gray-l);opacity:0.7"';
+
+  let body = '';
+
+  if (stepType === 'input') {
+    const rmCode = step[4] || '';
+    const recipe = recipes.find(r => r[1] === rmCode);
+    const target = recipe ? (parseFloat(recipe[3]) * targetKg * 1.01).toFixed(2) : '0';
+    const isWater = rmCode === 'RM002';
+    let n = 1;
+    body += `
+      <div class="fs-14 fw-7" style="margin-bottom:6px;margin-top:4px">Step ${n++}. 투입 목표량 확인</div>
+      <div class="info-box suc">
+        <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetKg}kg × 1.01)</div>
+        <div class="fs-20 fw-8 c-suc mt-4">${target} kg</div>
+        <div class="fs-11 c-txt-l">자재 코드: ${rmCode}${isWater ? ' (수도 공급 · 추적 외)' : ''}</div>
+      </div>
+    `;
+    if (checks.length > 0) {
+      body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      checks.forEach(c => {
+        body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>${c.trim()}</span></div>`;
+      });
+    }
+    if (!isWater) {
+      body += `
+        <div class="fs-14 fw-7" style="margin-bottom:6px;margin-top:20px">Step ${n++}. 원재료 LOT 확인</div>
+        <button class="btn btn-info btn-full mb-8" disabled>📷 QR 스캔 시작</button>
+      `;
+    }
+    body += `
+      <div class="fs-14 fw-7" style="margin-bottom:6px;margin-top:20px">Step ${n++}. 저울 계량값 사진 첨부 <span class="c-err">*필수</span></div>
+      <div class="row mb-8" style="gap:8px">
+        <button class="btn btn-sm btn-outline btn-pri flex-1" disabled>📷 카메라 촬영</button>
+        <button class="btn btn-sm btn-outline btn-gray flex-1" disabled>🖼️ 갤러리 선택</button>
+      </div>
+      <div class="fs-14 fw-7" style="margin-bottom:6px;margin-top:20px">Step ${n++}. 실제 투입량 입력</div>
+      <div class="input-group">
+        <label>실제 투입량 (kg) <span class="c-err">*필수</span></label>
+        <div class="input-suffix"><input type="number" placeholder="투입량 입력" ${dis}><span>kg</span></div>
+      </div>
+    `;
+  }
+  else if (stepType === 'process') {
+    const std = step[5] || '';
+    if (!isMixing && std) {
+      body += `<div class="info-box" style="background:rgba(59,130,246,0.1)"><div class="fs-12 fw-6 c-pri">기준값</div><div class="fs-14 fw-7 mt-4">${std}</div></div>`;
+    } else if (isMixing) {
+      body += `<div class="info-box" style="background:rgba(20,184,166,0.1)"><div class="fs-12 fw-6" style="color:#0d9488">${step[2]||''} 공정</div></div>`;
+    }
+    if (checks.length > 0) {
+      body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      checks.forEach(c => {
+        body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>${c.trim()}</span></div>`;
+      });
+    }
+    body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">공정 사진</div><button class="btn btn-sm btn-outline btn-pri" disabled>📷 사진 촬영/선택</button>`;
+  }
+  else if (stepType === 'pack' || stepType === 'seal') {
+    body += `<div class="info-box" style="background:rgba(124,58,237,0.1)"><div class="fs-12 fw-6" style="color:#7c3aed">${stepType==='seal'?'포장 공정':'계량 공정'}</div></div>`;
+    if (stepType === 'seal') {
+      body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>제품 라벨 부착 확인</span></div>`;
+      body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>포장지 내 공기 없이 밀봉 상태 확인</span></div>`;
+    }
+    body += `<div class="fs-13 fw-7 mb-8 mt-12">무작위 3개 제품 — 저울 위 사진 + 무게 기록</div>`;
+    for (let i = 1; i <= 3; i++) {
+      body += `
+        <div class="card" style="padding:10px;border-left:3px solid #7c3aed;margin-bottom:6px">
+          <div class="fs-13 fw-6 mb-8">샘플 #${i}</div>
+          <button class="btn btn-sm btn-outline btn-pri mb-8" disabled>📷 사진 촬영</button>
+          <div class="input-group"><label style="font-size:12px">무게</label><div class="input-suffix"><input type="number" placeholder="g" ${dis}><span>g</span></div></div>
+        </div>
+      `;
+    }
+    body += `<div class="input-group mt-12"><label>${stepType==='seal'?'최종 완제품 수량':'포장 수량'} (예상 ${packCount}개)</label><div class="input-suffix"><input type="number" placeholder="수량" ${dis}><span>개</span></div></div>`;
+  }
+  else if (stepType === 'inspect') {
+    body += `<div class="info-box" style="background:rgba(198,40,40,0.1)"><div class="fs-12 fw-6 c-err">CCP 금속검출 검사 (HACCP 핵심)</div></div>`;
+    body += `<div class="fs-11 c-txt-l mt-4">예상 검사 수량: ${packCount}개</div>`;
+    if (checks.length > 0) {
+      body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      checks.forEach(c => {
+        body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>${c.trim()}</span></div>`;
+      });
+    }
+    body += `<div class="fs-12 fw-6 mt-8 mb-4 c-err">CCP 모니터링 (시작·중간·종료 시간, Fe/SUS 결과 입력)</div>`;
+    body += `<div class="fs-11 c-txt-l">실제 작업자 화면에서 7단계 점검 입력 필드 노출</div>`;
+    body += `<button class="btn btn-sm btn-outline btn-pri mt-8" disabled>📷 검사 사진</button>`;
+  }
+  else if (stepType === 'qr-label') {
+    body += `<div class="info-box" style="background:rgba(21,101,192,0.1)"><div class="fs-12 fw-6" style="color:#1565c0">QR 라벨 인쇄</div></div>`;
+    body += `<div class="input-group mt-8"><label>QR 라벨 수량 (예상 ${packCount}매)</label><div class="input-suffix"><input type="number" placeholder="수량" ${dis}><span>매</span></div></div>`;
+    body += `<button class="btn btn-pri btn-full mt-8" disabled>🖨️ 라벨 미리보기</button>`;
+  }
+  else if (stepType === 'store') {
+    body += `<div class="info-box" style="background:rgba(0,105,92,0.1)"><div class="fs-12 fw-6" style="color:#00695c">냉동 보관</div></div>`;
+    if (step[5]) body += `<div class="fs-11 c-txt-l mt-4">보관 기준: ${step[5]}</div>`;
+    if (checks.length > 0) {
+      body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+      checks.forEach(c => {
+        body += `<div class="check-item"><div class="check-box" style="pointer-events:none"></div><span>${c.trim()}</span></div>`;
+      });
+    }
+    body += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-12">냉동고 온도계 사진</div><button class="btn btn-sm btn-outline btn-pri" disabled>📷 사진 촬영</button>`;
+    body += `<div class="input-group mt-8"><label>냉동 시작 시각 (자동 기록)</label><input type="text" placeholder="자동 입력 됨" ${dis}></div>`;
+  }
+  else {
+    body += `<div class="fs-12 c-txt-l">미정의 stepType: ${stepType}</div>`;
+  }
+
+  return `
+    <div class="card bl-${color}" style="margin-bottom:10px">
+      <div class="row between mb-12">
+        <div class="fs-16 fw-7">공정 ${step[1]}. ${step[2]||''}</div>
+        <span class="badge badge-${color}">${label}</span>
+      </div>
+      ${body}
+      <div class="fs-10 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">
+        ${desc ? `${desc} · ` : ''}stepType=${stepType}
+      </div>
     </div>
   `;
-};
+}
 
 // ─── RAW MATERIAL ITEMS (원재료 품목) ───
 Screens['items-rm'] = async () => {
