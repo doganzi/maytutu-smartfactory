@@ -1151,6 +1151,23 @@ const LiveSync = {
       return;
     }
 
+    // 입력 보존 화면: 자동 트리거(poll/focus/visibility) 시 스킵 — 입력값/결과 유실 방지.
+    //   사용자가 새로고침 버튼을 직접 누르는 'manual' 만 허용.
+    const screenForGuard = State.currentScreen;
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal'];
+    if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
+      console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
+      return;
+    }
+    // 활성 입력 요소가 있으면 자동 트리거 시 스킵 (보편적 안전망)
+    if (trigger !== 'manual') {
+      const ae = document.activeElement;
+      if (ae && ['INPUT','SELECT','TEXTAREA'].includes(ae.tagName)) {
+        console.log(`[LiveSync] ${ae.tagName}#${ae.id||''} 입력 활성 — ${trigger} 스킵`);
+        return;
+      }
+    }
+
     this._isSyncing = true;
     this._lastSyncTs = now;
 
