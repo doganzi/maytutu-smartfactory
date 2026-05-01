@@ -13,7 +13,7 @@
 ```bash
 git clone https://github.com/doganzi/maytutu-smartfactory.git
 cd maytutu-smartfactory
-./scripts/setup-dev.sh
+bash scripts/setup-dev.sh
 # → http://localhost:8080
 ```
 
