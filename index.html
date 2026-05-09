@@ -537,10 +537,22 @@ function qrImageFormula(cellRef) {
 const Auth = {
   _tokenExpiry: 0,        // 토큰 만료 시각 (ms)
   _refreshTimer: null,    // 자동 갱신 타이머
+  _silentRefreshing: false,  // 동시 갱신 방지
 
   init() {
-    // Check for token in URL hash (OAuth redirect)
+    // 0. silent refresh 응답 처리 (prompt=none 의 error= 케이스)
     const hash = window.location.hash;
+    if (hash && hash.includes('error=')) {
+      const params = new URLSearchParams(hash.substring(1));
+      const err = params.get('error');
+      console.warn(`[Auth] OAuth error response: ${err}`);
+      sessionStorage.removeItem('mt_silent_refresh');
+      window.location.hash = '';
+      // login_required / interaction_required → 정상 로그인 화면으로
+      // 다른 에러 → 동일하게 false 반환 (login 화면 노출)
+      return false;
+    }
+    // 1. URL hash 의 access_token (정상 로그인 / silent refresh 성공)
     if (hash && hash.includes('access_token')) {
       const params = new URLSearchParams(hash.substring(1));
       State.token = params.get('access_token');
@@ -548,19 +560,25 @@ const Auth = {
       this._tokenExpiry = Date.now() + expiresIn * 1000;
       localStorage.setItem('mt_token', State.token);
       localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
+      sessionStorage.removeItem('mt_silent_refresh');
       window.location.hash = '';
       this._scheduleRefresh(expiresIn);
       this.loadUserInfo();
       return true;
     }
-    // Check localStorage
+    // 2. localStorage 복원
     const saved = localStorage.getItem('mt_token');
     if (saved) {
       State.token = saved;
       this._tokenExpiry = parseInt(localStorage.getItem('mt_token_expiry')) || 0;
-      // 남은 시간 계산 후 갱신 스케줄
       const remaining = Math.max(0, Math.floor((this._tokenExpiry - Date.now()) / 1000));
-      if (remaining > 60) {
+      // 토큰이 만료됐거나 1분 미만이면 silent refresh 시도
+      if (remaining < 60) {
+        console.log(`[Auth] Token expired/expiring (${remaining}s left), attempting silent refresh on init`);
+        // 동기적으로는 결과 알 수 없음 → 일단 true 반환하고 백그라운드 갱신
+        // iframe + 5초 후 full-page 폴백
+        this._silentRefreshOrFullPage();
+      } else {
         this._scheduleRefresh(remaining);
       }
       return true;
@@ -568,17 +586,39 @@ const Auth = {
     return false;
   },
 
-  // 토큰 만료 5분 전에 자동 갱신 (silent refresh via hidden iframe)
+  // 토큰 만료 10분 전에 자동 갱신 (5분 → 10분 으로 마진 확대)
   _scheduleRefresh(expiresInSec) {
     if (this._refreshTimer) clearTimeout(this._refreshTimer);
-    // 만료 5분 전 또는 최소 30초 후에 갱신
-    const refreshIn = Math.max(30, expiresInSec - 300) * 1000;
+    const refreshIn = Math.max(30, expiresInSec - 600) * 1000;
     this._refreshTimer = setTimeout(() => this._silentRefresh(), refreshIn);
-    console.log(`Token refresh scheduled in ${Math.round(refreshIn/1000)}s`);
+    console.log(`[Auth] Token refresh scheduled in ${Math.round(refreshIn/1000)}s`);
   },
 
-  _silentRefresh() {
-    // 숨겨진 iframe으로 토큰 자동 갱신 (prompt=none)
+  // iframe silent refresh — 동기 호출 가능, 실패 시 full-page 로 폴백
+  _silentRefreshOrFullPage() {
+    if (this._silentRefreshing) return;
+    this._silentRefreshing = true;
+    let resolved = false;
+
+    const onSuccess = () => { resolved = true; this._silentRefreshing = false; };
+
+    // 1차: iframe 시도
+    this._silentRefresh(() => {
+      onSuccess();
+      // 갱신 성공 → API 자연스럽게 동작
+    });
+
+    // 2차: 5초 후에도 갱신 안 됐으면 full-page redirect (UX 잠깐 깜박임)
+    setTimeout(() => {
+      if (!resolved && !this.isTokenFresh()) {
+        console.warn('[Auth] iframe silent refresh failed, falling back to full-page prompt=none');
+        this._silentRefreshing = false;
+        this._fullPageSilentRefresh();
+      }
+    }, 5000);
+  },
+
+  _silentRefresh(onSuccess) {
     let redirect = window.location.origin + window.location.pathname;
     redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
     const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=none`;
@@ -605,23 +645,50 @@ const Auth = {
           localStorage.setItem('mt_token', State.token);
           localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
           this._scheduleRefresh(expiresIn);
-          console.log('Token silently refreshed');
+          console.log('[Auth] Token silently refreshed (iframe)');
+          if (onSuccess) onSuccess();
         }
       } catch (e) {
-        // cross-origin 차단 — 팝업 방식 폴백
-        console.warn('Silent refresh blocked, will prompt on next 401');
+        console.warn('[Auth] Silent refresh iframe blocked (cross-origin), full-page fallback may run');
       }
       cleanup();
     };
-
-    // 10초 타임아웃
     setTimeout(cleanup, 10000);
     document.body.appendChild(iframe);
   },
 
-  // 토큰 유효 여부 빠른 체크 (API 호출 없이)
+  // full-page redirect — iframe 차단 환경에서도 동작. 성공 시 hash 에 토큰 들어와 재진입
+  _fullPageSilentRefresh() {
+    // 무한 루프 방지: 1분 내 2회 이상 시도하면 정상 로그인으로
+    const lastAttempt = parseInt(sessionStorage.getItem('mt_silent_refresh_ts')) || 0;
+    const now = Date.now();
+    if (now - lastAttempt < 60000) {
+      console.warn('[Auth] silent refresh loop detected, falling back to login');
+      sessionStorage.removeItem('mt_silent_refresh');
+      sessionStorage.removeItem('mt_silent_refresh_ts');
+      this.logout();
+      return;
+    }
+    sessionStorage.setItem('mt_silent_refresh', '1');
+    sessionStorage.setItem('mt_silent_refresh_ts', String(now));
+    let redirect = window.location.origin + window.location.pathname;
+    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=none`;
+    window.location.href = url;
+  },
+
+  // 외부에서 호출 가능한 갱신 진입점 (401 핸들러용)
+  async tryRefreshToken() {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => { if (done) return; done = true; resolve(ok); };
+      this._silentRefresh(() => finish(true));
+      setTimeout(() => finish(this.isTokenFresh()), 4000);
+    });
+  },
+
   isTokenFresh() {
-    return this._tokenExpiry > Date.now() + 60000; // 1분 이상 남았으면 유효
+    return this._tokenExpiry > Date.now() + 60000;
   },
 
   login() {
@@ -733,9 +800,17 @@ const SheetsAPI = {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const res = await fetch(url, { ...opts, headers: { ...this.headers(), ...(opts.headers || {}) } });
-        // 401: 토큰 만료 → 재로그인
+        // 401: 토큰 만료 → silent refresh 1회 시도 후 재시도, 그래도 실패면 재로그인
         if (res.status === 401) {
-          toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+          if (attempt === 0) {
+            console.log('[SheetsAPI] 401 받음 — silent refresh 1회 시도');
+            const refreshed = await Auth.tryRefreshToken();
+            if (refreshed && Auth.isTokenFresh()) {
+              console.log('[SheetsAPI] 토큰 갱신 성공 — 요청 재시도');
+              continue;  // 갱신된 토큰으로 재시도
+            }
+          }
+          toast('세션 갱신 실패 — 다시 로그인합니다', 'warn', 3000);
           localStorage.removeItem('mt_token');
           setTimeout(() => Auth.login(), 1500);
           throw new Error('토큰 만료 — 재로그인 필요');
