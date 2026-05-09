@@ -2358,8 +2358,10 @@ async function renderInventoryContent(activeTab) {
           const mfgDate = (l[5] || '').substring(0,10);
           const expDate = (l[6] || '').substring(0,10);
           // 출하가능 개별 수 — '출하가능' 상태인 항목만 카운트 (LOT 단위 일괄 출하 후보)
+          // LOT 상태 검사는 완화: 개별이 출하가능이면 LOT 상태 무관히 출하 가능
+          // (LOT 상태가 '냉동보관중' 으로 뒤늦게 갱신 안 된 경우도 처리)
           const shippableCount = fgIndivs.filter(iv => iv[1] === lotId && iv[3] === '출하가능').length;
-          const canShipAll = status === '출하가능' && shippableCount > 0;
+          const canShipAll = shippableCount > 0;
           html += `
             <div class="card bl-${stColor} clickable" style="margin-bottom:6px" onclick="showLotIndividuals('${lotId}','${g.name}','fg')">
               <div class="lot-card-header mb-4">
@@ -2506,7 +2508,7 @@ Screens['lot-detail'] = async (params = {}) => {
           const totalIndivs = lotIndivs.length;
           const stColor = status === '출하가능' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
           const canPrint = activeIndivs.length > 0;
-          const canShipAll = status === '출하가능' && shippableIndivs.length > 0;
+          const canShipAll = shippableIndivs.length > 0;  // LOT 상태 검사 완화 — 개별이 출하가능이면 충분
           return `
             <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','fg')">
               <div class="lot-card-header mb-4">
