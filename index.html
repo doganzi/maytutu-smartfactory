@@ -3128,7 +3128,7 @@ Screens.more = () => {
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
     { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
     { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
-    { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },
+    // { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },  // 임시 비활성 — 등록 어려움
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
     { icon: '⚙️', label: '설정', desc: '계정, 앱 설정, 로그아웃', target: 'settings' },
@@ -9002,70 +9002,64 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
 }
 
 // ─── 출하 처리 (스캔 후) ───
-// ── 출하 거래처 선택 팝업 ──
+// ── 출하 확인 팝업 — 거래처 미선택. 출하 메모(자유입력)만 받음 ──
 async function showShipmentPopup(indivId, lotId, itemName) {
-  let vendors = [];
-  try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
-  const customerVendors = vendors.filter(v => (v[2]||'') === '고객' || (v[2]||'') === '');
-
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
   overlay.innerHTML = `
-    <div class="dialog" style="max-width:360px;max-height:80vh;overflow-y:auto">
-      <div class="fs-16 fw-7 mb-8">출하 처리</div>
+    <div class="dialog" style="max-width:360px">
+      <div class="fs-16 fw-7 mb-8">🚚 출하 처리</div>
       <div class="fs-12 c-txt-l mb-12">${indivId}<br>${itemName}</div>
-      <div class="fs-13 fw-6 mb-8">거래처 선택</div>
-      ${customerVendors.length === 0 ?
-        '<div class="fs-12 c-txt-l mb-8">등록된 거래처가 없습니다. Google Sheets에서 거래처를 추가하세요.</div>' :
-        customerVendors.map(v => `
-          <div class="card clickable" style="padding:10px;margin-bottom:6px;border:1.5px solid var(--gray-l)" onclick="executeShipment('${indivId}','${lotId}','${itemName}','${(v[1]||'').replace(/'/g,"\\'")}','${v[0]}');this.closest('.dialog-overlay').remove()">
-            <div class="fs-13 fw-6">${v[1] || ''} <span class="fs-11 c-txt-l">${v[0]}</span></div>
-            ${v[3] ? `<div class="fs-11 c-txt-l">${v[3]}</div>` : ''}
-          </div>
-        `).join('')
-      }
-      <div class="row mt-12" style="gap:8px">
-        <button class="btn btn-outline btn-gray flex-1" onclick="this.closest('.dialog-overlay').remove()">취소</button>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>출하 메모 (선택)</label>
+        <input type="text" id="ship-note" placeholder="예: 직접 출하 / 거래처명 / 기타" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="ship-cancel">취소</button>
+        <button class="btn btn-sm btn-suc" id="ship-ok">출하 진행</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+  overlay.querySelector('#ship-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#ship-ok').onclick = () => {
+    const note = overlay.querySelector('#ship-note').value?.trim() || '직접 출하';
+    overlay.remove();
+    executeShipment(indivId, lotId, itemName, note, '');
+  };
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
 
-/* ─── LOT 전체 출하 팝업 — 거래처 선택 후 모든 '출하가능' 개별 일괄 출하 ───
-   기존 showShipmentPopup 의 LOT 단위 변형. */
+/* ─── LOT 전체 출하 팝업 — 거래처 미선택. 출하 메모(자유입력)만 받음. ─── */
 async function showLotShipmentPopup(lotId, itemName, expectedCount) {
-  let vendors = [];
-  try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
-  const customerVendors = vendors.filter(v => (v[2]||'') === '고객' || (v[2]||'') === '');
-
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
   overlay.innerHTML = `
-    <div class="dialog" style="max-width:380px;max-height:80vh;overflow-y:auto">
+    <div class="dialog" style="max-width:380px">
       <div class="fs-16 fw-7 mb-8">🚚 LOT 전체 출하</div>
       <div class="fs-12 c-txt-l mb-4">${lotId}<br>${itemName}</div>
       <div class="card bl-warn" style="background:#fff8e1;padding:8px 10px;margin-bottom:12px">
         <div class="fs-12 fw-6">예상 출하 ${expectedCount}개 (개별 '출하가능' 항목 모두)</div>
-        <div class="fs-11 c-txt-l">상태 '냉동보관중' 등은 제외 · 거래처 선택 후 일괄 처리</div>
+        <div class="fs-11 c-txt-l">상태 '냉동보관중' 등은 제외 · 메모 입력 후 일괄 처리</div>
       </div>
-      <div class="fs-13 fw-6 mb-8">거래처 선택</div>
-      ${customerVendors.length === 0 ?
-        '<div class="fs-12 c-txt-l mb-8">등록된 거래처가 없습니다. Google Sheets에서 거래처를 추가하세요.</div>' :
-        customerVendors.map(v => `
-          <div class="card clickable" style="padding:10px;margin-bottom:6px;border:1.5px solid var(--gray-l)" onclick="executeLotShipment('${lotId}','${(itemName||'').replace(/'/g,"\\'")}','${(v[1]||'').replace(/'/g,"\\'")}','${v[0]}');this.closest('.dialog-overlay').remove()">
-            <div class="fs-13 fw-6">${v[1] || ''} <span class="fs-11 c-txt-l">${v[0]}</span></div>
-            ${v[3] ? `<div class="fs-11 c-txt-l">${v[3]}</div>` : ''}
-          </div>
-        `).join('')
-      }
-      <div class="d-actions mt-8">
-        <button class="btn btn-sm btn-outline btn-gray" onclick="this.closest('.dialog-overlay').remove()">취소</button>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>출하 메모 (선택)</label>
+        <input type="text" id="lot-ship-note" placeholder="예: 직접 출하 / 거래처명 / 기타" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="lot-ship-cancel">취소</button>
+        <button class="btn btn-sm btn-suc" id="lot-ship-ok">전체 출하 진행</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+  overlay.querySelector('#lot-ship-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#lot-ship-ok').onclick = () => {
+    const note = overlay.querySelector('#lot-ship-note').value?.trim() || '직접 출하';
+    overlay.remove();
+    executeLotShipment(lotId, itemName, note, '');
+  };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
 
 /* LOT 전체 출하 실행 — 모든 '출하가능' 개별을 출하완료로 일괄 갱신.
