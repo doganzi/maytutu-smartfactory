@@ -1038,7 +1038,7 @@ const Router = {
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
-      'data-audit': 'more',
+      'data-audit': 'more', 'wo-pdfs': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -3146,6 +3146,7 @@ Screens.more = () => {
     { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
     // { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },  // 임시 비활성 — 등록 어려움
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
+    { icon: '📄', label: '작업지시서 PDF', desc: '저장된 HACCP 생산기록 PDF 모음', target: 'wo-pdfs' },
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
     { icon: '⚙️', label: '설정', desc: '계정, 앱 설정, 로그아웃', target: 'settings' },
   ];
@@ -4477,6 +4478,87 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
 }
 
 // ─── BOM 계산기 (배치 사이징 + 자재 필요량 + 재고 비교) ───
+/* 작업지시서 PDF 모음 — wo[19] (pdfUrl) 가 채워진 모든 WO 를 카드 리스트로 표시 */
+Screens['wo-pdfs'] = async () => {
+  renderHeader('작업지시서 PDF', '저장된 HACCP 생산기록', { back: 'more' });
+  showLoading();
+  try {
+    SheetsAPI.invalidateCache('작업지시서');
+    const wos = await SheetsAPI.getAll('작업지시서', false).catch(() => []);
+    const isAdmin = State.user?.role === 'admin';
+    const myEmail = State.user?.email;
+    // PDF 가 있는 WO 만 + 본인 작업 또는 관리자
+    let pdfWos = wos.filter(w => w[19] && (w[19]+'').trim() && w[12] !== '삭제'
+                              && (isAdmin || w[8] === myEmail));
+    // 정렬: 승인시각 wo[16] desc, fallback 완료시각 wo[10]
+    pdfWos.sort((a, b) => {
+      const da = new Date(a[16] || a[10] || a[9] || 0).getTime();
+      const db = new Date(b[16] || b[10] || b[9] || 0).getTime();
+      return db - da;
+    });
+
+    // 상태 카운트
+    const statusCount = {};
+    pdfWos.forEach(w => { const s = w[12]||'미지정'; statusCount[s] = (statusCount[s]||0)+1; });
+    const curFilter = window._pdfFilter || '전체';
+    const filtered = curFilter === '전체' ? pdfWos : pdfWos.filter(w => w[12] === curFilter);
+    const statusBadgeMap = { '진행중':'info','승인대기':'warn','냉동보관중':'warn','출하가능':'suc','출하완료':'suc','승인완료':'suc' };
+    const statusOrder = ['출하완료','출하가능','승인완료','냉동보관중','승인대기','진행중'];
+    const filterStatuses = statusOrder.filter(s => statusCount[s]);
+
+    $id('content').innerHTML = `
+      <div style="padding:16px">
+        <div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:12px">
+          <div class="fs-13 fw-7 c-info mb-4">📄 ${pdfWos.length}건 PDF 저장됨</div>
+          <div class="fs-11 c-txt-l">${isAdmin ? '관리자 — 전체 작업지시서' : '본인이 작업한 건만 표시'} · 최신순</div>
+        </div>
+
+        ${filterStatuses.length > 1 ? `
+          <div class="row mb-12" style="gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm ${curFilter==='전체'?'btn-pri':'btn-outline btn-gray'}" onclick="window._pdfFilter='전체';Screens['wo-pdfs']()">전체 (${pdfWos.length})</button>
+            ${filterStatuses.map(s => `
+              <button class="btn btn-sm ${curFilter===s?'btn-pri':'btn-outline btn-gray'}" onclick="window._pdfFilter='${s}';Screens['wo-pdfs']()">${s} (${statusCount[s]})</button>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${filtered.length === 0 ?
+          `<div class="empty-state"><div class="es-icon">📄</div><div class="es-title">저장된 PDF 없음</div><div class="es-desc">${pdfWos.length === 0 ? '출하 승인 시 PDF가 자동 생성됩니다' : '선택한 상태의 PDF가 없습니다'}</div></div>` :
+          filtered.map(wo => {
+            const woId = wo[0]||'';
+            const status = wo[12]||'';
+            const stColor = statusBadgeMap[status] || 'gray';
+            const startDt = (wo[9]||'').substring(0,16);
+            const endDt = (wo[10]||'').substring(0,16);
+            const apprDt = (wo[16]||'').substring(0,16);
+            const fgLot = wo[14]||'';
+            const pdfUrl = wo[19]||'';
+            return `
+              <div class="card bl-${stColor}">
+                <div class="row between mb-4">
+                  <span class="fs-13 fw-7">${wo[4]||''} ${wo[5]||''}kg <span class="fs-11 c-txt-l">/ ${wo[7]||'-'}봉</span></span>
+                  <span class="badge badge-${stColor}">${status}</span>
+                </div>
+                <div class="fs-11 c-txt-l">${woId}${fgLot ? ` · FG ${fgLot}` : ''}</div>
+                <div class="fs-11 c-txt-l">${wo[8]||''} · 시작 ${startDt}${endDt ? ` · 완료 ${endDt}` : ''}</div>
+                ${apprDt ? `<div class="fs-11 c-txt-l">승인: ${apprDt}${wo[15] ? ' · ' + wo[15] : ''}</div>` : ''}
+                <div class="row mt-8" style="gap:6px">
+                  <a href="${pdfUrl}" target="_blank" rel="noopener" class="btn btn-pri btn-sm" style="flex:1;text-align:center;text-decoration:none">📄 PDF 열기</a>
+                  <button class="btn btn-outline btn-sm btn-gray" onclick="Router.go('wo-detail',{woId:'${woId}'})" style="flex:1">상세</button>
+                </div>
+              </div>
+            `;
+          }).join('')
+        }
+      </div>
+    `;
+    hideLoading();
+  } catch (e) {
+    hideLoading();
+    toast('로드 실패: ' + e.message, 'err');
+  }
+};
+
 Screens['bom-calc'] = async () => {
   renderHeader('BOM 계산기', '봉수/kg 입력 → 자재 필요량 자동 계산', { back: 'more' });
   showLoading();
