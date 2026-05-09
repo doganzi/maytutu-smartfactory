@@ -1159,6 +1159,14 @@ const LiveSync = {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
     }
+    // 모달 다이얼로그 오픈 중이면 자동 트리거 시 스킵 — 모달 사라짐/페이지 튕김 방지
+    if (trigger !== 'manual') {
+      const openDialog = document.querySelector('.dialog-overlay:not(.hidden)');
+      if (openDialog) {
+        console.log(`[LiveSync] 모달 오픈 중 — ${trigger} 스킵 (모달 보존)`);
+        return;
+      }
+    }
     // 활성 입력 요소가 있으면 자동 트리거 시 스킵 (보편적 안전망)
     if (trigger !== 'manual') {
       const ae = document.activeElement;
@@ -4937,9 +4945,10 @@ Screens['items-rm'] = async () => {
   hideLoading();
   items = items.filter(i => i[12] !== '비활성');
 
+  const isAdmin = State.user?.role === 'admin';
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 품목 · DB 연동 조회</div>
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 품목 · DB 연동 조회${isAdmin ? ' · 관리자: 우측 🗑 버튼으로 비활성화 가능' : ''}</div>
       ${items.length === 0 ?
         `<div class="empty-state"><div class="es-icon">📦</div><div class="es-title">등록된 원재료 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
         items.map(item => {
@@ -4954,16 +4963,20 @@ Screens['items-rm'] = async () => {
             lots.filter(l => l[1] === code && !['폐기','소진','입고취소'].includes(l[9]))
               .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
           const rmNeedsOrder = !isWater && rpVal > 0 && totalRemain <= rpVal;
+          const lotCount = lots.filter(l => l[1] === code).length;
           return `
             <div class="card" ${rmNeedsOrder ? 'style="border-left:3px solid var(--warn)"' : ''}>
               <div class="row between mb-4">
                 <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
-                ${isWater ? '<span class="badge badge-info">수돗물</span>' :
-                  rmNeedsOrder ? '<span class="badge badge-warn">발주필요</span>' : '<span class="badge badge-suc">정상</span>'}
+                <div class="row" style="gap:6px;align-items:center">
+                  ${isWater ? '<span class="badge badge-info">수돗물</span>' :
+                    rmNeedsOrder ? '<span class="badge badge-warn">발주필요</span>' : '<span class="badge badge-suc">정상</span>'}
+                  ${isAdmin && !isWater ? `<button class="btn btn-sm btn-outline btn-err" style="padding:2px 8px;font-size:11px" onclick="deactivateRmItem('${code}','${(name||'').replace(/'/g,"\\'")}', ${lotCount})">🗑</button>` : ''}
+                </div>
               </div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit} · SKU: ${sku || '-'}</div>
               <div class="fs-12 c-txt-l">분류: ${category || '-'} · 보관: ${storage} · 알레르겐: ${allergen || '없음'}</div>
-              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b>${rpVal > 0 ? ` · 발주점: ${rpVal}${unit}` : ''}</div>` : ''}
+              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b>${rpVal > 0 ? ` · 발주점: ${rpVal}${unit}` : ''}${lotCount > 0 ? ` · LOT ${lotCount}건` : ''}</div>` : ''}
               ${!isWater && (leadDays || orderCycle) ? `<div class="fs-11 c-txt-l">리드타임: ${leadDays || '-'}일 · 주문주기: ${orderCycle || '-'}</div>` : ''}
             </div>`;
         }).join('')
@@ -4974,6 +4987,30 @@ Screens['items-rm'] = async () => {
     </div>
   `;
 };
+
+/* 원재료 품목 비활성화 (관리자) — i[12] = '비활성'.
+   삭제가 아닌 soft delete: 시트 row 보존, UI 에서만 숨김.
+   LOT 가 연결된 품목은 경고 표시 후 진행. */
+async function deactivateRmItem(code, name, lotCount) {
+  if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
+  if (code === 'RM002') { toast('물(RM002)은 비활성화 불가', 'err'); return; }
+  const warn = lotCount > 0 ? `\n⚠ 연결된 LOT ${lotCount}건 — 비활성 후에도 LOT 데이터는 유지됩니다.` : '';
+  confirm('원재료 품목 비활성화', `${code} ${name}${warn}\n\n비활성화하시겠습니까?\n(시트 row 는 보존, UI 에서만 숨김)`, async () => {
+    if (!acquireLock('deactivateRmItem')) return;
+    try {
+      showLoading();
+      await SheetsAPI.updateCell('원재료품목', 0, code, 12, '비활성');
+      SheetsAPI.invalidateCache('원재료품목');
+      toast(`${code} 비활성화 완료`, 'suc');
+      await Screens['items-rm']();  // 화면 갱신
+    } catch (e) {
+      toast('비활성화 실패: ' + e.message, 'err');
+    } finally {
+      hideLoading();
+      releaseLock('deactivateRmItem');
+    }
+  });
+}
 
 // ─── FINISHED GOODS ITEMS (완제품 품목) ───
 Screens['items-fg'] = async () => {
