@@ -2357,6 +2357,9 @@ async function renderInventoryContent(activeTab) {
           const totalCount = parseFloat(l[10]) || parseFloat(l[3]) || 0;
           const mfgDate = (l[5] || '').substring(0,10);
           const expDate = (l[6] || '').substring(0,10);
+          // 출하가능 개별 수 — '출하가능' 상태인 항목만 카운트 (LOT 단위 일괄 출하 후보)
+          const shippableCount = fgIndivs.filter(iv => iv[1] === lotId && iv[3] === '출하가능').length;
+          const canShipAll = status === '출하가능' && shippableCount > 0;
           html += `
             <div class="card bl-${stColor} clickable" style="margin-bottom:6px" onclick="showLotIndividuals('${lotId}','${g.name}','fg')">
               <div class="lot-card-header mb-4">
@@ -2369,6 +2372,9 @@ async function renderInventoryContent(activeTab) {
               <div class="fs-12 c-txt-l">재고: ${activeCount}개 / 전체 ${totalCount}개 · 제조: ${mfgDate}</div>
               <div class="fs-11 c-txt-l">소비기한: ${expDate}</div>
               ${totalCount > 0 ? `<div class="progress-bar mt-6"><div class="fill" style="width:${Math.min(100,(activeCount/totalCount)*100)}%;background:var(--${stColor})"></div></div>` : ''}
+              ${canShipAll ? `
+                <button class="btn btn-suc btn-full mt-8" style="padding:8px;font-size:13px" onclick="event.stopPropagation();showLotShipmentPopup('${lotId}','${(g.name||'').replace(/'/g,"\\'")}', ${shippableCount})">🚚 전체 출하 (${shippableCount}개)</button>
+              ` : ''}
               <div id="indiv-list-${lotId.replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
             </div>
           `;
