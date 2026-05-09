@@ -2496,9 +2496,11 @@ Screens['lot-detail'] = async (params = {}) => {
           // 완제품 LOT: 개별 기반 카운트
           const activeStatuses = ['냉동보관중','출하가능'];
           const activeIndivs = lotIndivs.filter(iv => activeStatuses.includes(iv[3]));
+          const shippableIndivs = lotIndivs.filter(iv => iv[3] === '출하가능');
           const totalIndivs = lotIndivs.length;
           const stColor = status === '출하가능' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
           const canPrint = activeIndivs.length > 0;
+          const canShipAll = status === '출하가능' && shippableIndivs.length > 0;
           return `
             <div class="card bl-${stColor}" style="cursor:pointer" onclick="showLotIndividuals('${l[0]}','${itemName}','fg')">
               <div class="lot-card-header mb-4">
@@ -2511,6 +2513,9 @@ Screens['lot-detail'] = async (params = {}) => {
               <div class="fs-12 c-txt-l">재고: ${activeIndivs.length}개 / 전체 ${totalIndivs}개 · 제조: ${(l[5]||'').substring(0,10)}</div>
               <div class="fs-11 c-txt-l">소비기한: ${(l[6]||'').substring(0,10)}</div>
               ${totalIndivs > 0 ? `<div class="progress-bar mt-8"><div class="fill" style="width:${Math.min(100,(activeIndivs.length/totalIndivs)*100)}%;background:var(--${stColor})"></div></div>` : ''}
+              ${canShipAll ? `
+                <button class="btn btn-suc btn-full mt-8" style="padding:8px;font-size:13px" onclick="event.stopPropagation();showLotShipmentPopup('${l[0]}','${(itemName||'').replace(/'/g,"\\'")}', ${shippableIndivs.length})">🚚 전체 출하 (${shippableIndivs.length}개)</button>
+              ` : ''}
               <div id="indiv-list-${l[0].replace(/[^a-zA-Z0-9]/g,'_')}" style="display:none" class="mt-8"></div>
             </div>
           `;
@@ -9026,6 +9031,110 @@ async function showShipmentPopup(indivId, lotId, itemName) {
   `;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+/* ─── LOT 전체 출하 팝업 — 거래처 선택 후 모든 '출하가능' 개별 일괄 출하 ───
+   기존 showShipmentPopup 의 LOT 단위 변형. */
+async function showLotShipmentPopup(lotId, itemName, expectedCount) {
+  let vendors = [];
+  try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
+  const customerVendors = vendors.filter(v => (v[2]||'') === '고객' || (v[2]||'') === '');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px;max-height:80vh;overflow-y:auto">
+      <div class="fs-16 fw-7 mb-8">🚚 LOT 전체 출하</div>
+      <div class="fs-12 c-txt-l mb-4">${lotId}<br>${itemName}</div>
+      <div class="card bl-warn" style="background:#fff8e1;padding:8px 10px;margin-bottom:12px">
+        <div class="fs-12 fw-6">예상 출하 ${expectedCount}개 (개별 '출하가능' 항목 모두)</div>
+        <div class="fs-11 c-txt-l">상태 '냉동보관중' 등은 제외 · 거래처 선택 후 일괄 처리</div>
+      </div>
+      <div class="fs-13 fw-6 mb-8">거래처 선택</div>
+      ${customerVendors.length === 0 ?
+        '<div class="fs-12 c-txt-l mb-8">등록된 거래처가 없습니다. Google Sheets에서 거래처를 추가하세요.</div>' :
+        customerVendors.map(v => `
+          <div class="card clickable" style="padding:10px;margin-bottom:6px;border:1.5px solid var(--gray-l)" onclick="executeLotShipment('${lotId}','${(itemName||'').replace(/'/g,"\\'")}','${(v[1]||'').replace(/'/g,"\\'")}','${v[0]}');this.closest('.dialog-overlay').remove()">
+            <div class="fs-13 fw-6">${v[1] || ''} <span class="fs-11 c-txt-l">${v[0]}</span></div>
+            ${v[3] ? `<div class="fs-11 c-txt-l">${v[3]}</div>` : ''}
+          </div>
+        `).join('')
+      }
+      <div class="d-actions mt-8">
+        <button class="btn btn-sm btn-outline btn-gray" onclick="this.closest('.dialog-overlay').remove()">취소</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+/* LOT 전체 출하 실행 — 모든 '출하가능' 개별을 출하완료로 일괄 갱신.
+   각 개별별 출하기록 행 + 상태 변경 + LOT 잔량/상태 업데이트 + WO 출하완료 전환. */
+async function executeLotShipment(lotId, itemName, customerName, customerCode) {
+  if (!acquireLock('executeLotShipment')) return;
+  try {
+    showLoading();
+    SheetsAPI.invalidateCache('완제품개별');
+    SheetsAPI.invalidateCache('완제품LOT');
+    const allIndivs = await SheetsAPI.getAll('완제품개별', false);
+    const targetIndivs = allIndivs.filter(iv => iv[1] === lotId && iv[3] === '출하가능');
+    if (targetIndivs.length === 0) {
+      toast(`${lotId}: 출하가능 상태인 개별이 없습니다`, 'err');
+      return;
+    }
+    const shipTime = formatDateTime();
+    const shipperEmail = State.user?.email || '';
+
+    // 1. 출하기록 일괄 append + 각 개별 행 인덱스 수집
+    const shipRows = [];
+    const indivUpdates = [];
+    for (const iv of targetIndivs) {
+      const shipId = await generateSeqId('SHP', '출하기록');
+      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail]);
+      const idx = await SheetsAPI.findRowIndex('완제품개별', 0, iv[0]);
+      if (idx > 0) {
+        indivUpdates.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
+        indivUpdates.push({ range: `완제품개별!E${idx}`, values: [[shipTime]] });
+        indivUpdates.push({ range: `완제품개별!F${idx}`, values: [[shipperEmail]] });
+      }
+    }
+    // 출하기록 한꺼번에 append
+    if (shipRows.length > 0) await SheetsAPI.append('출하기록', shipRows);
+    // 개별 상태 batchUpdate
+    if (indivUpdates.length > 0) await SheetsAPI.batchUpdate(indivUpdates);
+
+    // 2. LOT 잔량/상태 갱신
+    SheetsAPI.invalidateCache('완제품개별');
+    const refreshed = await SheetsAPI.getAll('완제품개별', false);
+    const lotIndivs = refreshed.filter(iv => iv[1] === lotId);
+    const remainCount = lotIndivs.filter(iv => !['출하완료','폐기','입고취소','삭제'].includes(iv[3])).length;
+    const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+    if (lotIdx > 0) {
+      const lotBatch = [{ range: `완제품LOT!I${lotIdx}`, values: [[String(remainCount)]] }];
+      if (remainCount === 0) lotBatch.push({ range: `완제품LOT!J${lotIdx}`, values: [['출하완료']] });
+      await SheetsAPI.batchUpdate(lotBatch);
+    }
+
+    // 3. WO 출하완료 전환 (LOT 전체 소진 시)
+    if (remainCount === 0) {
+      try {
+        const wos = await SheetsAPI.getAll('작업지시서');
+        const wo = wos.find(w => w[14] === lotId && (w[12] === '출하가능' || w[12] === '냉동보관중'));
+        if (wo) await SheetsAPI.updateCell('작업지시서', 0, wo[0], 12, '출하완료');
+      } catch (e) { console.warn('WO 상태 전환 실패:', e); }
+    }
+
+    SheetsAPI.invalidateCache('완제품LOT');
+    SheetsAPI.invalidateCache('완제품개별');
+    toast(`${lotId} 전체 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
+    setTimeout(() => Router.go('inventory'), 1200);
+  } catch (e) {
+    toast('전체 출하 실패: ' + e.message, 'err', 5000);
+    console.error('[executeLotShipment]', e);
+  } finally {
+    hideLoading();
+    releaseLock('executeLotShipment');
+  }
 }
 
 async function executeShipment(indivId, lotId, itemName, customerName, customerCode) {
