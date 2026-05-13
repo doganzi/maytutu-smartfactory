@@ -4261,6 +4261,7 @@ async function runDataAudit() {
       auditRmLotRemain(rmLots, rmIndivs),
       auditRmLotCanceled(rmLots, rmIndivs),
       auditFgLotRemain(fgLots, fgIndivs),
+      auditFgLotPackCount(fgLots, fgIndivs),
       auditDuplicateLotIds(rmLots, fgLots, rmIndivs, fgIndivs, wos),
       auditDuplicateIndivIds(rmIndivs, fgIndivs),
       auditStaleReserved(fgLots, wos),
@@ -4437,6 +4438,30 @@ function auditFgLotRemain(fgLots, fgIndivs) {
     }
   }
   return { name: '완제품 LOT 잔량 정합성', desc: 'remainQty = 활성(냉동보관중+출하가능) 개별 수', issues };
+}
+
+/* FG LOT packCount(col 10) vs 실제 개별 row 수 검사
+   상단 요약(재고 메인)에서 'l[10]' 을 사용하는 반면, LOT 상세는 실제 row 수를 카운트.
+   두 값이 다르면 표시 불일치 발생. autoFix 는 col 10 을 실제 개수로 갱신. */
+function auditFgLotPackCount(fgLots, fgIndivs) {
+  const issues = [];
+  for (const lot of fgLots) {
+    const lotId = lot[0];
+    const status = lot[9]||'';
+    if (['삭제','채번예약'].includes(status)) continue;
+    const dbPackCount = parseInt(lot[10])||0;
+    const actual = fgIndivs.filter(iv => iv[1] === lotId).length;
+    if (dbPackCount !== actual && actual > 0) {
+      issues.push({
+        id: lotId,
+        message: `packCount(col 10) ${dbPackCount}개 → 실제 개별 row ${actual}개 (상단 요약과 상세가 다르게 보임)`,
+        autoFix: async () => {
+          await SheetsAPI.updateRow('완제품LOT', 0, lotId, { 10: actual });
+        }
+      });
+    }
+  }
+  return { name: '완제품 LOT packCount 정합성', desc: 'lot[10] = 실제 개별 row 수 (재고 메인 상단 요약 ↔ 상세 일치)', issues };
 }
 
 function auditWoFgLotLink(wos, fgLots) {
