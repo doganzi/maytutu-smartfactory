@@ -4688,7 +4688,8 @@ function auditStaleReserved(fgLots, wos) {
   return { name: '채번예약 placeholder 잔여', desc: 'atomic claim 후 거부/삭제로 정리 안 된 placeholder', issues };
 }
 
-/* 중복 개별 ID 검사 */
+/* 중복 개별 ID 검사 — autoFix: 첫 발생 유지(출하기록 보존), 후순 발생을 새 일련번호로 renumber.
+   같은 lotId 의 max(suffix seq) 찾아 그 다음 번호부터 부여. lotId 는 그대로. */
 function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
   const issues = [];
   const groups = [
@@ -4706,11 +4707,79 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
       if (count < 2) continue;
       issues.push({
         id,
-        message: `${g.tab} 시트에 동일 개별 ID 가 ${count}건 — 시트에서 직접 정리 필요`
+        message: `${g.tab} 시트에 동일 개별 ID 가 ${count}건 — 첫 발생 유지, 후순 발생은 새 번호로 renumber 가능`,
+        autoFix: g.tab === '완제품개별' ? async () => { await autoFixDupFgIndivIds(); } : undefined
       });
     }
   }
-  return { name: '중복 개별 ID', desc: '동일 indivId 가 시트에 다중 row — 수동 정리', issues };
+  return { name: '중복 개별 ID', desc: '동일 indivId 가 시트에 다중 row — 🔧 수정 시 일괄 renumber', issues };
+}
+
+/* 완제품개별 중복 indivId 일괄 정리:
+   - 시트 행 인덱스 보존하여 같은 indivId 그룹 찾기
+   - 첫 발생 유지 (출하기록 등 외부 참조 보존)
+   - 두 번째 이후는 같은 LOT 의 max(suffix) + 1, +2 ... 로 renumber
+   - lotId 는 그대로 (개별 분리만, LOT 분리는 별도) */
+async function autoFixDupFgIndivIds() {
+  SheetsAPI.invalidateCache('완제품개별');
+  const allIndivs = await SheetsAPI.getAll('완제품개별', false);
+
+  // 행 인덱스 보존 + 같은 indivId 그룹화
+  const byId = new Map();
+  allIndivs.forEach((row, i) => {
+    const id = row[0];
+    if (!id) return;
+    const arr = byId.get(id) || [];
+    arr.push({ row, sheetRowIdx: i + 1 });
+    byId.set(id, arr);
+  });
+
+  // LOT 별 max seq 계산 (renumber 시 다음 번호 부여용)
+  const lotMaxSeq = new Map();
+  allIndivs.forEach(iv => {
+    const lotId = iv[1];
+    if (!lotId) return;
+    const m = (iv[0]||'').match(/-(\d+)$/);
+    if (!m) return;
+    const seq = parseInt(m[1]);
+    if (!isNaN(seq)) {
+      const cur = lotMaxSeq.get(lotId) || 0;
+      if (seq > cur) lotMaxSeq.set(lotId, seq);
+    }
+  });
+
+  const updates = [];
+  let renamedCount = 0;
+  for (const [id, group] of byId.entries()) {
+    if (group.length < 2) continue;
+    // group 을 시트 인덱스 순으로 정렬 (낮은 게 먼저)
+    group.sort((a, b) => a.sheetRowIdx - b.sheetRowIdx);
+    // 첫 발생 유지, 두 번째 이후 renumber
+    for (let k = 1; k < group.length; k++) {
+      const { row, sheetRowIdx } = group[k];
+      const lotId = row[1] || '';
+      if (!lotId) continue;
+      let nextSeq = (lotMaxSeq.get(lotId) || 0) + 1;
+      lotMaxSeq.set(lotId, nextSeq);
+      // suffix 자릿수 추정 — 기존 ID 의 마지막 -NN 길이 보존
+      const m = id.match(/-(\d+)$/);
+      const padLen = m ? m[1].length : 2;
+      const newId = `${lotId}-${String(nextSeq).padStart(padLen, '0')}`;
+      updates.push({ range: `완제품개별!A${sheetRowIdx}`, values: [[newId]] });
+      renamedCount++;
+    }
+  }
+
+  if (updates.length === 0) {
+    console.log('[중복개별정리] 변경 사항 없음');
+    return;
+  }
+  // batchUpdate 분할 (200건 단위)
+  for (let i = 0; i < updates.length; i += 200) {
+    await SheetsAPI.batchUpdate(updates.slice(i, i + 200));
+  }
+  SheetsAPI.invalidateCache('완제품개별');
+  console.log(`[중복개별정리] ${renamedCount}건 renumber 완료`);
 }
 
 // ─── BOM 계산기 (배치 사이징 + 자재 필요량 + 재고 비교) ───
@@ -9386,12 +9455,22 @@ async function approveWO(woId) {
       }
 
       // 3. Create FG individual QR records
-      const indivRows = [];
-      for (let i = 1; i <= packCount; i++) {
-        const fgIndivId = `${fgLotId}-${String(i).padStart(2,'0')}`;
-        indivRows.push([fgIndivId, fgLotId, fgItemCode, '출하가능', '', '', qrImageUrl(fgIndivId)]);
+      //    재발 방지: 같은 lotId 의 개별이 이미 있으면 중복 생성 차단 (idempotent)
+      //    원인이 될 수 있는 경로: 더블 클릭 / 네트워크 재시도 / race
+      SheetsAPI.invalidateCache('완제품개별');
+      const existingIndivs = await SheetsAPI.getAll('완제품개별', false);
+      const existingForLot = existingIndivs.filter(iv => iv[1] === fgLotId);
+      if (existingForLot.length > 0) {
+        console.warn(`[승인] FG LOT ${fgLotId} 의 개별 ${existingForLot.length}개 이미 존재 — 중복 생성 차단`);
+        toast(`⚠ 개별 이미 존재 (${existingForLot.length}개) — 중복 생성 차단`, 'warn', 3000);
+      } else {
+        const indivRows = [];
+        for (let i = 1; i <= packCount; i++) {
+          const fgIndivId = `${fgLotId}-${String(i).padStart(2,'0')}`;
+          indivRows.push([fgIndivId, fgLotId, fgItemCode, '출하가능', '', '', qrImageUrl(fgIndivId)]);
+        }
+        await SheetsAPI.append('완제품개별', indivRows);
       }
-      await SheetsAPI.append('완제품개별', indivRows);
 
       toast(`출하승인 완료! ${fgLotId} 완제품 재고 등록 (QR ${packCount}개)`, 'suc', 5000);
 
