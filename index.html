@@ -23,7 +23,8 @@
 }
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { font-size:16px; -webkit-text-size-adjust:100%; -moz-text-size-adjust:100%; text-size-adjust:100%; }
-body { font-family: system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; font-size:1rem; background:var(--bg); color:var(--txt); -webkit-tap-highlight-color:transparent; overflow:hidden; height:100vh; height:100dvh; padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) 0 env(safe-area-inset-left,0); }
+body { font-family: system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; font-size:1rem; background:var(--bg); color:var(--txt); -webkit-tap-highlight-color:transparent; overflow:hidden; height:100vh; height:100dvh; padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) 0 env(safe-area-inset-left,0); overscroll-behavior:contain; overscroll-behavior-y:contain; }
+html { overscroll-behavior:contain; overscroll-behavior-y:contain; }
 input,select,textarea,button { font-family:inherit; font-size:16px; }
 input[type="number"] { -moz-appearance:textfield; }
 input[type="number"]::-webkit-inner-spin-button,
@@ -1297,16 +1298,38 @@ const LiveSync = {
 
 // Router.go에서 마지막 params 저장 (동기화 시 리렌더용)
 // 화면별로 params 분리 보관 — sub-screen 진입 후 다른 화면 잠깐 들렀다 복귀 시 params 유실 방지
+// 추가로 sessionStorage 에 현재 화면+params 기록 → 풀투리프레시·전체 리로드 시 복원 가능.
 const _origRouterGo = Router.go.bind(Router);
 Router.go = function(screen, params = {}) {
   if (!State._screenParams) State._screenParams = {};
   State._screenParams[screen] = params;
   State._lastParams = params;
   if (screen === 'wo-detail' && params.woId) State._woDetailId = params.woId;
+  // 리로드 복원용 — login/qr-scan/wo-execute 등 일부 특수 화면은 제외
+  const noRestoreScreens = ['login', 'qr-scan', 'wo-execute', 'reject-modal'];
+  if (!noRestoreScreens.includes(screen)) {
+    try {
+      sessionStorage.setItem('mt_last_screen', JSON.stringify({ screen, params, ts: Date.now() }));
+    } catch(e) {}
+  }
   _origRouterGo(screen, params);
   // 화면 전환 시 폴링 재시작 (interval 리셋)
   LiveSync.startPoll();
 };
+
+/* 풀투리프레시 / 페이지 리로드 후 마지막 화면 복원 */
+function restoreLastScreen() {
+  try {
+    const raw = sessionStorage.getItem('mt_last_screen');
+    if (!raw) return false;
+    const { screen, params, ts } = JSON.parse(raw);
+    // 30분 이내 기록만 복원 (오래된 건 무시)
+    if (!screen || Date.now() - (ts||0) > 30 * 60 * 1000) return false;
+    console.log(`[Router] 마지막 화면 복원: ${screen}`);
+    Router.go(screen, params || {});
+    return true;
+  } catch(e) { return false; }
+}
 
 /* ═══════════════════════════════════════════════
    BOTTOM NAV RENDERER
@@ -9773,7 +9796,10 @@ async function initApp() {
       return;
     }
 
-    Router.go('dashboard');
+    // 풀투리프레시 / 페이지 리로드 후 마지막 화면 복원 시도, 없으면 dashboard
+    if (!restoreLastScreen()) {
+      Router.go('dashboard');
+    }
 
     // LiveSync 초기화 — PC↔모바일 실시간 동기화
     LiveSync.init();
