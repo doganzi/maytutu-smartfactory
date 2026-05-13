@@ -1146,16 +1146,10 @@ window.addEventListener('popstate', (e) => {
   if (Router._historyStack.length > 0) {
     Router.back();
   } else {
-    // At root (dashboard) — push state again to prevent exit
-    if (State.currentScreen === 'dashboard') {
-      history.pushState({ screen: 'dashboard' }, '', '#dashboard');
-    } else {
-      // Go to dashboard as final fallback
-      Router._isPopping = true;
-      Router.go('dashboard');
-      Router._isPopping = false;
-      history.pushState({ screen: 'dashboard' }, '', '#dashboard');
-    }
+    // 빈 stack: 강제 dashboard 이동 금지 — 현재 화면 유지 + history 만 다시 push
+    // (PWA 백그라운드 복귀 / 카메라 호출 후 등에서 popstate 발생 시 작업 화면 보존)
+    const cur = State.currentScreen || 'dashboard';
+    history.pushState({ screen: cur }, '', '#' + cur);
   }
 });
 
@@ -1275,7 +1269,9 @@ const LiveSync = {
       } else if (screen === 'wo-detail' && State._woDetailId) {
         await Screens['wo-detail']({ woId: State._woDetailId });
       } else if (Screens[screen]) {
-        await Screens[screen](State._lastParams || {});
+        // 화면별 params 우선 사용 — sub-screen 진입 컨텍스트 유실 방지
+        const screenParams = (State._screenParams && State._screenParams[screen]) || State._lastParams || {};
+        await Screens[screen](screenParams);
       }
 
       // 동기화 완료 시각 표시 (토스트는 poll 때만 생략)
@@ -1300,8 +1296,11 @@ const LiveSync = {
 };
 
 // Router.go에서 마지막 params 저장 (동기화 시 리렌더용)
+// 화면별로 params 분리 보관 — sub-screen 진입 후 다른 화면 잠깐 들렀다 복귀 시 params 유실 방지
 const _origRouterGo = Router.go.bind(Router);
 Router.go = function(screen, params = {}) {
+  if (!State._screenParams) State._screenParams = {};
+  State._screenParams[screen] = params;
   State._lastParams = params;
   if (screen === 'wo-detail' && params.woId) State._woDetailId = params.woId;
   _origRouterGo(screen, params);
