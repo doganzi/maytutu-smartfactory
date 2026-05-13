@@ -1113,7 +1113,7 @@ const Router = {
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
-      'data-audit': 'more', 'wo-pdfs': 'more',
+      'data-audit': 'more', 'wo-pdfs': 'more', 'db-browser': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -3214,6 +3214,7 @@ Screens.more = () => {
     { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
     { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
     { icon: '🔍', label: '데이터 정합성 검증', desc: 'LOT·잔량·상태·고아 데이터 진단 (관리자)', target: 'data-audit', adminOnly: true },
+    { icon: '🗄️', label: 'DB 직접 조회·편집', desc: '모든 시트 탭 row 조회 / 셀 편집 / JSON 복사 (관리자)', target: 'db-browser', adminOnly: true },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
@@ -4553,6 +4554,183 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
 }
 
 // ─── BOM 계산기 (배치 사이징 + 자재 필요량 + 재고 비교) ───
+/* DB 직접 조회·편집 (관리자 전용)
+   모든 시트 탭 row 를 표로 조회, 셀 단위 인라인 편집, 전체/선택 row JSON 복사.
+   외부 자격증명 노출 없이 사용자 OAuth 만으로 동작.
+
+   주요 시트 컬럼 헤더 (CLAUDE.md 참조 — 다른 시트는 col0,col1... 로 표시) */
+const DB_SHEETS = {
+  '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
+  '원재료LOT': ['lotId','itemCode','itemName','supplier','qty','unit','mfgDate','expDate','remain','status','indivCount','temp'],
+  '완제품LOT': ['lotId','itemCode','itemName','qty','unit','prodDate','expDate','woId','remain','status','packCount','temp'],
+  '소모품LOT': ['lotId','itemCode','itemName','qty','unit','recvDate','expDate','status'],
+  '원재료개별': ['indivId','lotId','itemCode','status','qty/dt','note','qrUrl'],
+  '완제품개별': ['indivId','lotId','itemCode','status','shipDt','shipperOrNote','qrUrl'],
+  '공정기록': ['woId','stepNo','stepName','stepType','usedLotIds','stepData(JSON)','photoUrls','actualValue','photoUrl','checkResult','recordStatus','completedAt','worker'],
+  'SOP': ['sopId','name','target','version','status','stepCount'],
+  'SOP공정단계': ['sopId','stepNo','stepName','stepType','rmCode','std','checks'],
+  'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
+  '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status'],
+  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status'],
+  '소모품품목': ['code','name','spec','unit','status'],
+  '거래처': ['code','name','type','phone','address'],
+  '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
+  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper'],
+  '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
+  '기기': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
+};
+
+Screens['db-browser'] = async (params = {}) => {
+  if (State.user?.role !== 'admin') {
+    renderHeader('DB 직접 조회·편집', null, { back: 'more' });
+    $id('content').innerHTML = '<div style="padding:16px"><div class="card bl-err"><div class="c-err fw-7">관리자 권한 필요</div></div></div>';
+    return;
+  }
+  const selectedTab = params.tab || State._dbBrowserTab || '작업지시서';
+  State._dbBrowserTab = selectedTab;
+  renderHeader('DB 직접 조회·편집', selectedTab, { back: 'more' });
+
+  showLoading();
+  let rows = [];
+  try {
+    SheetsAPI.invalidateCache(selectedTab);
+    rows = await SheetsAPI.getAll(selectedTab, false).catch(() => []);
+  } catch(e) { console.warn(e); }
+  hideLoading();
+
+  const headers = DB_SHEETS[selectedTab] || (rows[0] || []).map((_, i) => `col${i}`);
+  const filter = (State._dbBrowserFilter || '').toLowerCase();
+  const filtered = filter ? rows.filter(r => (r||[]).some(c => String(c||'').toLowerCase().includes(filter))) : rows;
+  const maxShow = 200;  // 너무 많으면 끊음
+  const showRows = filtered.slice(0, maxShow);
+
+  $id('content').innerHTML = `
+    <div style="padding:12px">
+      <div class="card bl-err" style="background:#fff5f5;padding:8px 10px;margin-bottom:8px">
+        <div class="fs-12 c-err fw-7">⚠ 관리자 권한 — 시트 직접 편집 가능</div>
+        <div class="fs-11 c-txt-l">모든 변경은 즉시 반영되며 되돌릴 수 없습니다. HACCP 추적 영향 가능</div>
+      </div>
+
+      <div class="input-group" style="margin-bottom:8px">
+        <label>시트 선택</label>
+        <select id="db-tab-select" onchange="Router.go('db-browser',{tab:this.value})">
+          ${Object.keys(DB_SHEETS).map(t => `<option value="${t}" ${t===selectedTab?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="input-group" style="margin-bottom:8px">
+        <label>검색 (모든 컬럼 부분일치)</label>
+        <input type="text" id="db-filter" value="${(State._dbBrowserFilter||'').replace(/"/g,'&quot;')}" placeholder="예: FG-002-260422 / WO-2026 / sh_lee" oninput="window._dbDebounce&&clearTimeout(window._dbDebounce);window._dbDebounce=setTimeout(()=>{State._dbBrowserFilter=this.value;Router.go('db-browser',{tab:'${selectedTab}'})},400)">
+      </div>
+
+      <div class="row between mb-8" style="align-items:center">
+        <span class="fs-12 c-txt-l">${rows.length}건 전체 · ${filtered.length}건 필터 · ${showRows.length}건 표시</span>
+        <div class="row" style="gap:6px">
+          <button class="btn btn-sm btn-outline btn-pri" onclick="dbCopyAllJSON('${selectedTab}')">📋 JSON 복사</button>
+          <button class="btn btn-sm btn-outline btn-gray" onclick="Router.go('db-browser',{tab:'${selectedTab}'})">🔄 새로고침</button>
+        </div>
+      </div>
+
+      ${showRows.length === 0 ?
+        '<div class="empty-state"><div class="es-icon">🗄️</div><div class="es-title">표시할 row 없음</div></div>' :
+        showRows.map((row, idx) => `
+          <div class="card" style="padding:10px;margin-bottom:6px">
+            <div class="row between mb-4">
+              <span class="fs-12 fw-7" style="font-family:monospace">[${idx}] ${headers[0]||'id'}: ${row[0]||'-'}</span>
+              <button class="btn btn-sm btn-outline btn-pri" onclick="dbEditRow('${selectedTab}','${(row[0]||'').replace(/'/g,"\\'")}')" style="padding:2px 8px;font-size:11px">✏️ 편집</button>
+            </div>
+            ${headers.map((h, i) => {
+              const v = row[i];
+              if (v === undefined || v === '' || v === null) return '';
+              const display = String(v).length > 80 ? String(v).substring(0,80)+'…' : String(v);
+              return `<div class="fs-11" style="padding:2px 0"><span class="c-txt-l">[${i}] ${h}:</span> <span style="word-break:break-all">${display}</span></div>`;
+            }).join('')}
+          </div>
+        `).join('')}
+      ${filtered.length > maxShow ? `<div class="fs-11 c-warn mt-8">⚠ ${filtered.length - maxShow}건 더 있음 — 검색으로 좁히세요</div>` : ''}
+    </div>
+  `;
+};
+
+/* 시트의 모든 row 를 JSON 으로 클립보드에 복사 (채팅 붙여넣기용) */
+async function dbCopyAllJSON(tab) {
+  try {
+    const rows = await SheetsAPI.getAll(tab, false).catch(() => []);
+    const headers = DB_SHEETS[tab] || (rows[0]||[]).map((_,i) => `col${i}`);
+    const objs = rows.map(r => {
+      const o = {};
+      headers.forEach((h, i) => { if (r[i] !== undefined && r[i] !== '') o[h] = r[i]; });
+      return o;
+    });
+    const text = JSON.stringify({ tab, count: objs.length, rows: objs }, null, 2);
+    await navigator.clipboard.writeText(text);
+    toast(`📋 ${objs.length}건 JSON 복사됨 — 채팅에 붙여넣어 분석 요청 가능`, 'suc', 4000);
+  } catch(e) {
+    toast('복사 실패: ' + e.message, 'err');
+  }
+}
+
+/* row 편집 모달 — 각 컬럼 인라인 편집, 저장 시 SheetsAPI.updateRow */
+async function dbEditRow(tab, idValue) {
+  showLoading();
+  const rows = await SheetsAPI.getAll(tab, false).catch(() => []);
+  const row = rows.find(r => String(r[0]) === String(idValue));
+  hideLoading();
+  if (!row) { toast('row 를 찾을 수 없습니다', 'err'); return; }
+  const headers = DB_SHEETS[tab] || row.map((_,i) => `col${i}`);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:480px;max-height:85vh;overflow-y:auto">
+      <div class="d-title">${tab} 편집</div>
+      <div class="d-msg" style="font-family:monospace">[0] ${headers[0]||'id'}: <b>${row[0]||'-'}</b></div>
+      <div class="card bl-warn" style="background:#fff8e1;padding:8px 10px;margin-bottom:10px">
+        <div class="fs-11 c-txt-l">변경할 필드만 입력. 빈칸 유지하려면 그대로 두세요.</div>
+      </div>
+      <div id="db-edit-fields" style="max-height:50vh;overflow-y:auto">
+        ${headers.map((h, i) => `
+          <div class="input-group" style="margin-bottom:6px">
+            <label style="font-size:11px">[${i}] ${h}</label>
+            <input type="text" data-col="${i}" value="${String(row[i]||'').replace(/"/g,'&quot;')}"
+                   ${i===0?'readonly disabled style="background:var(--gray-l);opacity:0.7"':'style="font-family:monospace;font-size:12px"'}>
+          </div>
+        `).join('')}
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="db-edit-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="db-edit-save">변경사항 저장</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#db-edit-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#db-edit-save').onclick = async () => {
+    const updates = {};
+    overlay.querySelectorAll('input[data-col]').forEach(inp => {
+      const colIdx = parseInt(inp.dataset.col);
+      if (colIdx === 0) return;
+      const newVal = inp.value;
+      const oldVal = String(row[colIdx]||'');
+      if (newVal !== oldVal) updates[colIdx] = newVal;
+    });
+    if (Object.keys(updates).length === 0) { toast('변경사항 없음', 'info'); overlay.remove(); return; }
+    const changeSummary = Object.entries(updates).map(([k,v]) => `[${k}] ${headers[k]||k}: "${String(row[k]||'').substring(0,30)}" → "${String(v).substring(0,30)}"`).join('\n');
+    overlay.remove();
+    confirm('DB 변경 저장', `${tab} / ${idValue}\n\n${changeSummary}\n\n저장하시겠습니까?`, async () => {
+      try {
+        showLoading();
+        await SheetsAPI.updateRow(tab, 0, idValue, updates);
+        SheetsAPI.invalidateCache(tab);
+        toast(`✓ ${Object.keys(updates).length}개 필드 저장됨`, 'suc');
+        Router.go('db-browser', { tab });
+      } catch (e) {
+        toast('저장 실패: ' + e.message, 'err', 4000);
+      } finally { hideLoading(); }
+    });
+  };
+}
+
 /* 작업지시서 PDF 모음 — wo[19] (pdfUrl) 가 채워진 모든 WO 를 카드 리스트로 표시 */
 Screens['wo-pdfs'] = async () => {
   renderHeader('작업지시서 PDF', '저장된 HACCP 생산기록', { back: 'more' });
