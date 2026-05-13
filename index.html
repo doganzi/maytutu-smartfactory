@@ -2747,13 +2747,23 @@ async function showLotIndividuals(lotId, itemName, type) {
           `;
         }).join('')}
         ${shippedIndivs.length > 0 ? `
-          <div class="fs-11 c-txt-l mt-8 mb-4" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">출하완료 ${shippedIndivs.length}건 ▸</div>
-          <div style="display:none;opacity:0.5">
+          <div class="fs-12 fw-6 c-txt-l mt-8 mb-4" style="cursor:pointer;padding:8px 4px;background:var(--bg);border-radius:4px"
+               onclick="const d=this.nextElementSibling;const open=d.style.display!=='none';d.style.display=open?'none':'block';this.querySelector('.ship-arrow').textContent=open?'▸':'▾'">
+            🚚 출하완료 ${shippedIndivs.length}건
+            <span class="ship-arrow" style="float:right">▾</span>
+          </div>
+          <div style="display:block">
             ${shippedIndivs.map(iv => `
-              <div style="padding:4px 0;border-bottom:1px solid var(--bg)">
-                <span class="lot-id" style="font-size:10px;font-weight:600">${iv[0]}</span>
-                <span class="badge badge-gray" style="font-size:9px;padding:1px 6px">출하완료</span>
-                <span class="fs-10 c-txt-l" style="margin-left:4px">${(iv[4]||'').substring(0,16)}</span>
+              <div style="padding:8px 6px;border-bottom:1px solid var(--bg);background:#fafafa">
+                <div class="row between" style="align-items:flex-start;gap:6px">
+                  <div style="flex:1;min-width:0">
+                    <div class="fs-12 fw-6" style="font-family:monospace;word-break:break-all">${iv[0]||''}</div>
+                    <div class="fs-11 c-txt-l mt-2">
+                      📦 ${(iv[4]||'').substring(0,16) || '시각 미기록'}${iv[5] ? ' · ' + (iv[5].split('@')[0]||iv[5]) : ''}
+                    </div>
+                  </div>
+                  <span class="badge badge-gray" style="font-size:10px;padding:2px 6px;flex-shrink:0">출하완료</span>
+                </div>
               </div>
             `).join('')}
           </div>
