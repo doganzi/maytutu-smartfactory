@@ -2623,7 +2623,8 @@ Screens['lot-detail'] = async (params = {}) => {
           const activeStatuses = ['냉동보관중','출하가능'];
           const activeIndivs = lotIndivs.filter(iv => activeStatuses.includes(iv[3]));
           const shippableIndivs = lotIndivs.filter(iv => iv[3] === '출하가능');
-          const totalIndivs = lotIndivs.length;
+          // 전체 카운트는 'soft-deleted' 제외 (HACCP 추적성 유지 + 실제 생산량 반영)
+          const totalIndivs = lotIndivs.filter(iv => iv[3] !== '삭제').length;
           const stColor = status === '출하가능' ? 'suc' : status === '냉동보관중' ? 'warn' : 'gray';
           const canPrint = activeIndivs.length > 0;
           const canShipAll = shippableIndivs.length > 0;  // LOT 상태 검사 완화 — 개별이 출하가능이면 충분
@@ -2738,7 +2739,7 @@ async function showLotIndividuals(lotId, itemName, type) {
     const shippedIndivs = indivs.filter(iv => iv[3] === '출하완료');
     container.innerHTML = `
       <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
-        <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (재고 ${activeIndivs.length}건 / 전체 ${indivs.length}건)</div>
+        <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (재고 ${activeIndivs.length}건 / 전체 ${indivs.filter(iv => iv[3] !== '삭제').length}건)</div>
         ${activeIndivs.map(iv => {
           const st = iv[3] || (isFG ? '냉동보관중' : '미사용');
           const canPrint = ['미사용','사용중','냉동보관중','출하가능'].includes(st);
@@ -4352,9 +4353,10 @@ async function runAuditFixOne(secIdx, issIdx) {
     try {
       showLoading();
       await iss.autoFix();
-      sec.issues.splice(issIdx, 1);  // 수정 완료 항목 제거
-      toast(`수정 완료: ${iss.id}`, 'suc');
-      renderAuditResult();
+      toast(`수정 완료: ${iss.id} — audit 자동 재실행 중...`, 'suc', 2000);
+      // 전역 영향 가능한 autoFix(예: LOT 단위 중복 정리)는 다른 issue 들도 함께 정정됨.
+      // 정확한 현황 반영을 위해 audit 자동 재실행.
+      await runDataAudit();
     } catch (e) {
       toast('수정 실패: ' + e.message, 'err');
     } finally {
@@ -4371,14 +4373,14 @@ async function runAuditAutoFix() {
     try {
       showLoading();
       let okCount = 0, errCount = 0;
-      for (const { iss, sec } of fixable) {
-        try { await iss.autoFix(); okCount++; sec.issues = sec.issues.filter(i => i !== iss); }
+      for (const { iss } of fixable) {
+        try { await iss.autoFix(); okCount++; }
         catch (e) { errCount++; console.error('수정 실패:', iss.id, e); }
       }
-      // 캐시 무효화 후 재진단 권장
       SheetsAPI.invalidateAllCache();
-      toast(`수정 ${okCount}건 완료${errCount?` · 실패 ${errCount}건`:''}`, errCount?'warn':'suc');
-      renderAuditResult();
+      toast(`수정 ${okCount}건 완료${errCount?` · 실패 ${errCount}건`:''} — 재검사 중...`, errCount?'warn':'suc', 2500);
+      // 전역 영향 가능한 autoFix 결과를 정확히 반영하기 위해 audit 자동 재실행
+      await runDataAudit();
     } catch (e) {
       toast('일괄 수정 실패: ' + e.message, 'err');
     } finally {
@@ -4720,12 +4722,16 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
       if (count < 2) continue;
       issues.push({
         id,
-        message: `${g.tab} 시트에 동일 개별 ID 가 ${count}건 — 첫 발생 유지, 후순 발생은 새 번호로 renumber 가능`,
-        autoFix: g.tab === '완제품개별' ? async () => { await autoFixDupFgIndivIds(); } : undefined
+        message: `${g.tab} 시트에 동일 개별 ID 가 ${count}건 — 🔧 수정: 같은 LOT 의 중복 행을 soft-delete (출하기록 보존)`,
+        autoFix: g.tab === '완제품개별' ? async () => {
+          // 중복 indivId 의 lotId 추출 (마지막 -NN 제거) → 해당 LOT 의 중복 일괄 soft-delete
+          const lotId = id.replace(/-\d+$/, '');
+          await autoDeleteDupFgIndivs(lotId);
+        } : undefined
       });
     }
   }
-  return { name: '중복 개별 ID', desc: '동일 indivId 가 시트에 다중 row — 🔧 수정 시 일괄 renumber', issues };
+  return { name: '중복 개별 ID', desc: '동일 indivId 가 시트에 다중 row — 🔧 수정 시 중복 행 soft-delete (\'삭제\') + packCount/잔량 자동 보정', issues };
 }
 
 /* 완제품개별 중복 indivId 일괄 정리:
@@ -4733,6 +4739,80 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
    - 첫 발생 유지 (출하기록 등 외부 참조 보존)
    - 두 번째 이후는 같은 LOT 의 max(suffix) + 1, +2 ... 로 renumber
    - lotId 는 그대로 (개별 분리만, LOT 분리는 별도) */
+
+/* [B안 — 사용자 선호] 중복 개별 row 를 soft-delete.
+   - 같은 LOT 안의 indivId 그룹별로 처리
+   - 출하완료된 행이 있으면 그 행을 유지 (출하기록 보존)
+   - 없으면 시트 첫 발생 row 유지
+   - 나머지는 status='삭제' + 노트로 soft-delete
+   - LOT packCount(col 10) / remain(col 8) 도 실제 비-삭제 / 활성 개수로 자동 보정 */
+async function autoDeleteDupFgIndivs(lotId) {
+  SheetsAPI.invalidateCache('완제품개별');
+  SheetsAPI.invalidateCache('완제품LOT');
+  const allIndivs = await SheetsAPI.getAll('완제품개별', false);
+  // 해당 LOT 의 모든 row + 시트 행 인덱스 보존
+  const lotRows = [];
+  allIndivs.forEach((row, i) => {
+    if (row[1] === lotId) lotRows.push({ row, sheetRowIdx: i + 1 });
+  });
+  if (lotRows.length === 0) {
+    console.log(`[중복삭제] ${lotId}: 개별 없음`);
+    return;
+  }
+  // indivId 별 그룹
+  const byId = new Map();
+  for (const e of lotRows) {
+    const id = e.row[0];
+    if (!id) continue;
+    const arr = byId.get(id) || [];
+    arr.push(e);
+    byId.set(id, arr);
+  }
+  // 중복 그룹 → 삭제할 행 결정
+  const toDelete = [];
+  for (const [id, group] of byId.entries()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => a.sheetRowIdx - b.sheetRowIdx);
+    // 출하완료 행 우선 유지
+    let keepIdx = group.findIndex(g => g.row[3] === '출하완료');
+    if (keepIdx === -1) keepIdx = 0;  // 없으면 첫 발생 유지
+    for (let i = 0; i < group.length; i++) {
+      if (i === keepIdx) continue;
+      toDelete.push({ sheetRowIdx: group[i].sheetRowIdx, oldId: id });
+    }
+  }
+  if (toDelete.length === 0) {
+    console.log(`[중복삭제] ${lotId}: 중복 없음`);
+    return;
+  }
+  // soft-delete via batchUpdate (status='삭제', 일자/노트 기록)
+  const nowStr = formatDateTime();
+  const updates = [];
+  for (const d of toDelete) {
+    updates.push({ range: `완제품개별!D${d.sheetRowIdx}`, values: [['삭제']] });
+    updates.push({ range: `완제품개별!E${d.sheetRowIdx}`, values: [[nowStr]] });
+    updates.push({ range: `완제품개별!F${d.sheetRowIdx}`, values: [[`중복정리:${d.oldId}`]] });
+  }
+  for (let i = 0; i < updates.length; i += 50) {
+    await SheetsAPI.batchUpdate(updates.slice(i, i + 50));
+  }
+  // LOT packCount / remain 자동 보정
+  SheetsAPI.invalidateCache('완제품개별');
+  const refreshed = await SheetsAPI.getAll('완제품개별', false);
+  const lotIndivsAfter = refreshed.filter(iv => iv[1] === lotId && iv[3] !== '삭제');
+  const activeAfter = lotIndivsAfter.filter(iv => ['냉동보관중','출하가능'].includes(iv[3])).length;
+  const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+  if (lotIdx > 0) {
+    await SheetsAPI.batchUpdate([
+      { range: `완제품LOT!I${lotIdx}`, values: [[String(activeAfter)]] },         // col I = remain (col 8)
+      { range: `완제품LOT!K${lotIdx}`, values: [[String(lotIndivsAfter.length)]] }  // col K = packCount (col 10)
+    ]);
+  }
+  SheetsAPI.invalidateCache('완제품LOT');
+  SheetsAPI.invalidateCache('완제품개별');
+  console.log(`[중복삭제] ${lotId}: ${toDelete.length}건 soft-delete · packCount → ${lotIndivsAfter.length} · remain → ${activeAfter}`);
+}
+
 async function autoFixDupFgIndivIds() {
   SheetsAPI.invalidateCache('완제품개별');
   const allIndivs = await SheetsAPI.getAll('완제품개별', false);
