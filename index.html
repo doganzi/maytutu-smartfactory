@@ -4491,17 +4491,112 @@ function auditDuplicateLotIds(rmLots, fgLots, rmIndivs, fgIndivs, wos) {
         return `${i+1}) ${g.woCol?`WO ${wo} · `:''}수량 ${qty} · 잔 ${rem} · 일자 ${date}`;
       }).join('\n');
       const myIndivCount = (g.indivs || []).filter(iv => iv[1] === id).length;
+      const isFG = g.tab === '완제품LOT';
       issues.push({
         id,
-        message: `${g.tab}에 ${arr.length}건 중복 row · 개별 ID ${myIndivCount}건 함께 묶임\n${detail}\n\n수동 정정 (시트 직접 편집):\n1) ${g.tab} 에서 첫 row 외 다른 row 의 ID를 다음 일련번호(예: 끝 -001 → -002)로 변경\n2) ${g.indivTab} 에서 변경한 LOT 소유 개별만 lotId 컬럼을 새 ID로, indivId 도 새 prefix 로 변경\n3) ${g.woCol?'작업지시서의 해당 WO[14] 도 새 ID 로 갱신':'(원재료는 WO 매핑 없음)'}\n4) 캐시 갱신 후 재검사`
+        message: `${g.tab}에 ${arr.length}건 중복 row · 개별 ID ${myIndivCount}건 묶임\n${detail}\n\n자동 분리: 첫 row 유지, 2번째 이후를 새 일련번호(-002, -003...)로 분리.\n${isFG ? '완제품개별은 시트 append 순서 가정으로 packCount 기준 분리.' : ''}`,
+        autoFix: isFG ? async () => { await autoSplitDupFgLot(id); } : undefined
       });
     }
   }
   return {
     name: '중복 LOT ID (race condition)',
-    desc: '동시 채번으로 같은 ID 가 2회 이상 — 자동 분리는 데이터 무결성 위험으로 수동 처리만 안내',
+    desc: '동시 채번으로 같은 ID 가 2회 이상 — 완제품 LOT 은 🔧 자동 분리 가능 (원재료는 수동)',
     issues
   };
+}
+
+/* 중복 FG LOT 자동 분리 — 첫 row 유지, 나머지는 새 일련번호로 분리.
+   알고리즘:
+   1. 완제품LOT 에서 동일 lotId 의 모든 row 인덱스 찾기 (시트 순서 = 채번 순서 가정)
+   2. 첫 row 외 각 row 별로 새 ID 발급
+   3. 해당 row 의 [0] 셀 변경 + 해당 row 의 woId (col 7) 의 작업지시서 wo[14] 변경
+   4. 완제품개별 시트에서 같은 lotId 의 모든 row 인덱스 찾기 (시트 순서 = WO 승인 순서 가정)
+   5. 첫 row 의 packCount 만큼 유지, 다음 packCount 만큼 두 번째 새 ID 로, ... */
+async function autoSplitDupFgLot(lotId) {
+  // 1. 완제품LOT 모든 row 조회 (인덱스 보존을 위해 raw 시트 데이터 사용)
+  SheetsAPI.invalidateCache('완제품LOT');
+  const fgLots = await SheetsAPI.getAll('완제품LOT', false);
+  // 1-row offset 보정: getAll 은 row 1 부터 시작 (헤더 없는 시트 가정)
+  // 시트 행 인덱스 = getAll 인덱스 + 1
+  const dupRows = [];
+  fgLots.forEach((row, i) => {
+    if (row[0] === lotId) dupRows.push({ row, sheetRowIdx: i + 1 });
+  });
+  if (dupRows.length < 2) throw new Error('중복 row 없음 (이미 정리됨?)');
+
+  // 2. 첫 row 외 새 ID 발급
+  const parts = lotId.split('-');
+  const seqLen = (parts[parts.length - 1] || '').length || 3;
+  const prefix = parts.slice(0, -1).join('-') + '-';
+  // 동일 prefix 중 현재 max seq 확인
+  let maxSeq = 0;
+  fgLots.forEach(l => {
+    if (l[0] && l[0].startsWith(prefix)) {
+      const s = parseInt(l[0].split('-').slice(-1)[0]) || 0;
+      if (s > maxSeq) maxSeq = s;
+    }
+  });
+
+  const assignments = [{ oldId: lotId, newId: lotId, sheetRowIdx: dupRows[0].sheetRowIdx, woId: dupRows[0].row[7] || '', packCount: parseInt(dupRows[0].row[10]) || 0 }];
+  for (let i = 1; i < dupRows.length; i++) {
+    maxSeq++;
+    const newId = `${prefix}${String(maxSeq).padStart(seqLen, '0')}`;
+    assignments.push({
+      oldId: lotId,
+      newId,
+      sheetRowIdx: dupRows[i].sheetRowIdx,
+      woId: dupRows[i].row[7] || '',
+      packCount: parseInt(dupRows[i].row[10]) || 0
+    });
+  }
+
+  // 3. 완제품LOT row 의 col A (lotId) 변경 (batchUpdate)
+  const lotUpdates = assignments.slice(1).map(a => ({
+    range: `완제품LOT!A${a.sheetRowIdx}`,
+    values: [[a.newId]]
+  }));
+  if (lotUpdates.length > 0) await SheetsAPI.batchUpdate(lotUpdates);
+
+  // 4. 해당 WO 의 wo[14] (col O = 15번째) 변경
+  for (const a of assignments.slice(1)) {
+    if (!a.woId) continue;
+    const woIdx = await SheetsAPI.findRowIndex('작업지시서', 0, a.woId);
+    if (woIdx > 0) {
+      await SheetsAPI.batchUpdate([{ range: `작업지시서!O${woIdx}`, values: [[a.newId]] }]);
+    }
+  }
+
+  // 5. 완제품개별 분리 — 시트 순서 기준 packCount 만큼 그룹 분리
+  SheetsAPI.invalidateCache('완제품개별');
+  const fgIndivs = await SheetsAPI.getAll('완제품개별', false);
+  const targetIndivs = [];
+  fgIndivs.forEach((row, i) => {
+    if (row[1] === lotId) targetIndivs.push({ row, sheetRowIdx: i + 1 });
+  });
+
+  // 시트 순서대로 분할: 첫 packCount → assignment[0] (변경 없음), 다음 packCount → assignment[1], ...
+  const indivUpdates = [];
+  let cursor = 0;
+  for (const a of assignments) {
+    if (a.newId === a.oldId) { cursor += a.packCount; continue; }
+    const segment = targetIndivs.slice(cursor, cursor + a.packCount);
+    for (let k = 0; k < segment.length; k++) {
+      const { row, sheetRowIdx } = segment[k];
+      const newIndivId = `${a.newId}-${String(k + 1).padStart(2, '0')}`;
+      // col A (indivId) + col B (lotId) 변경
+      indivUpdates.push({ range: `완제품개별!A${sheetRowIdx}`, values: [[newIndivId]] });
+      indivUpdates.push({ range: `완제품개별!B${sheetRowIdx}`, values: [[a.newId]] });
+    }
+    cursor += a.packCount;
+  }
+  if (indivUpdates.length > 0) await SheetsAPI.batchUpdate(indivUpdates);
+
+  // 캐시 무효화 + 로그
+  SheetsAPI.invalidateCache('완제품LOT');
+  SheetsAPI.invalidateCache('완제품개별');
+  SheetsAPI.invalidateCache('작업지시서');
+  console.log(`[중복분리] ${lotId} 분리 완료:`, assignments.slice(1).map(a => `${a.oldId}→${a.newId} (WO ${a.woId}, ${a.packCount}개)`).join(', '));
 }
 
 /* 채번예약 placeholder 가 24시간 이상 stale — 거부됐는데 정리 안된 경우 또는 채번 후 작업 미완료 */
@@ -9156,7 +9251,32 @@ async function approveWO(woId) {
         console.log(`[승인] 사전 생성된 FG LOT ID 재사용: ${fgLotId}`);
       }
 
-      // 1. Update WO — 출하가능 상태로
+      // ⚠ Race-condition Self-Healing (PR #27)
+      //   동시 채번으로 같은 ID 가 다른 WO 와 겹쳤는지 검증.
+      //   내 WO 의 row 가 시트에서 첫째가 아니면 새 ID 자동 발급.
+      //   채번 atomicity 불가한 Sheets API 한계를 승인 시점 정정으로 보완.
+      SheetsAPI.invalidateCache('완제품LOT');
+      const allFgLots = await SheetsAPI.getAll('완제품LOT', false);
+      const sameIdRows = allFgLots.filter(l => l[0] === fgLotId);
+      const myRowIdx = sameIdRows.findIndex(l => l[7] === woId);
+      if (sameIdRows.length > 0 && myRowIdx !== 0) {
+        // 충돌 — 다른 WO 가 같은 ID 를 먼저 점유한 상태
+        console.warn(`[승인] LOT ID ${fgLotId} 충돌 감지 (다른 WO 가 점유) → 새 ID 자동 발급`);
+        toast(`⚠ LOT ID 충돌 감지 — 새 ID 자동 발급`, 'warn', 3000);
+        const newId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT', 0, productionDate);
+        // 안전 검증: 새 ID 도 비어있어야 함
+        const newIdConflict = allFgLots.find(l => l[0] === newId);
+        if (newIdConflict) {
+          // 극히 드문 경우 — 한 번 더 짧은 지연 후 재발급
+          await new Promise(r => setTimeout(r, 500 + Math.random() * 300));
+          fgLotId = await generateLotId('FG', fgItemCode, expDate, '완제품LOT', 0, productionDate);
+        } else {
+          fgLotId = newId;
+        }
+        console.log(`[승인] 충돌 정정: ${wo[14]} → ${fgLotId}`);
+      }
+
+      // 1. Update WO — 출하가능 상태로 (충돌 정정된 fgLotId 반영)
       await SheetsAPI.updateRow('작업지시서', 0, woId, {
         12: '출하가능',
         14: fgLotId,
