@@ -1676,11 +1676,15 @@ Screens.production = async () => {
     State.productionRequests = await SheetsAPI.getAll('생산요청').catch(() => []);
   } catch (e) { console.warn(e); }
 
+  // 직전 활성 탭 유지 — LiveSync 재렌더 시 무조건 기본 탭으로 튕기는 이슈 방지
   const defaultTab = isAdmin ? '생산요청' : '새 작업';
-  renderProductionContent(defaultTab, isAdmin);
+  const lastTab = State._prodActiveTab || defaultTab;
+  renderProductionContent(lastTab, isAdmin);
 };
 
 function renderProductionContent(activeTab, isAdmin) {
+  // 활성 탭 State 에 저장
+  State._prodActiveTab = activeTab;
   const tabs = isAdmin ? ['생산요청', '승인대기', '전체작업'] : ['새 작업', '작업 현황', '완료된 작업'];
 
   $id('content').innerHTML = `
@@ -2305,10 +2309,14 @@ Screens.inventory = async () => {
     State.receivingRecords = rcvRecords;
   } catch(e) { console.warn(e); }
 
-  renderInventoryContent('원재료');
+  // 직전 활성 탭 유지 — LiveSync 자동 재렌더로 무조건 '원재료' 로 튕기는 이슈 방지
+  const lastTab = State._invActiveTab || '원재료';
+  renderInventoryContent(lastTab);
 };
 
 async function renderInventoryContent(activeTab) {
+  // 활성 탭 State 에 저장 (재렌더 시 복원용)
+  State._invActiveTab = activeTab;
   const tabs = ['원재료', '완제품', '소모품'];
 
   $id('content').innerHTML = `
