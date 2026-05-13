@@ -2557,8 +2557,13 @@ Screens['lot-detail'] = async (params = {}) => {
 
   let lots = [], indivs = [], rmSku = '';
   try {
-    lots = (await SheetsAPI.getAll(lotTab).catch(() => [])).filter(l => l[1] === itemCode);
-    indivs = await SheetsAPI.getAll(indivTab).catch(() => []);
+    // 카드와 개별 목록 표시값 일치 보장 — 진입 시 캐시 무효화로 fresh 데이터 강제
+    SheetsAPI.invalidateCache(lotTab);
+    SheetsAPI.invalidateCache(indivTab);
+    lots = (await SheetsAPI.getAll(lotTab, false).catch(() => [])).filter(l => l[1] === itemCode);
+    indivs = await SheetsAPI.getAll(indivTab, false).catch(() => []);
+    // showLotIndividuals 가 재사용할 수 있도록 State 에 저장 (재fetch 없이 동일 데이터 사용)
+    State._lotDetailIndivs = { tab: indivTab, data: indivs, ts: Date.now() };
     if (!isFG && !isSP) {
       const item = State.rawMaterialItems?.find(i => i[0] === itemCode);
       rmSku = item?.[3] || '';
@@ -2713,7 +2718,15 @@ async function showLotIndividuals(lotId, itemName, type) {
     const isSP = type === 'sp';
     const indivTab = isFG ? '완제품개별' : isSP ? '소모품개별' : '원재료개별';
     const lotTab = isFG ? '완제품LOT' : isSP ? '소모품LOT' : '원재료LOT';
-    const indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
+    // lot-detail 에서 저장한 동일 데이터 우선 사용 (카드 ↔ 목록 표시값 일치 보장)
+    // State._lotDetailIndivs 가 같은 탭 + 60초 이내면 그대로 사용, 아니면 fresh fetch
+    let indivs;
+    const cached = State._lotDetailIndivs;
+    if (cached && cached.tab === indivTab && Date.now() - cached.ts < 60000) {
+      indivs = cached.data.filter(iv => iv[1] === lotId);
+    } else {
+      indivs = (await SheetsAPI.getAll(indivTab).catch(() => [])).filter(iv => iv[1] === lotId);
+    }
     const lot = (await SheetsAPI.getAll(lotTab).catch(() => [])).find(l => l[0] === lotId);
 
     if (indivs.length === 0) {
