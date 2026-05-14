@@ -1256,6 +1256,9 @@ const LiveSync = {
       const screen = State.currentScreen;
       console.log(`[LiveSync] 동기화 시작 (trigger=${trigger}, screen=${screen})`);
 
+      // 재렌더 직전 — 스크롤 위치 보존 (재렌더 후 같은 위치로 복원)
+      const savedScrollY = window.scrollY;
+
       // 현재 화면 리렌더 — 화면별 최적화
       if (screen === 'wo-execute' && State.woExec?.woId) {
         // WO 실행 화면: 작업 중 데이터 보존하면서 records만 갱신
@@ -1273,6 +1276,14 @@ const LiveSync = {
         // 화면별 params 우선 사용 — sub-screen 진입 컨텍스트 유실 방지
         const screenParams = (State._screenParams && State._screenParams[screen]) || State._lastParams || {};
         await Screens[screen](screenParams);
+      }
+
+      // 재렌더 후 스크롤 위치 복원 — rAF 두 번으로 비동기 렌더·DOM 안정화 대기.
+      // 자동 동기화 (poll/focus/visibility) 시에만 적용 — 수동 새로고침은 사용자가 위로 가길 기대할 수 있음.
+      if (trigger !== 'manual' && savedScrollY > 0) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.scrollTo(0, savedScrollY);
+        }));
       }
 
       // 동기화 완료 시각 표시 (토스트는 poll 때만 생략)
