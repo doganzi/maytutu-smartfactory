@@ -4599,11 +4599,10 @@ async function autoSplitDupFgLot(lotId) {
   // 1. 완제품LOT 모든 row 조회 (인덱스 보존을 위해 raw 시트 데이터 사용)
   SheetsAPI.invalidateCache('완제품LOT');
   const fgLots = await SheetsAPI.getAll('완제품LOT', false);
-  // 1-row offset 보정: getAll 은 row 1 부터 시작 (헤더 없는 시트 가정)
-  // 시트 행 인덱스 = getAll 인덱스 + 1
+  // getAll 은 헤더 1행을 slice 한 결과 — 시트 row 인덱스 = getAll 인덱스 + 2 (1-based + 헤더 보정)
   const dupRows = [];
   fgLots.forEach((row, i) => {
-    if (row[0] === lotId) dupRows.push({ row, sheetRowIdx: i + 1 });
+    if (row[0] === lotId) dupRows.push({ row, sheetRowIdx: i + 2 });
   });
   if (dupRows.length < 2) throw new Error('중복 row 없음 (이미 정리됨?)');
 
@@ -4654,7 +4653,7 @@ async function autoSplitDupFgLot(lotId) {
   const fgIndivs = await SheetsAPI.getAll('완제품개별', false);
   const targetIndivs = [];
   fgIndivs.forEach((row, i) => {
-    if (row[1] === lotId) targetIndivs.push({ row, sheetRowIdx: i + 1 });
+    if (row[1] === lotId) targetIndivs.push({ row, sheetRowIdx: i + 2 });
   });
 
   // 시트 순서대로 분할: 첫 packCount → assignment[0] (변경 없음), 다음 packCount → assignment[1], ...
@@ -4791,7 +4790,7 @@ async function autoDeletePhantomFgRows(lotId, expectedPackCount) {
     const m = (row[0] || '').match(/-(\d+)$/);
     if (!m) return;
     const seq = parseInt(m[1]);
-    if (seq > expectedPackCount) toDelete.push({ sheetRowIdx: i + 1, oldId: row[0] });
+    if (seq > expectedPackCount) toDelete.push({ sheetRowIdx: i + 2, oldId: row[0] });
   });
   if (toDelete.length === 0) {
     console.log(`[phantom정리] ${lotId}: 대상 없음`);
@@ -4842,7 +4841,7 @@ async function autoDeleteDupFgIndivs(lotId) {
   // 해당 LOT 의 모든 row + 시트 행 인덱스 보존
   const lotRows = [];
   allIndivs.forEach((row, i) => {
-    if (row[1] === lotId) lotRows.push({ row, sheetRowIdx: i + 1 });
+    if (row[1] === lotId) lotRows.push({ row, sheetRowIdx: i + 2 });
   });
   if (lotRows.length === 0) {
     console.log(`[중복삭제] ${lotId}: 개별 없음`);
@@ -4912,7 +4911,7 @@ async function autoFixDupFgIndivIds() {
     const id = row[0];
     if (!id) return;
     const arr = byId.get(id) || [];
-    arr.push({ row, sheetRowIdx: i + 1 });
+    arr.push({ row, sheetRowIdx: i + 2 });
     byId.set(id, arr);
   });
 
