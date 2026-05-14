@@ -1312,10 +1312,85 @@ Router.go = function(screen, params = {}) {
       sessionStorage.setItem('mt_last_screen', JSON.stringify({ screen, params, ts: Date.now() }));
     } catch(e) {}
   }
+  // 화면 진입 직전 — 이전 화면 scroll 위치 저장 (자기 화면 재진입은 제외)
+  if (State.currentScreen && State.currentScreen !== screen) {
+    try { sessionStorage.setItem(`mt_scroll:${State.currentScreen}`, String(window.scrollY)); } catch(e) {}
+  }
   _origRouterGo(screen, params);
   // 화면 전환 시 폴링 재시작 (interval 리셋)
   LiveSync.startPoll();
+  // 화면 렌더 완료 후 draft·scroll 복원 — rAF 두 번으로 비동기 렌더 대기
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    FormDraft.restore(screen);
+    try {
+      const sy = parseInt(sessionStorage.getItem(`mt_scroll:${screen}`) || '0');
+      if (sy > 0) window.scrollTo(0, sy);
+    } catch(e) {}
+  }));
 };
+
+/* ─── 폼 draft 자동 저장·복원 ───
+   입력 화면(wo-create / bom-calc / req-form / data-audit)에서
+   새로고침·일시 이탈 시 입력값을 sessionStorage 에 보존하고 복원.
+   기존 LiveSync 입력 보존(자동 재렌더 차단) 과 별개의 안전망 —
+   풀투리프레시·전체 리로드·OAuth 재인증 후에도 복원됨. */
+const FormDraft = {
+  enabledScreens: ['wo-create', 'bom-calc', 'req-form', 'data-audit'],
+  TTL_MS: 30 * 60 * 1000,
+  _saveTimer: null,
+  _key(screen) { return `mt_form_draft:${screen}`; },
+  scheduleSave() {
+    if (!this.enabledScreens.includes(State.currentScreen)) return;
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._save(), 300);
+  },
+  _save() {
+    try {
+      const draft = {};
+      document.querySelectorAll('input[id], select[id], textarea[id]').forEach(el => {
+        if (['password','hidden','file','button','submit','reset'].includes(el.type)) return;
+        if (el.dataset.noDraft === '1') return;
+        const v = (el.type === 'checkbox' || el.type === 'radio') ? !!el.checked : el.value;
+        draft[el.id] = v;
+      });
+      if (Object.keys(draft).length === 0) {
+        sessionStorage.removeItem(this._key(State.currentScreen));
+        return;
+      }
+      sessionStorage.setItem(this._key(State.currentScreen), JSON.stringify({ d: draft, ts: Date.now() }));
+    } catch(e) { /* quota or storage off */ }
+  },
+  restore(screen) {
+    if (!this.enabledScreens.includes(screen)) return;
+    try {
+      const raw = sessionStorage.getItem(this._key(screen));
+      if (!raw) return;
+      const { d, ts } = JSON.parse(raw);
+      if (!d || Date.now() - (ts||0) > this.TTL_MS) {
+        sessionStorage.removeItem(this._key(screen));
+        return;
+      }
+      let cnt = 0;
+      Object.entries(d).forEach(([id, v]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!v;
+        else el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        cnt++;
+      });
+      if (cnt > 0) console.log(`[FormDraft] ${screen}: ${cnt}개 입력값 복원`);
+    } catch(e) { /* ignore */ }
+  },
+  clear(screen) {
+    try { sessionStorage.removeItem(this._key(screen || State.currentScreen)); } catch(e) {}
+  }
+};
+
+// 위임 리스너 — 화면 내 모든 입력 변경 캡처 (capture 단계로 stopPropagation 영향 회피)
+document.addEventListener('input', () => FormDraft.scheduleSave(), true);
+document.addEventListener('change', () => FormDraft.scheduleSave(), true);
 
 /* 풀투리프레시 / 페이지 리로드 후 마지막 화면 복원 */
 function restoreLastScreen() {
