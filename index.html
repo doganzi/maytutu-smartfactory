@@ -2533,12 +2533,19 @@ async function renderInventoryContent(activeTab) {
         // 품목 헤더
         const freezingCount = g.lots.filter(l => (l[9]||'') === '냉동보관중').length;
         const readyCount = g.lots.filter(l => (l[9]||'') === '출하가능').length;
+        // 가용 주차 산정 — 1박스=4개, 주당 75박스 소비 기준
+        const PACKS_PER_BOX = 4;
+        const BOXES_PER_WEEK = 75;
+        const boxes = g.totalActiveIndivs / PACKS_PER_BOX;
+        const weeks = boxes / BOXES_PER_WEEK;
+        const weekColor = weeks < 1 ? 'c-err' : weeks < 2 ? 'c-warn' : 'c-suc';
         html += `
           <div class="card info-box suc" style="margin-bottom:8px">
             <div class="row between">
               <div>
                 <div class="fs-14 fw-7">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
                 <div class="fs-12 c-txt-l mt-4">총 ${g.lots.length} LOT · ${g.totalActiveIndivs}개 · 냉동 -18°C</div>
+                <div class="fs-12 mt-2">≈ ${boxes.toFixed(1)}박스 · 가용 <span class="${weekColor} fw-7">${weeks.toFixed(1)}주</span> <span class="fs-10 c-txt-l">(1박스 4개 · 주 ${BOXES_PER_WEEK}박스 기준)</span></div>
               </div>
               <div style="text-align:right">
                 ${freezingCount > 0 ? `<span class="badge badge-warn" style="display:block;margin-bottom:2px">냉동중 ${freezingCount}</span>` : ''}
