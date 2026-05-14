@@ -2397,7 +2397,9 @@ Screens.inventory = async () => {
 
   // 직전 활성 탭 유지 — LiveSync 자동 재렌더로 무조건 '원재료' 로 튕기는 이슈 방지
   const lastTab = State._invActiveTab || '원재료';
-  renderInventoryContent(lastTab);
+  // await 필수 — 완제품 탭은 내부에서 SheetsAPI.getAll('완제품개별') 추가 페치.
+  // 빠뜨리면 LiveSync 의 스크롤 복원이 페치 완료 전에 실행되어 직후 DOM 재구성으로 무효화됨.
+  await renderInventoryContent(lastTab);
 };
 
 async function renderInventoryContent(activeTab) {
