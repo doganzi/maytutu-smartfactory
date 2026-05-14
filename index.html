@@ -4288,6 +4288,7 @@ async function runDataAudit() {
       auditFgLotPackCount(fgLots, fgIndivs),
       auditDuplicateLotIds(rmLots, fgLots, rmIndivs, fgIndivs, wos),
       auditDuplicateIndivIds(rmIndivs, fgIndivs),
+      auditPhantomRenumberRows(fgLots, fgIndivs, wos),
       auditStaleReserved(fgLots, wos),
       auditWoFgLotLink(wos, fgLots),
       auditWoStatusStep(wos, records),
@@ -4732,6 +4733,94 @@ function auditDuplicateIndivIds(rmIndivs, fgIndivs) {
     }
   }
   return { name: '중복 개별 ID', desc: '동일 indivId 가 시트에 다중 row — 🔧 수정 시 중복 행 soft-delete (\'삭제\') + packCount/잔량 자동 보정', issues };
+}
+
+/* phantom renumber 행 검사 — WO 의 packCount 보다 큰 suffix 를 가진 완제품개별 행 탐지
+   배경: PR #33 의 C안 renumber autoFix 가 중복 indivId 를 -41~-80 등 새 번호로 옮긴 잔재
+        또는 다른 경로로 정원 초과 채번된 phantom 행
+   판정: 완제품LOT[7]=woId → 작업지시서[7]=packCount (의도된 봉수)
+        해당 LOT 의 비-삭제 개별 중 suffix > packCount 인 행을 phantom 으로 분류
+   autoFix: phantom 행 soft-delete + LOT packCount/remain 정정
+            출하완료 행은 절대 삭제 안 함 (HACCP 보존) — 있으면 수동 점검 안내 */
+function auditPhantomRenumberRows(fgLots, fgIndivs, wos) {
+  const issues = [];
+  for (const lot of fgLots) {
+    const lotId = lot[0];
+    if (lot[9] === '삭제' || lot[9] === '채번예약') continue;
+    const woId = lot[7] || '';
+    if (!woId) continue;
+    const wo = wos.find(w => w[0] === woId);
+    if (!wo) continue;
+    const expected = parseInt(wo[7]);
+    if (!expected || expected <= 0) continue;
+    const lotIndivs = fgIndivs.filter(iv => iv[1] === lotId && iv[3] !== '삭제');
+    let phantomCount = 0;
+    let phantomShipped = 0;
+    for (const iv of lotIndivs) {
+      const m = (iv[0] || '').match(/-(\d+)$/);
+      if (!m) continue;
+      const seq = parseInt(m[1]);
+      if (seq > expected) {
+        phantomCount++;
+        if (iv[3] === '출하완료') phantomShipped++;
+      }
+    }
+    if (phantomCount === 0) continue;
+    issues.push({
+      id: lotId,
+      message: `WO ${woId} packCount=${expected} 인데 suffix > ${expected} 인 개별 ${phantomCount}건` +
+               (phantomShipped > 0 ? ` (⚠️ 출하완료 ${phantomShipped}건 포함 — 자동 정리 불가, 수동 점검 필요)` : ''),
+      autoFix: phantomShipped === 0 ? async () => {
+        await autoDeletePhantomFgRows(lotId, expected);
+      } : undefined
+    });
+  }
+  return { name: 'phantom 개별 행 (정원 초과)', desc: 'WO packCount 보다 큰 suffix 를 가진 완제품개별 행 — 🔧 수정 시 soft-delete + LOT packCount/remain 정정 (출하완료 행은 보호)', issues };
+}
+
+/* phantom 행 일괄 soft-delete + LOT packCount/remain 보정.
+   출하완료 행은 안전망으로 무조건 보호 (HACCP 출하기록 무결성). */
+async function autoDeletePhantomFgRows(lotId, expectedPackCount) {
+  SheetsAPI.invalidateCache('완제품개별');
+  SheetsAPI.invalidateCache('완제품LOT');
+  const allIndivs = await SheetsAPI.getAll('완제품개별', false);
+  const toDelete = [];
+  allIndivs.forEach((row, i) => {
+    if (row[1] !== lotId) return;
+    if (row[3] === '삭제' || row[3] === '출하완료') return;
+    const m = (row[0] || '').match(/-(\d+)$/);
+    if (!m) return;
+    const seq = parseInt(m[1]);
+    if (seq > expectedPackCount) toDelete.push({ sheetRowIdx: i + 1, oldId: row[0] });
+  });
+  if (toDelete.length === 0) {
+    console.log(`[phantom정리] ${lotId}: 대상 없음`);
+    return;
+  }
+  const nowStr = formatDateTime();
+  const updates = [];
+  for (const d of toDelete) {
+    updates.push({ range: `완제품개별!D${d.sheetRowIdx}`, values: [['삭제']] });
+    updates.push({ range: `완제품개별!E${d.sheetRowIdx}`, values: [[nowStr]] });
+    updates.push({ range: `완제품개별!F${d.sheetRowIdx}`, values: [[`phantom정리:${d.oldId}`]] });
+  }
+  for (let i = 0; i < updates.length; i += 50) {
+    await SheetsAPI.batchUpdate(updates.slice(i, i + 50));
+  }
+  SheetsAPI.invalidateCache('완제품개별');
+  const refreshed = await SheetsAPI.getAll('완제품개별', false);
+  const lotIndivsAfter = refreshed.filter(iv => iv[1] === lotId && iv[3] !== '삭제');
+  const activeAfter = lotIndivsAfter.filter(iv => ['냉동보관중','출하가능'].includes(iv[3])).length;
+  const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+  if (lotIdx > 0) {
+    await SheetsAPI.batchUpdate([
+      { range: `완제품LOT!I${lotIdx}`, values: [[String(activeAfter)]] },
+      { range: `완제품LOT!K${lotIdx}`, values: [[String(lotIndivsAfter.length)]] }
+    ]);
+  }
+  SheetsAPI.invalidateCache('완제품LOT');
+  SheetsAPI.invalidateCache('완제품개별');
+  console.log(`[phantom정리] ${lotId}: ${toDelete.length}건 soft-delete · packCount → ${lotIndivsAfter.length} · remain → ${activeAfter}`);
 }
 
 /* 완제품개별 중복 indivId 일괄 정리:
