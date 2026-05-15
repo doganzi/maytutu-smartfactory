@@ -1223,9 +1223,10 @@ const LiveSync = {
 
     // 입력 보존 화면: 자동 트리거(poll/focus/visibility) 시 스킵 — 입력값/결과 유실 방지.
     //   사용자가 새로고침 버튼을 직접 누르는 'manual' 만 허용.
-    // 'lot-detail' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (사용자 명시 요청).
+    // 'lot-detail' / 'inventory' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (자동 재렌더 시
+    // 펼침 상태 손실로 페이지 높이가 짧아져 scrollY 복원이 무효화되는 이슈 방지).
     const screenForGuard = State.currentScreen;
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail'];
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory'];
     if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
