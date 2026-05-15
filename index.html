@@ -2658,6 +2658,8 @@ async function renderInventoryContent(activeTab) {
 Screens['lot-detail'] = async (params = {}) => {
   const { itemCode, itemName, type } = params;
   renderHeader('LOT 상세', `${itemCode || ''} ${itemName || ''}`, { back: 'inventory' });
+  // 다중 선택 출하 상태 — 화면 진입 시마다 초기화 (다른 LOT 잔여 선택 방지)
+  State._selectedShipIds = new Map();
 
   const isFG = type === 'fg';
   const isSP = type === 'sp';
@@ -2846,17 +2848,34 @@ async function showLotIndividuals(lotId, itemName, type) {
 
     const activeIndivs = indivs.filter(iv => !['출하완료','폐기','입고취소','삭제'].includes(iv[3]));
     const shippedIndivs = indivs.filter(iv => iv[3] === '출하완료');
+    // 다중 선택 출하용 — 출하가능 항목 1개 이상일 때 컨트롤 바 노출
+    const shippableIds = activeIndivs.filter(iv => iv[3] === '출하가능').map(iv => iv[0]);
+    const hasShippable = isFG && shippableIds.length > 0;
+    const safeNameEsc = (itemName || '').replace(/'/g, "\\'");
     container.innerHTML = `
       <div style="border-top:1px dashed var(--gray-l);padding-top:8px">
         <div class="fs-11 fw-6 c-txt-l mb-4">개별 항목 (재고 ${activeIndivs.length}건 / 전체 ${indivs.filter(iv => iv[3] !== '삭제').length}건)</div>
+        ${hasShippable ? `
+          <div class="row between" style="padding:8px 10px;background:#e8f5e9;border-radius:6px;margin-bottom:8px;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0">
+              <input type="checkbox" id="ship-select-all-${safeId}" onclick="event.stopPropagation();toggleShipSelectAll('${lotId}')" style="width:18px;height:18px">
+              전체 선택
+            </label>
+            <button class="btn btn-sm btn-suc" id="ship-selected-btn-${safeId}" style="padding:4px 12px;font-size:12px;display:none" onclick="event.stopPropagation();showSelectedShipmentPopup('${lotId}','${safeNameEsc}')">🚚 선택 출하 (<span class="cnt">0</span>개)</button>
+          </div>
+        ` : ''}
         ${activeIndivs.map(iv => {
           const st = iv[3] || (isFG ? '냉동보관중' : '미사용');
           const canPrint = ['미사용','사용중','냉동보관중','출하가능'].includes(st);
           const canShip = isFG && st === '출하가능';
           const isFreezing = st === '냉동보관중';
           const stColor = st === '출하가능' ? 'suc' : st === '냉동보관중' ? 'warn' : st === '사용중' ? 'info' : st === '미사용' ? 'suc' : 'gray';
+          const isSelected = canShip && State._selectedShipIds?.get(lotId)?.has(iv[0]);
           return `
-            <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:flex-start">
+            <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:center;gap:6px">
+              ${canShip
+                ? `<input type="checkbox" class="ship-select-cb" data-indiv="${iv[0]}" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation();toggleShipSelection('${lotId}','${iv[0]}')" style="margin-right:4px;flex-shrink:0;width:18px;height:18px">`
+                : '<span style="width:22px;flex-shrink:0"></span>'}
               <div style="flex:1;min-width:0">
                 <span class="lot-id" style="font-size:11px;font-weight:600">${iv[0]}</span>
                 <span class="badge badge-${stColor}" style="font-size:9px;padding:1px 6px;margin-left:4px">${st}</span>
@@ -2893,8 +2912,167 @@ async function showLotIndividuals(lotId, itemName, type) {
         ` : ''}
       </div>
     `;
+    // 다중 선택 상태 복원 (펼침/접힘 토글 후에도 유지)
+    if (typeof updateShipSelectionUI === 'function') updateShipSelectionUI(lotId);
   } catch(e) {
     container.innerHTML = '<div class="fs-12 c-err">조회 실패: ' + e.message + '</div>';
+  }
+}
+
+/* ─── 완제품 개별 다중 선택 출하 ───
+   LOT 안에서 출하가능 개별을 여러 개 체크 → 일괄 출하.
+   State._selectedShipIds: Map<lotId, Set<indivId>> — 같은 lot-detail 화면 안에서
+   다른 LOT 의 선택 상태와 독립적으로 관리. lot-detail 진입/재진입 시 초기화. */
+function toggleShipSelection(lotId, indivId) {
+  if (!State._selectedShipIds) State._selectedShipIds = new Map();
+  if (!State._selectedShipIds.has(lotId)) State._selectedShipIds.set(lotId, new Set());
+  const sel = State._selectedShipIds.get(lotId);
+  if (sel.has(indivId)) sel.delete(indivId); else sel.add(indivId);
+  updateShipSelectionUI(lotId);
+}
+
+function toggleShipSelectAll(lotId) {
+  if (!State._selectedShipIds) State._selectedShipIds = new Map();
+  if (!State._selectedShipIds.has(lotId)) State._selectedShipIds.set(lotId, new Set());
+  const sel = State._selectedShipIds.get(lotId);
+  const safeId = lotId.replace(/[^a-zA-Z0-9]/g, '_');
+  const container = $id('indiv-list-' + safeId);
+  if (!container) return;
+  const cbs = container.querySelectorAll('.ship-select-cb');
+  const allChecked = Array.from(cbs).every(cb => cb.checked);
+  cbs.forEach(cb => {
+    const id = cb.getAttribute('data-indiv');
+    if (allChecked) { sel.delete(id); cb.checked = false; }
+    else { sel.add(id); cb.checked = true; }
+  });
+  updateShipSelectionUI(lotId);
+}
+
+function updateShipSelectionUI(lotId) {
+  const safeId = lotId.replace(/[^a-zA-Z0-9]/g, '_');
+  const sel = State._selectedShipIds?.get(lotId);
+  const count = sel?.size || 0;
+  const btn = $id('ship-selected-btn-' + safeId);
+  if (btn) {
+    btn.style.display = count > 0 ? 'inline-block' : 'none';
+    const cntEl = btn.querySelector('.cnt');
+    if (cntEl) cntEl.textContent = String(count);
+  }
+  const container = $id('indiv-list-' + safeId);
+  const selAllCb = $id('ship-select-all-' + safeId);
+  if (container && selAllCb) {
+    const cbs = container.querySelectorAll('.ship-select-cb');
+    const total = cbs.length;
+    selAllCb.checked = total > 0 && count === total;
+    selAllCb.indeterminate = count > 0 && count < total;
+  }
+}
+
+async function showSelectedShipmentPopup(lotId, itemName) {
+  const sel = State._selectedShipIds?.get(lotId);
+  if (!sel || sel.size === 0) { toast('선택된 항목이 없습니다', 'err'); return; }
+  const indivIds = Array.from(sel);
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px">
+      <div class="fs-16 fw-7 mb-8">🚚 선택 출하</div>
+      <div class="fs-12 c-txt-l mb-4">${lotId}<br>${itemName}</div>
+      <div class="card bl-suc" style="background:#e8f5e9;padding:8px 10px;margin-bottom:12px">
+        <div class="fs-12 fw-6">${indivIds.length}개 항목 일괄 출하</div>
+        <div class="fs-11 c-txt-l" style="word-break:break-all;margin-top:2px">${indivIds.slice(0,3).join(', ')}${indivIds.length > 3 ? ` 외 ${indivIds.length-3}개` : ''}</div>
+      </div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>출하 메모 (선택)</label>
+        <input type="text" id="sel-ship-note" placeholder="예: 직접 출하 / 거래처명 / 기타" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="sel-ship-cancel">취소</button>
+        <button class="btn btn-sm btn-suc" id="sel-ship-ok">선택 출하 진행</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#sel-ship-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#sel-ship-ok').onclick = () => {
+    const note = overlay.querySelector('#sel-ship-note').value?.trim() || '직접 출하';
+    overlay.remove();
+    executeSelectedShipment(lotId, indivIds, itemName, note);
+  };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function executeSelectedShipment(lotId, indivIds, itemName, customerName) {
+  if (!acquireLock('executeSelectedShipment')) return;
+  try {
+    showLoading();
+    SheetsAPI.invalidateCache('완제품개별');
+    SheetsAPI.invalidateCache('완제품LOT');
+    const allIndivs = await SheetsAPI.getAll('완제품개별', false);
+    // 선택된 ID 중 실제 출하가능 상태인 것만 대상 (다른 사용자의 동시 처리 방지)
+    const targetIndivs = allIndivs.filter(iv => iv[1] === lotId && iv[3] === '출하가능' && indivIds.includes(iv[0]));
+    if (targetIndivs.length === 0) {
+      toast('선택 항목 중 출하가능한 항목이 없습니다 (이미 처리됐을 수 있음)', 'err', 4000);
+      return;
+    }
+    const shipTime = formatDateTime();
+    const shipperEmail = State.user?.email || '';
+
+    const shipRows = [];
+    const indivUpdates = [];
+    for (const iv of targetIndivs) {
+      const shipId = await generateSeqId('SHP', '출하기록');
+      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail]);
+      const idx = await SheetsAPI.findRowIndex('완제품개별', 0, iv[0]);
+      if (idx > 0) {
+        indivUpdates.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
+        indivUpdates.push({ range: `완제품개별!E${idx}`, values: [[shipTime]] });
+        indivUpdates.push({ range: `완제품개별!F${idx}`, values: [[shipperEmail]] });
+      }
+    }
+    if (shipRows.length > 0) await SheetsAPI.append('출하기록', shipRows);
+    if (indivUpdates.length > 0) await SheetsAPI.batchUpdate(indivUpdates);
+
+    // LOT 잔량 + 상태 갱신
+    SheetsAPI.invalidateCache('완제품개별');
+    const refreshed = await SheetsAPI.getAll('완제품개별', false);
+    const lotIndivs = refreshed.filter(iv => iv[1] === lotId);
+    const remainCount = lotIndivs.filter(iv => !['출하완료','폐기','입고취소','삭제'].includes(iv[3])).length;
+    const lotIdx = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+    if (lotIdx > 0) {
+      const lotBatch = [{ range: `완제품LOT!I${lotIdx}`, values: [[String(remainCount)]] }];
+      if (remainCount === 0) lotBatch.push({ range: `완제품LOT!J${lotIdx}`, values: [['출하완료']] });
+      await SheetsAPI.batchUpdate(lotBatch);
+    }
+
+    // LOT 전체 소진 시 WO 상태 전환
+    if (remainCount === 0) {
+      try {
+        const wos = await SheetsAPI.getAll('작업지시서');
+        const wo = wos.find(w => w[14] === lotId && (w[12] === '출하가능' || w[12] === '냉동보관중'));
+        if (wo) await SheetsAPI.updateCell('작업지시서', 0, wo[0], 12, '출하완료');
+      } catch (e) { console.warn('WO 상태 전환 실패:', e); }
+    }
+
+    SheetsAPI.invalidateCache('완제품LOT');
+    SheetsAPI.invalidateCache('완제품개별');
+    // 선택 상태 초기화
+    State._selectedShipIds?.delete(lotId);
+    toast(`${lotId} 선택 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
+    const cur = State.currentScreen;
+    if (cur === 'lot-detail') {
+      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
+      const params = State._screenParams?.['lot-detail'] || {};
+      setTimeout(() => Router.go('lot-detail', params), 800);
+    } else {
+      setTimeout(() => Router.go('inventory'), 1200);
+    }
+  } catch (e) {
+    toast('선택 출하 실패: ' + e.message, 'err', 5000);
+    console.error('[executeSelectedShipment]', e);
+  } finally {
+    hideLoading();
+    releaseLock('executeSelectedShipment');
   }
 }
 
