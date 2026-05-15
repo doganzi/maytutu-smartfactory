@@ -1223,8 +1223,9 @@ const LiveSync = {
 
     // 입력 보존 화면: 자동 트리거(poll/focus/visibility) 시 스킵 — 입력값/결과 유실 방지.
     //   사용자가 새로고침 버튼을 직접 누르는 'manual' 만 허용.
+    // 'lot-detail' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (사용자 명시 요청).
     const screenForGuard = State.currentScreen;
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal'];
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail'];
     if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
@@ -10070,7 +10071,15 @@ async function executeLotShipment(lotId, itemName, customerName, customerCode) {
     SheetsAPI.invalidateCache('완제품LOT');
     SheetsAPI.invalidateCache('완제품개별');
     toast(`${lotId} 전체 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
-    setTimeout(() => Router.go('inventory'), 1200);
+    const cur = State.currentScreen;
+    if (cur === 'lot-detail') {
+      // 현재 lot-detail 화면 유지 — 스크롤 위치 보존 + 데이터만 fresh 재렌더
+      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
+      const params = State._screenParams?.['lot-detail'] || {};
+      setTimeout(() => Router.go('lot-detail', params), 800);
+    } else {
+      setTimeout(() => Router.go('inventory'), 1200);
+    }
   } catch (e) {
     toast('전체 출하 실패: ' + e.message, 'err', 5000);
     console.error('[executeLotShipment]', e);
@@ -10143,8 +10152,14 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     }
 
     toast(`출하 완료: ${indivId} → ${customerName}`, 'suc');
-    if (State.currentScreen === 'qr-scan') {
+    const cur = State.currentScreen;
+    if (cur === 'qr-scan') {
       setTimeout(() => Router.go('qr-scan'), 1000);
+    } else if (cur === 'lot-detail') {
+      // 현재 lot-detail 화면 유지 — 스크롤 위치 보존 + 데이터만 fresh 재렌더
+      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
+      const params = State._screenParams?.['lot-detail'] || {};
+      setTimeout(() => Router.go('lot-detail', params), 600);
     } else {
       setTimeout(() => Router.go('inventory'), 1000);
     }
