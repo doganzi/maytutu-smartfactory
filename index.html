@@ -3214,12 +3214,21 @@ async function submitReceiving() {
 // ─── QR SCAN ───
 Screens['qr-scan'] = () => {
   $id('content').innerHTML = `
+    <style>
+      /* Html5Qrcode 가 만드는 video 를 컨테이너 가득 채우게 강제 (letterbox 방지) */
+      #qr-reader { position: relative; background: #000; overflow: hidden; }
+      #qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+      #qr-reader > div { width: 100% !important; height: 100% !important; }
+      #qr-reader__scan_region { width: 100% !important; height: 100% !important; min-height: 0 !important; background: #000 !important; padding: 0 !important; }
+      #qr-reader__scan_region img { display: none !important; }
+      #qr-reader__dashboard { display: none !important; }
+    </style>
     <div style="background:#000;height:100%;display:flex;flex-direction:column">
       <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
         <span style="color:#fff;font-size:16px;font-weight:700">QR 스캔</span>
         <span style="color:#fff;opacity:0.6;font-size:13px;cursor:pointer" onclick="stopQRScan().then(()=>Router.go('dashboard')).catch(()=>Router.go('dashboard'))">닫기</span>
       </div>
-      <div id="qr-reader" style="flex:1"></div>
+      <div id="qr-reader" style="flex:1;min-height:0"></div>
       <div id="qr-result" style="background:var(--white);border-radius:16px 16px 0 0;padding:20px;min-height:100px">
         <div class="fs-14 fw-7 mb-8">QR 코드를 카메라에 비춰주세요</div>
       </div>
@@ -3229,10 +3238,17 @@ Screens['qr-scan'] = () => {
   // Start scanner
   setTimeout(() => {
     try {
+      // 화면 비율에 맞춰 가이드 사각형(qrbox) 동적 산정 — 짧은 변의 65%
+      const shortSide = Math.min(window.innerWidth, window.innerHeight);
+      const qrboxSize = Math.max(180, Math.floor(shortSide * 0.65));
+      // viewport 가 세로 화면이면 aspectRatio 를 세로 비율로 → 카메라 영역 letterbox 최소화
+      const viewportAspect = window.innerHeight > window.innerWidth
+        ? window.innerHeight / window.innerWidth
+        : window.innerWidth / window.innerHeight;
       window._qrScanner = new Html5Qrcode("qr-reader");
       window._qrScanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 220, height: 220 } },
+        { fps: 10, qrbox: { width: qrboxSize, height: qrboxSize }, aspectRatio: viewportAspect },
         onQRScanSuccess,
         () => {}
       ).catch(e => {
