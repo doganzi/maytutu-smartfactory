@@ -925,7 +925,10 @@ const SheetsAPI = {
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       console.error(`[SheetsAPI] APPEND 실패: ${tab}, status=${res.status}`, errText);
-      throw new Error(`Sheets APPEND ${tab}: ${res.status}`);
+      // Google 응답에서 사람이 읽을 수 있는 detail 추출 (예: "Unable to parse range: 구매주문!A:T")
+      let detail = '';
+      try { const j = JSON.parse(errText); detail = j.error?.message || ''; } catch {}
+      throw new Error(`Sheets APPEND ${tab}: ${res.status}${detail ? ' — ' + detail : ''}`);
     }
     this.invalidateCache(tab);
     console.log(`[SheetsAPI] APPEND 성공: ${range}, ${colCount}cols`);
@@ -2857,6 +2860,15 @@ async function submitNewPO() {
 
   try {
     showLoading();
+    // 사전 점검 — '구매주문' 시트 탭 존재 확인 (없으면 명확한 안내)
+    try {
+      await SheetsAPI.getAll('구매주문');
+    } catch (probeErr) {
+      hideLoading();
+      toast('Google Sheets 에 "구매주문" 시트 탭이 없습니다. 시트에 탭을 추가하고 헤더 1행(20개 컬럼)을 입력한 뒤 다시 시도하세요.', 'err', 7000);
+      console.error('[po-new] 구매주문 시트 미존재:', probeErr);
+      return;
+    }
     const poId = await generateSeqId('PO', '구매주문');
     const totalAmt = String((parseFloat(qty) || 0) * (parseFloat(unitPrice) || 0));
     await SheetsAPI.append('구매주문', [
@@ -2867,7 +2879,7 @@ async function submitNewPO() {
     toast(`발주 등록 완료: ${poId}`, 'suc');
     Router.go('inventory');
   } catch(e) {
-    toast('등록 실패: ' + e.message, 'err');
+    toast('등록 실패: ' + e.message, 'err', 6000);
   } finally { hideLoading(); }
 }
 
