@@ -2769,26 +2769,34 @@ Screens['po-new'] = async () => {
   }
   renderHeader('신규 발주 등록', null, { back: 'inventory' });
 
-  let vendors = [], rmItems = [];
+  let vendors = [], rmItems = [], pos = [], rcvs = [];
   try {
-    [vendors, rmItems] = await Promise.all([
+    [vendors, rmItems, pos, rcvs] = await Promise.all([
       SheetsAPI.getAll('거래처').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('구매주문').catch(() => []),
+      SheetsAPI.getAll('입고기록').catch(() => []),
     ]);
   } catch(e) { console.warn('po-new 로드 실패:', e); }
 
   // RM002(물) 및 비활성 제외
   const activeItems = rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성');
 
+  // 품목 → 거래처 이력 매핑 (구매주문 + 입고기록 합산)
+  const itemVendors = {};
+  pos.forEach(p => {
+    if (p[4] && p[3]) (itemVendors[p[4]] = itemVendors[p[4]] || new Set()).add(p[3]);
+  });
+  rcvs.forEach(r => {
+    if (r[3] && r[2]) (itemVendors[r[3]] = itemVendors[r[3]] || new Set()).add(r[2]);
+  });
+
+  // 후속 함수에서 사용
+  window._poVendors = vendors;
+  window._poItemVendors = itemVendors;
+
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="input-group">
-        <label>거래처 *</label>
-        <select id="po-vendor">
-          <option value="">-- 선택 --</option>
-          ${vendors.map(v => `<option value="${v[0]}">${v[0]} ${v[1] || ''}</option>`).join('')}
-        </select>
-      </div>
       <div class="input-group">
         <label>품목 *</label>
         <select id="po-item" onchange="updatePOItemUnit()">
@@ -2796,14 +2804,20 @@ Screens['po-new'] = async () => {
           ${activeItems.map(i => {
             const sku = i[3] || '';
             const parsed = parseSkuUnit(sku);
-            // 주문 단위 우선(포대/통/판), 없으면 시트 unit(i[4]) 폴백
             const orderUnit = parsed ? parsed.unitName : (i[4] || 'kg');
             const storageUnit = parsed ? (parsed.isEgg ? '알' : parsed.raw) : (i[4] || 'kg');
             const perUnit = parsed ? (parsed.isEgg ? parsed.eggPerTray : parsed.perUnit) : 1;
-            const kgPerUnit = parsed ? parsed.perUnit : 1;  // kg 환산 계수
-            return `<option value="${i[0]}" data-name="${(i[1]||'').replace(/"/g,'&quot;')}" data-order-unit="${orderUnit}" data-storage-unit="${storageUnit}" data-per-unit="${perUnit}" data-kg-per-unit="${kgPerUnit}" data-sku="${(i[3]||'').replace(/"/g,'&quot;')}">${i[0]} ${i[1] || ''}${sku?` (${sku})`:''}</option>`;
+            const kgPerUnit = parsed ? parsed.perUnit : 1;
+            return `<option value="${i[0]}" data-name="${(i[1]||'').replace(/"/g,'&quot;')}" data-order-unit="${orderUnit}" data-storage-unit="${storageUnit}" data-per-unit="${perUnit}" data-kg-per-unit="${kgPerUnit}" data-sku="${(i[3]||'').replace(/"/g,'&quot;')}">${i[1] || i[0]}${sku?` (${sku})`:''}</option>`;
           }).join('')}
         </select>
+      </div>
+      <div class="input-group">
+        <label>거래처 *</label>
+        <select id="po-vendor" disabled>
+          <option value="">-- 먼저 품목 선택 --</option>
+        </select>
+        <div id="po-vendor-hint" class="fs-11 c-txt-l mt-4" style="display:none"></div>
       </div>
       <div class="grid-2">
         <div class="input-group">
@@ -2840,6 +2854,7 @@ function updatePOItemUnit() {
   const sel = $id('po-item');
   if (!sel) return;
   const opt = sel.options[sel.selectedIndex];
+  const itemCode = sel.value;
   const orderUnit = (opt && opt.dataset.orderUnit) || '';
   const storageUnit = (opt && opt.dataset.storageUnit) || '';
   const perUnit = parseFloat(opt?.dataset.perUnit) || 0;
@@ -2850,7 +2865,7 @@ function updatePOItemUnit() {
   // 단가 라벨 — "단가 (1 포대당 원)" 식으로 명확화
   const lbl = $id('po-price-unit-lbl');
   if (lbl) lbl.textContent = orderUnit || '개';
-  // 환산 힌트 — "💡 1 포대 = 10 kg" / 계란 "💡 1 판 = 30 알 (≈ 1.5 kg)"
+  // 환산 힌트
   const hint = $id('po-conv-hint');
   if (hint) {
     if (orderUnit && storageUnit && perUnit) {
@@ -2861,7 +2876,40 @@ function updatePOItemUnit() {
       hint.style.display = 'none';
     }
   }
+  // 거래처 dropdown — 선택 품목과 거래 이력 있는 거래처만, 없으면 전체 + 힌트
+  updatePOVendors(itemCode);
   updatePOTotal();
+}
+
+function updatePOVendors(itemCode) {
+  const vSel = $id('po-vendor');
+  const vHint = $id('po-vendor-hint');
+  if (!vSel) return;
+  const allVendors = window._poVendors || [];
+  const map = window._poItemVendors || {};
+  if (!itemCode) {
+    vSel.innerHTML = `<option value="">-- 먼저 품목 선택 --</option>`;
+    vSel.disabled = true;
+    if (vHint) vHint.style.display = 'none';
+    return;
+  }
+  const linked = map[itemCode];  // Set or undefined
+  const hasHistory = linked && linked.size > 0;
+  const candidates = hasHistory
+    ? allVendors.filter(v => linked.has(v[0]))
+    : allVendors;
+  vSel.disabled = false;
+  vSel.innerHTML = `<option value="">-- 선택 --</option>` +
+    candidates.map(v => `<option value="${v[0]}">${v[1] || v[0]}</option>`).join('');
+  if (vHint) {
+    if (hasHistory) {
+      vHint.style.display = 'block';
+      vHint.textContent = `📜 이 품목 거래 이력 ${candidates.length}개 거래처 노출 (이력 없으면 전체 표시)`;
+    } else {
+      vHint.style.display = 'block';
+      vHint.textContent = `🆕 이 품목 첫 발주 — 전체 거래처(${candidates.length}개) 표시`;
+    }
+  }
 }
 
 function updatePOTotal() {
