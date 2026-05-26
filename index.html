@@ -2793,7 +2793,16 @@ Screens['po-new'] = async () => {
         <label>품목 *</label>
         <select id="po-item" onchange="updatePOItemUnit()">
           <option value="">-- 선택 --</option>
-          ${activeItems.map(i => `<option value="${i[0]}" data-name="${(i[1]||'').replace(/"/g,'&quot;')}" data-unit="${i[4]||'kg'}" data-sku="${(i[3]||'').replace(/"/g,'&quot;')}">${i[0]} ${i[1] || ''}</option>`).join('')}
+          ${activeItems.map(i => {
+            const sku = i[3] || '';
+            const parsed = parseSkuUnit(sku);
+            // 주문 단위 우선(포대/통/판), 없으면 시트 unit(i[4]) 폴백
+            const orderUnit = parsed ? parsed.unitName : (i[4] || 'kg');
+            const storageUnit = parsed ? (parsed.isEgg ? '알' : parsed.raw) : (i[4] || 'kg');
+            const perUnit = parsed ? (parsed.isEgg ? parsed.eggPerTray : parsed.perUnit) : 1;
+            const kgPerUnit = parsed ? parsed.perUnit : 1;  // kg 환산 계수
+            return `<option value="${i[0]}" data-name="${(i[1]||'').replace(/"/g,'&quot;')}" data-order-unit="${orderUnit}" data-storage-unit="${storageUnit}" data-per-unit="${perUnit}" data-kg-per-unit="${kgPerUnit}" data-sku="${(i[3]||'').replace(/"/g,'&quot;')}">${i[0]} ${i[1] || ''}${sku?` (${sku})`:''}</option>`;
+          }).join('')}
         </select>
       </div>
       <div class="grid-2">
@@ -2806,13 +2815,14 @@ Screens['po-new'] = async () => {
           <input type="text" id="po-unit" readonly style="background:#f5f5f5">
         </div>
       </div>
+      <div id="po-conv-hint" class="fs-11 c-info" style="display:none;background:#e3f2fd;padding:8px 10px;border-radius:6px;margin-bottom:14px"></div>
       <div class="grid-2">
         <div class="input-group">
-          <label>단가 (원)</label>
+          <label>단가 (1<span id="po-price-unit-lbl">개</span>당 원)</label>
           <input type="number" id="po-unit-price" min="0" step="1" oninput="updatePOTotal()">
         </div>
         <div class="input-group">
-          <label>합계</label>
+          <label>합계 (원)</label>
           <input type="text" id="po-total" readonly style="background:#f5f5f5">
         </div>
       </div>
@@ -2830,8 +2840,28 @@ function updatePOItemUnit() {
   const sel = $id('po-item');
   if (!sel) return;
   const opt = sel.options[sel.selectedIndex];
+  const orderUnit = (opt && opt.dataset.orderUnit) || '';
+  const storageUnit = (opt && opt.dataset.storageUnit) || '';
+  const perUnit = parseFloat(opt?.dataset.perUnit) || 0;
+  const kgPerUnit = parseFloat(opt?.dataset.kgPerUnit) || 0;
+  // 수량 단위 표시 (포대/통/판 등 주문 단위)
   const unitEl = $id('po-unit');
-  if (unitEl) unitEl.value = (opt && opt.dataset.unit) || '';
+  if (unitEl) unitEl.value = orderUnit;
+  // 단가 라벨 — "단가 (1 포대당 원)" 식으로 명확화
+  const lbl = $id('po-price-unit-lbl');
+  if (lbl) lbl.textContent = orderUnit || '개';
+  // 환산 힌트 — "💡 1 포대 = 10 kg" / 계란 "💡 1 판 = 30 알 (≈ 1.5 kg)"
+  const hint = $id('po-conv-hint');
+  if (hint) {
+    if (orderUnit && storageUnit && perUnit) {
+      const eggKg = (kgPerUnit && kgPerUnit !== perUnit) ? ` (≈ ${kgPerUnit} kg)` : '';
+      hint.style.display = 'block';
+      hint.innerHTML = `💡 1 ${orderUnit} = ${perUnit} ${storageUnit}${eggKg} · 입고 시 자동 환산`;
+    } else {
+      hint.style.display = 'none';
+    }
+  }
+  updatePOTotal();
 }
 
 function updatePOTotal() {
