@@ -1148,6 +1148,7 @@ const Router = {
       production: 'prod', 'wo-create': 'prod', 'wo-execute': 'prod',
       'approval-detail': 'prod', 'req-form': 'prod', 'reject-modal': 'prod',
       inventory: 'inv', 'receive-form': 'inv', 'lot-detail': 'inv',
+      'po-new': 'inv', 'po-detail': 'inv',
       'qr-scan': 'scan',
       more: 'more', 'sop-list': 'more', 'sop-detail': 'more',
       equip: 'more', 'label-print': 'more', settings: 'more',
@@ -1265,7 +1266,7 @@ const LiveSync = {
     // 'lot-detail' / 'inventory' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (자동 재렌더 시
     // 펼침 상태 손실로 페이지 높이가 짧아져 scrollY 복원이 무효화되는 이슈 방지).
     const screenForGuard = State.currentScreen;
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory'];
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail'];
     if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
@@ -2449,8 +2450,10 @@ Screens.inventory = async () => {
     State.receivingRecords = rcvRecords;
   } catch(e) { console.warn(e); }
 
-  // 직전 활성 탭 유지 — LiveSync 자동 재렌더로 무조건 '원재료' 로 튕기는 이슈 방지
-  const lastTab = State._invActiveTab || '원재료';
+  // 직전 활성 탭 유지 — LiveSync 자동 재렌더로 무조건 기본 탭으로 튕기는 이슈 방지
+  // 기본 탭은 '발주' (소모품 탭 제거됨 — 과거 저장값이면 '발주' 로 폴백)
+  const validTabs = ['발주', '원재료', '완제품'];
+  const lastTab = validTabs.includes(State._invActiveTab) ? State._invActiveTab : '발주';
   // await 필수 — 완제품 탭은 내부에서 SheetsAPI.getAll('완제품개별') 추가 페치.
   // 빠뜨리면 LiveSync 의 스크롤 복원이 페치 완료 전에 실행되어 직후 DOM 재구성으로 무효화됨.
   await renderInventoryContent(lastTab);
@@ -2459,7 +2462,7 @@ Screens.inventory = async () => {
 async function renderInventoryContent(activeTab) {
   // 활성 탭 State 에 저장 (재렌더 시 복원용)
   State._invActiveTab = activeTab;
-  const tabs = ['원재료', '완제품', '소모품', '발주'];
+  const tabs = ['발주', '원재료', '완제품'];
 
   $id('content').innerHTML = `
     <div class="tab-filter">
@@ -2648,32 +2651,7 @@ async function renderInventoryContent(activeTab) {
     }
   }
 
-  else if (activeTab === '소모품') {
-    const spLots = State.consumableLots || [];
-    const grouped = {};
-    spLots.forEach(l => {
-      const code = l[1] || 'SP001';
-      if (!grouped[code]) grouped[code] = { name: l[2] || '', lots: [], totalRemain: 0 };
-      grouped[code].lots.push(l);
-      grouped[code].totalRemain += parseFloat(l[6]) || 0;
-    });
-
-    if (Object.keys(grouped).length === 0) {
-      listEl.innerHTML = `<div class="empty-state"><div class="es-icon">🧴</div><div class="es-title">소모품 재고 없음</div></div>`;
-    } else {
-      listEl.innerHTML = Object.entries(grouped).map(([code, g]) => `
-        <div class="card clickable" onclick="Router.go('lot-detail', {itemCode:'${code}', itemName:'${g.name}', type:'sp'})">
-          <div class="row between">
-            <div>
-              <div class="fs-14 fw-6">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
-              <div class="fs-12 c-txt-l mt-4">현재고: ${g.totalRemain} (${g.lots.length} LOT)</div>
-            </div>
-            <span class="badge badge-suc">정상</span>
-          </div>
-        </div>
-      `).join('');
-    }
-  }
+  // 소모품 탭은 제거됨 — 소모품 LOT 은 더보기 → 소모품 품목 화면에서 관리
 
   else if (activeTab === '발주') {
     // 구매주문 + 거래처 동시 로드 (발주 탭 진입 시에만 — 전체 재고 진입 비용 절감)
@@ -2735,7 +2713,7 @@ async function renderInventoryContent(activeTab) {
         const totalAmt = parseFloat(p[9]) || (qty * unitPrice) || 0;
         const dot = (done) => done ? '<span style="color:var(--suc);font-weight:bold">●</span>' : '<span style="color:var(--gray-l)">○</span>';
         return `
-          <div class="card bl-${stColor}" style="margin-bottom:8px">
+          <div class="card clickable bl-${stColor}" style="margin-bottom:8px" onclick="Router.go('po-detail', {poId:'${p[0]}'})">
             <div class="row between mb-4">
               <span class="fs-13 fw-7">${p[0] || '-'}</span>
               <span class="badge badge-${stColor}">${stLabel}</span>
@@ -2754,6 +2732,10 @@ async function renderInventoryContent(activeTab) {
     }
 
     listEl.innerHTML = html;
+    // FAB(+) — 신규 발주 등록 (producer / admin 만 노출)
+    if (Role.isProducer() || Role.isAdmin()) {
+      listEl.innerHTML += `<div class="fab" onclick="Router.go('po-new')">+</div>`;
+    }
   }
 
   else if (activeTab === '입고') {
@@ -2773,6 +2755,438 @@ async function renderInventoryContent(activeTab) {
     }
     listEl.innerHTML += `<div class="fab" onclick="Router.go('receive-form')">+</div>`;
   }
+}
+
+// ─── 구매주문 (PO) — 등록 / 상세·처리 ───
+Screens['po-new'] = async () => {
+  if (!Role.isProducer() && !Role.isAdmin()) {
+    toast('생산자/관리자 권한 필요', 'err');
+    Router.go('inventory');
+    return;
+  }
+  renderHeader('신규 발주 등록', null, { back: 'inventory' });
+
+  let vendors = [], rmItems = [];
+  try {
+    [vendors, rmItems] = await Promise.all([
+      SheetsAPI.getAll('거래처').catch(() => []),
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+    ]);
+  } catch(e) { console.warn('po-new 로드 실패:', e); }
+
+  // RM002(물) 및 비활성 제외
+  const activeItems = rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성');
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="input-group">
+        <label>거래처 *</label>
+        <select id="po-vendor">
+          <option value="">-- 선택 --</option>
+          ${vendors.map(v => `<option value="${v[0]}">${v[0]} ${v[1] || ''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="input-group">
+        <label>품목 *</label>
+        <select id="po-item" onchange="updatePOItemUnit()">
+          <option value="">-- 선택 --</option>
+          ${activeItems.map(i => `<option value="${i[0]}" data-name="${(i[1]||'').replace(/"/g,'&quot;')}" data-unit="${i[4]||'kg'}" data-sku="${(i[3]||'').replace(/"/g,'&quot;')}">${i[0]} ${i[1] || ''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="grid-2">
+        <div class="input-group">
+          <label>수량 *</label>
+          <input type="number" id="po-qty" min="1" step="1" oninput="updatePOTotal()">
+        </div>
+        <div class="input-group">
+          <label>단위</label>
+          <input type="text" id="po-unit" readonly style="background:#f5f5f5">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="input-group">
+          <label>단가 (원)</label>
+          <input type="number" id="po-unit-price" min="0" step="1" oninput="updatePOTotal()">
+        </div>
+        <div class="input-group">
+          <label>합계</label>
+          <input type="text" id="po-total" readonly style="background:#f5f5f5">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>비고</label>
+        <textarea id="po-note" rows="2" placeholder="예: 카톡주문, 다음주 화요일 도착 예정"></textarea>
+      </div>
+      <button class="btn btn-pri btn-full mt-12" onclick="submitNewPO()">발주 등록</button>
+    </div>
+  `;
+  updatePOItemUnit();
+};
+
+function updatePOItemUnit() {
+  const sel = $id('po-item');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const unitEl = $id('po-unit');
+  if (unitEl) unitEl.value = (opt && opt.dataset.unit) || '';
+}
+
+function updatePOTotal() {
+  const qty = parseFloat($id('po-qty')?.value) || 0;
+  const price = parseFloat($id('po-unit-price')?.value) || 0;
+  const totalEl = $id('po-total');
+  if (totalEl) totalEl.value = (qty * price).toLocaleString();
+}
+
+async function submitNewPO() {
+  if (!Role.isProducer() && !Role.isAdmin()) { toast('권한 없음', 'err'); return; }
+  const vendor = $id('po-vendor')?.value || '';
+  const itemSel = $id('po-item');
+  const itemCode = itemSel?.value || '';
+  const itemName = itemSel?.options[itemSel.selectedIndex]?.dataset.name || '';
+  const qty = $id('po-qty')?.value || '';
+  const unit = $id('po-unit')?.value || '';
+  const unitPrice = $id('po-unit-price')?.value || '0';
+  const note = $id('po-note')?.value || '';
+
+  const missing = [];
+  if (!vendor) missing.push('거래처');
+  if (!itemCode) missing.push('품목');
+  if (!qty || parseFloat(qty) <= 0) missing.push('수량');
+  if (missing.length) { toast('미입력: ' + missing.join(', '), 'err'); return; }
+
+  try {
+    showLoading();
+    const poId = await generateSeqId('PO', '구매주문');
+    const totalAmt = String((parseFloat(qty) || 0) * (parseFloat(unitPrice) || 0));
+    await SheetsAPI.append('구매주문', [
+      poId, formatDate(), State.user?.email || '', vendor, itemCode, itemName,
+      qty, unit, unitPrice, totalAmt, '', '', '', '', '', '', '', '', '주문완료', note
+    ]);
+    SheetsAPI.invalidateCache('구매주문');
+    toast(`발주 등록 완료: ${poId}`, 'suc');
+    Router.go('inventory');
+  } catch(e) {
+    toast('등록 실패: ' + e.message, 'err');
+  } finally { hideLoading(); }
+}
+
+Screens['po-detail'] = async (params = {}) => {
+  const { poId } = params;
+  if (!poId) { Router.go('inventory'); return; }
+  State._poDetailId = poId;
+  renderHeader(poId, '로드 중...', { back: 'inventory' });
+  $id('content').innerHTML = '<div style="padding:24px;text-align:center;color:#999">로드 중...</div>';
+
+  let po, vendors = [];
+  try {
+    SheetsAPI.invalidateCache('구매주문');
+    const [pos, vs] = await Promise.all([
+      SheetsAPI.getAll('구매주문', false).catch(() => []),
+      SheetsAPI.getAll('거래처').catch(() => []),
+    ]);
+    po = pos.find(p => p[0] === poId);
+    vendors = vs;
+  } catch(e) { console.warn(e); }
+
+  if (!po) {
+    $id('content').innerHTML = `<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-title">PO 를 찾을 수 없음</div><div class="es-desc">${poId}</div></div>`;
+    return;
+  }
+
+  const vendorMap = {};
+  vendors.forEach(v => { if (v[0]) vendorMap[v[0]] = v[1] || v[0]; });
+  const vendorName = vendorMap[po[3]] || po[3] || '-';
+  renderHeader(poId, `${vendorName} · ${po[5] || ''} ${po[6] || ''}${po[7] || ''}`, { back: 'inventory' });
+
+  const isDone = (idx) => !!(po[idx] && String(po[idx]).trim());
+  const orderDone = isDone(1), recvDone = isDone(10), taxDone = isDone(13), payDone = isDone(15);
+  const canRecv = Role.canEditPO('recv');
+  const canTax = Role.canEditPO('tax');
+  const canPay = Role.canEditPO('pay');
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      <div class="card mb-12" style="background:#e3f2fd">
+        <div class="fs-13 fw-7 mb-8 c-info">진행 상태</div>
+        ${poStepRow('주문완료', orderDone, `${(po[1]||'').substring(0,10)} · ${po[2]||''}`)}
+        ${poStepRow('수령완료', recvDone, recvDone ? `${(po[10]||'').substring(0,10)} · ${po[11]||''} · LOT ${po[12]||''}` : '생산자 처리 대기')}
+        ${poStepRow('세금계산서 수령', taxDone, taxDone ? `${(po[13]||'').substring(0,10)} · ${po[14]||''}` : '회계팀 처리 대기')}
+        ${poStepRow('입금완료', payDone, payDone ? `${(po[15]||'').substring(0,10)} · ${po[16]||''} · ${po[17]||''}` : '회계팀 처리 대기')}
+      </div>
+
+      <div class="card mb-12">
+        <div class="fs-13 fw-7 mb-6">기본 정보</div>
+        <div class="fs-12 c-txt-l">거래처: <b>${vendorName}</b> (${po[3]||''})</div>
+        <div class="fs-12 c-txt-l">품목: <b>${po[4]||''} ${po[5]||''}</b></div>
+        <div class="fs-12 c-txt-l">수량: <b>${po[6]||''} ${po[7]||''}</b></div>
+        <div class="fs-12 c-txt-l">단가: <b>${(parseFloat(po[8])||0).toLocaleString()}원</b> · 합계: <b>${(parseFloat(po[9])||0).toLocaleString()}원</b></div>
+        ${po[19] ? `<div class="fs-12 c-txt-l mt-4">비고: ${po[19]}</div>` : ''}
+      </div>
+
+      ${poRecvSection(po, canRecv, recvDone)}
+      ${poTaxSection(po, canTax, taxDone)}
+      ${poPaySection(po, canPay, payDone, recvDone)}
+    </div>
+  `;
+};
+
+function poStepRow(label, done, meta) {
+  const dotStyle = done
+    ? 'background:var(--suc);color:#fff'
+    : 'background:#fff;border:2px solid var(--gray-l);color:var(--gray)';
+  return `
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 0">
+      <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;flex-shrink:0;${dotStyle}">${done?'✓':'○'}</div>
+      <div style="flex:1;font-size:12px"><b>${label}</b><div class="c-txt-l fs-11">${meta||''}</div></div>
+    </div>
+  `;
+}
+
+function poRecvSection(po, canEdit, done) {
+  const today = formatDate();
+  // 소비기한 기본값: 6개월 후
+  const expDefault = (() => { const d = new Date(); d.setMonth(d.getMonth()+6); return formatDate(d); })();
+  if (done) {
+    return `
+      <div class="card mb-12">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">📦 수령 처리</span>
+          <span class="badge badge-suc">완료</span>
+        </div>
+        <div class="fs-12 c-txt-l">수령일: ${(po[10]||'').substring(0,10)}</div>
+        <div class="fs-12 c-txt-l">수령자: ${po[11]||''}</div>
+        <div class="fs-12 c-txt-l">LOT: <b>${po[12]||''}</b></div>
+      </div>
+    `;
+  }
+  if (!canEdit) {
+    return `
+      <div class="card mb-12" style="opacity:0.55">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">📦 수령 처리</span>
+          <span class="badge badge-gray">producer 권한</span>
+        </div>
+        <div class="fs-12 c-txt-l">🔒 생산자(이상현/노민영) 권한 필요</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="card mb-12" style="border:2px solid var(--warn);background:#fff8e1">
+      <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+        <span class="fs-13 fw-7">📦 수령 처리</span>
+        <span class="badge badge-warn">처리 필요</span>
+      </div>
+      <div class="grid-2">
+        <div class="input-group">
+          <label>수령일 *</label>
+          <input type="date" id="po-recv-dt" value="${today}">
+        </div>
+        <div class="input-group">
+          <label>소비기한 *</label>
+          <input type="date" id="po-recv-exp" value="${expDefault}">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>수령자</label>
+        <input type="text" value="${State.user?.name||''}" readonly style="background:#f5f5f5">
+      </div>
+      <button class="btn btn-suc btn-full" onclick="savePOReceive('${po[0]}')">📦 수령 완료 처리 (LOT 자동생성)</button>
+      <div class="fs-11 c-txt-l mt-4">⚙️ 입고기록 + 원재료LOT + 개별 QR 자동 생성됨</div>
+    </div>
+  `;
+}
+
+function poTaxSection(po, canEdit, done) {
+  if (done) {
+    return `
+      <div class="card mb-12">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">🧾 세금계산서</span>
+          <span class="badge badge-suc">완료</span>
+        </div>
+        <div class="fs-12 c-txt-l">발행일: ${(po[13]||'').substring(0,10)}</div>
+        <div class="fs-12 c-txt-l">번호: ${po[14]||''}</div>
+      </div>
+    `;
+  }
+  if (!canEdit) {
+    return `
+      <div class="card mb-12" style="opacity:0.55">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">🧾 세금계산서</span>
+          <span class="badge badge-gray">accounting 권한</span>
+        </div>
+        <div class="fs-12 c-txt-l">🔒 회계팀(이수경/노민영) 권한 필요</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="card mb-12" style="border:2px solid var(--info);background:#e3f2fd">
+      <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+        <span class="fs-13 fw-7">🧾 세금계산서</span>
+        <span class="badge badge-info">처리 필요</span>
+      </div>
+      <div class="grid-2">
+        <div class="input-group">
+          <label>발행일 *</label>
+          <input type="date" id="po-tax-dt" value="${formatDate()}">
+        </div>
+        <div class="input-group">
+          <label>계산서 번호 *</label>
+          <input type="text" id="po-tax-no" placeholder="예: 전자세금-2026-0142">
+        </div>
+      </div>
+      <button class="btn btn-info btn-full" onclick="savePOTax('${po[0]}')">🧾 계산서 등록</button>
+    </div>
+  `;
+}
+
+function poPaySection(po, canEdit, done, recvDone) {
+  if (done) {
+    return `
+      <div class="card mb-12">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">💰 입금 처리</span>
+          <span class="badge badge-suc">완료</span>
+        </div>
+        <div class="fs-12 c-txt-l">입금일: ${(po[15]||'').substring(0,10)}</div>
+        <div class="fs-12 c-txt-l">계좌: ${po[16]||''}</div>
+        <div class="fs-12 c-txt-l">확인자: ${po[17]||''}</div>
+      </div>
+    `;
+  }
+  if (!canEdit) {
+    return `
+      <div class="card mb-12" style="opacity:0.55">
+        <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+          <span class="fs-13 fw-7">💰 입금 처리</span>
+          <span class="badge badge-gray">accounting 권한</span>
+        </div>
+        <div class="fs-12 c-txt-l">🔒 회계팀(이수경/노민영) 권한 필요</div>
+      </div>
+    `;
+  }
+  // 권한 있으나 수령 단계 미완료면 안내 (입금만 먼저 가능은 하지만 일반적이지 않음)
+  return `
+    <div class="card mb-12" style="border:2px solid var(--suc);background:#e8f5e9">
+      <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
+        <span class="fs-13 fw-7">💰 입금 처리</span>
+        <span class="badge badge-suc">처리 필요</span>
+      </div>
+      ${!recvDone ? `<div class="fs-11 c-warn mb-8">⚠️ 수령 단계가 아직 완료되지 않았습니다. 그래도 진행 가능합니다.</div>` : ''}
+      <div class="grid-2">
+        <div class="input-group">
+          <label>입금일 *</label>
+          <input type="date" id="po-pay-dt" value="${formatDate()}">
+        </div>
+        <div class="input-group">
+          <label>이체 계좌 *</label>
+          <input type="text" id="po-pay-acc" placeholder="예: 신한 110-***-***">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>확인자</label>
+        <input type="text" value="${State.user?.name||''}" readonly style="background:#f5f5f5">
+      </div>
+      <button class="btn btn-suc btn-full" onclick="savePOPayment('${po[0]}')">💰 입금 완료 처리 (자동 종결)</button>
+    </div>
+  `;
+}
+
+async function savePOReceive(poId) {
+  if (!Role.canEditPO('recv')) { toast('권한 없음', 'err'); return; }
+  const recvDt = $id('po-recv-dt')?.value;
+  const exp = $id('po-recv-exp')?.value;
+  if (!recvDt || !exp) { toast('수령일·소비기한 필수', 'err'); return; }
+
+  try {
+    showLoading();
+    const pos = await SheetsAPI.getAll('구매주문', false);
+    const po = pos.find(p => p[0] === poId);
+    if (!po) throw new Error('PO 없음');
+
+    const itemCode = po[4];
+    const itemName = po[5];
+    const vendorCode = po[3];
+    const inputQty = parseFloat(po[6]) || 0;
+
+    // RM 품목 sku 조회 → kg 환산 (기존 submitReceiving 와 동일 로직)
+    const rmItems = await SheetsAPI.getAll('원재료품목').catch(() => []);
+    const item = rmItems.find(i => i[0] === itemCode);
+    const sku = item?.[3] || '';
+    const parsed = parseSkuUnit(sku);
+    const qtyKg = parsed ? Math.round(inputQty * parsed.perUnit * 100) / 100 : inputQty;
+    const indivCount = parsed ? inputQty : Math.max(1, Math.round(inputQty));
+
+    const rcvId = await generateSeqId('RCV', '입고기록');
+    const lotId = await generateLotId('RM', itemCode, exp, '원재료LOT');
+
+    // 1. 입고기록
+    await SheetsAPI.append('입고기록', [
+      rcvId, '원재료', vendorCode, itemCode, itemName, lotId, String(qtyKg), 'kg', formatDateTime(),
+      State.user?.email || '', '완료', ''
+    ]);
+    // 2. 원재료LOT
+    await SheetsAPI.append('원재료LOT', [
+      lotId, itemCode, itemName, vendorCode, String(qtyKg), 'kg', recvDt, exp, String(qtyKg), '미사용', indivCount, '상온 15~25℃'
+    ]);
+    // 3. 원재료개별 QR
+    if (indivCount > 0) {
+      const perUnit = qtyKg / indivCount;
+      const indivRows = [];
+      for (let i = 1; i <= indivCount; i++) {
+        const indivId = `${lotId}-${String(i).padStart(2, '0')}`;
+        indivRows.push([indivId, lotId, itemCode, '미사용', String(perUnit), '', qrImageUrl(indivId)]);
+      }
+      await SheetsAPI.append('원재료개별', indivRows);
+    }
+    // 4. 구매주문 row 업데이트
+    await SheetsAPI.updateRow('구매주문', 0, poId, {
+      10: recvDt, 11: State.user?.email || '', 12: lotId, 18: '수령완료'
+    });
+    SheetsAPI.invalidateAllCache();
+    toast(`수령 완료 · LOT ${lotId} 생성 (${indivCount}개)`, 'suc');
+    Router.go('po-detail', { poId });
+  } catch (e) {
+    toast('수령 처리 실패: ' + e.message, 'err');
+  } finally { hideLoading(); }
+}
+
+async function savePOTax(poId) {
+  if (!Role.canEditPO('tax')) { toast('권한 없음', 'err'); return; }
+  const dt = $id('po-tax-dt')?.value;
+  const no = $id('po-tax-no')?.value?.trim();
+  if (!dt || !no) { toast('발행일·번호 필수', 'err'); return; }
+  try {
+    showLoading();
+    await SheetsAPI.updateRow('구매주문', 0, poId, {
+      13: dt, 14: no, 18: '세금계산서수령'
+    });
+    SheetsAPI.invalidateCache('구매주문');
+    toast('계산서 등록 완료', 'suc');
+    Router.go('po-detail', { poId });
+  } catch (e) {
+    toast('등록 실패: ' + e.message, 'err');
+  } finally { hideLoading(); }
+}
+
+async function savePOPayment(poId) {
+  if (!Role.canEditPO('pay')) { toast('권한 없음', 'err'); return; }
+  const dt = $id('po-pay-dt')?.value;
+  const acc = $id('po-pay-acc')?.value?.trim();
+  if (!dt || !acc) { toast('입금일·계좌 필수', 'err'); return; }
+  try {
+    showLoading();
+    await SheetsAPI.updateRow('구매주문', 0, poId, {
+      15: dt, 16: acc, 17: State.user?.name || '', 18: '입금완료'
+    });
+    SheetsAPI.invalidateCache('구매주문');
+    toast('입금 완료 · PO 종결', 'suc');
+    Router.go('po-detail', { poId });
+  } catch (e) {
+    toast('처리 실패: ' + e.message, 'err');
+  } finally { hideLoading(); }
 }
 
 // ─── LOT DETAIL ───
