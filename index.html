@@ -783,6 +783,28 @@ const Auth = {
 };
 
 /* ═══════════════════════════════════════════════
+   ROLE — 역할별 권한 헬퍼
+   사용자 시트 role 컬럼 값: admin / producer / accounting / worker
+   구매주문 단계별 편집 권한:
+     order(주문)·recv(수령) → producer + admin
+     tax(세금계산서)·pay(입금) → accounting + admin
+   ═══════════════════════════════════════════════ */
+const Role = {
+  current() { return State.user?.role || 'worker'; },
+  isAdmin() { return this.current() === 'admin'; },
+  isProducer() { return this.current() === 'producer'; },
+  isAccounting() { return this.current() === 'accounting'; },
+  /** 구매주문 단계별 편집 가능 여부 */
+  canEditPO(stage) {
+    const r = this.current();
+    if (r === 'admin') return true;
+    if ((stage === 'order' || stage === 'recv') && r === 'producer') return true;
+    if ((stage === 'tax' || stage === 'pay') && r === 'accounting') return true;
+    return false;
+  },
+};
+
+/* ═══════════════════════════════════════════════
    GOOGLE SHEETS API WRAPPER
    ═══════════════════════════════════════════════ */
 const SheetsAPI = {
@@ -3595,7 +3617,7 @@ Screens.more = () => {
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
     { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
     { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
-    // { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },  // 임시 비활성 — 등록 어려움
+    { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
     { icon: '📄', label: '작업지시서 PDF', desc: '저장된 HACCP 생산기록 PDF 모음', target: 'wo-pdfs' },
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
