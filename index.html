@@ -2727,7 +2727,8 @@ async function renderInventoryContent(activeTab) {
         const taxDone = isDone(p, 13);
         const payDone = isDone(p, 15);
         const stColor = payDone ? 'suc' : taxDone ? 'info' : recvDone ? 'warn' : 'gray';
-        const stLabel = payDone ? '입금완료' : taxDone ? '계산서수령' : recvDone ? '수령완료' : orderDone ? '주문완료' : '주문대기';
+        // 단계 순서: 주문 → 세금계산서 → 입금 → 수령(종결). 최종 단계가 우선 표시되도록 역순 체크.
+        const stLabel = recvDone ? '수령완료' : payDone ? '입금완료' : taxDone ? '계산서수령' : orderDone ? '주문완료' : '주문대기';
         const vendorName = vendorMap[p[3]] || p[3] || '-';
         const qty = parseFloat(p[6]) || 0;
         const unitPrice = parseFloat(p[8]) || 0;
@@ -3040,9 +3041,9 @@ Screens['po-detail'] = async (params = {}) => {
       <div class="card mb-12" style="background:#e3f2fd">
         <div class="fs-13 fw-7 mb-8 c-info">진행 상태</div>
         ${poStepRow('주문완료', orderDone, `${(po[1]||'').substring(0,10)} · ${po[2]||''}`)}
-        ${poStepRow('수령완료', recvDone, recvDone ? `${(po[10]||'').substring(0,10)} · ${po[11]||''} · LOT ${po[12]||''}` : '생산자 처리 대기')}
         ${poStepRow('세금계산서 수령', taxDone, taxDone ? `${(po[13]||'').substring(0,10)} · ${po[14]||''}` : '회계팀 처리 대기')}
         ${poStepRow('입금완료', payDone, payDone ? `${(po[15]||'').substring(0,10)} · ${po[16]||''} · ${po[17]||''}` : '회계팀 처리 대기')}
+        ${poStepRow('수령완료', recvDone, recvDone ? `${(po[10]||'').substring(0,10)} · ${po[11]||''} · LOT ${po[12]||''}` : '생산자 처리 대기')}
       </div>
 
       <div class="card mb-12">
@@ -3054,9 +3055,9 @@ Screens['po-detail'] = async (params = {}) => {
         ${po[19] ? `<div class="fs-12 c-txt-l mt-4">비고: ${po[19]}</div>` : ''}
       </div>
 
-      ${poRecvSection(po, canRecv, recvDone)}
       ${poTaxSection(po, canTax, taxDone)}
-      ${poPaySection(po, canPay, payDone, recvDone)}
+      ${poPaySection(po, canPay, payDone, taxDone)}
+      ${poRecvSection(po, canRecv, recvDone, payDone)}
     </div>
   `;
 };
@@ -3073,7 +3074,7 @@ function poStepRow(label, done, meta) {
   `;
 }
 
-function poRecvSection(po, canEdit, done) {
+function poRecvSection(po, canEdit, done, payDone) {
   const today = formatDate();
   // 소비기한 기본값: 6개월 후
   const expDefault = (() => { const d = new Date(); d.setMonth(d.getMonth()+6); return formatDate(d); })();
@@ -3104,9 +3105,10 @@ function poRecvSection(po, canEdit, done) {
   return `
     <div class="card mb-12" style="border:2px solid var(--warn);background:#fff8e1">
       <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
-        <span class="fs-13 fw-7">📦 수령 처리</span>
+        <span class="fs-13 fw-7">📦 수령 처리 (최종 단계)</span>
         <span class="badge badge-warn">처리 필요</span>
       </div>
+      ${!payDone ? `<div class="fs-11 c-warn mb-8">⚠️ 입금 단계가 아직 완료되지 않았습니다. 그래도 진행 가능합니다.</div>` : ''}
       <div class="grid-2">
         <div class="input-group">
           <label>수령일 *</label>
@@ -3121,7 +3123,7 @@ function poRecvSection(po, canEdit, done) {
         <label>수령자</label>
         <input type="text" value="${State.user?.name||''}" readonly style="background:#f5f5f5">
       </div>
-      <button class="btn btn-suc btn-full" onclick="savePOReceive('${po[0]}')">📦 수령 완료 처리 (LOT 자동생성)</button>
+      <button class="btn btn-suc btn-full" onclick="savePOReceive('${po[0]}')">📦 수령 완료 처리 (LOT 자동생성 · PO 종결)</button>
       <div class="fs-11 c-txt-l mt-4">⚙️ 입고기록 + 원재료LOT + 개별 QR 자동 생성됨</div>
     </div>
   `;
@@ -3172,7 +3174,7 @@ function poTaxSection(po, canEdit, done) {
   `;
 }
 
-function poPaySection(po, canEdit, done, recvDone) {
+function poPaySection(po, canEdit, done, taxDone) {
   if (done) {
     return `
       <div class="card mb-12">
@@ -3197,14 +3199,14 @@ function poPaySection(po, canEdit, done, recvDone) {
       </div>
     `;
   }
-  // 권한 있으나 수령 단계 미완료면 안내 (입금만 먼저 가능은 하지만 일반적이지 않음)
+  // 정상 흐름: 세금계산서 수령 → 입금 → 수령. 계산서 미수령 상태에서 입금 시 안내.
   return `
     <div class="card mb-12" style="border:2px solid var(--suc);background:#e8f5e9">
       <div class="row between mb-8" style="padding-bottom:8px;border-bottom:1px solid var(--gray-l)">
         <span class="fs-13 fw-7">💰 입금 처리</span>
         <span class="badge badge-suc">처리 필요</span>
       </div>
-      ${!recvDone ? `<div class="fs-11 c-warn mb-8">⚠️ 수령 단계가 아직 완료되지 않았습니다. 그래도 진행 가능합니다.</div>` : ''}
+      ${!taxDone ? `<div class="fs-11 c-warn mb-8">⚠️ 세금계산서가 아직 수령되지 않았습니다. 그래도 진행 가능합니다.</div>` : ''}
       <div class="grid-2">
         <div class="input-group">
           <label>입금일 *</label>
@@ -3219,7 +3221,7 @@ function poPaySection(po, canEdit, done, recvDone) {
         <label>확인자</label>
         <input type="text" value="${State.user?.name||''}" readonly style="background:#f5f5f5">
       </div>
-      <button class="btn btn-suc btn-full" onclick="savePOPayment('${po[0]}')">💰 입금 완료 처리 (자동 종결)</button>
+      <button class="btn btn-suc btn-full" onclick="savePOPayment('${po[0]}')">💰 입금 완료 처리</button>
     </div>
   `;
 }
@@ -3276,7 +3278,7 @@ async function savePOReceive(poId) {
       10: recvDt, 11: State.user?.email || '', 12: lotId, 18: '수령완료'
     });
     SheetsAPI.invalidateAllCache();
-    toast(`수령 완료 · LOT ${lotId} 생성 (${indivCount}개)`, 'suc');
+    toast(`수령 완료 · LOT ${lotId} 생성 (${indivCount}개) · PO 종결`, 'suc');
     Router.go('po-detail', { poId });
   } catch (e) {
     toast('수령 처리 실패: ' + e.message, 'err');
@@ -3312,7 +3314,7 @@ async function savePOPayment(poId) {
       15: dt, 16: acc, 17: State.user?.name || '', 18: '입금완료'
     });
     SheetsAPI.invalidateCache('구매주문');
-    toast('입금 완료 · PO 종결', 'suc');
+    toast('입금 완료', 'suc');
     Router.go('po-detail', { poId });
   } catch (e) {
     toast('처리 실패: ' + e.message, 'err');
