@@ -2459,7 +2459,7 @@ Screens.inventory = async () => {
 async function renderInventoryContent(activeTab) {
   // 활성 탭 State 에 저장 (재렌더 시 복원용)
   State._invActiveTab = activeTab;
-  const tabs = ['원재료', '완제품', '소모품'];
+  const tabs = ['원재료', '완제품', '소모품', '발주'];
 
   $id('content').innerHTML = `
     <div class="tab-filter">
@@ -2673,6 +2673,87 @@ async function renderInventoryContent(activeTab) {
         </div>
       `).join('');
     }
+  }
+
+  else if (activeTab === '발주') {
+    // 구매주문 + 거래처 동시 로드 (발주 탭 진입 시에만 — 전체 재고 진입 비용 절감)
+    let purchaseOrders = [], vendors = [];
+    try {
+      [purchaseOrders, vendors] = await Promise.all([
+        SheetsAPI.getAll('구매주문').catch(() => []),
+        SheetsAPI.getAll('거래처').catch(() => []),
+      ]);
+    } catch(e) { console.warn('발주 로드 실패:', e); }
+
+    // 거래처 코드 → 이름 lookup
+    const vendorMap = {};
+    vendors.forEach(v => { if (v[0]) vendorMap[v[0]] = v[1] || v[0]; });
+
+    // 단계 완료 판정 — 일자 필드 채워졌는지 기준 (status 보다 정확)
+    const isDone = (po, idx) => !!(po[idx] && String(po[idx]).trim());
+
+    // 종결·취소 제외한 활성 PO
+    const activePOs = purchaseOrders.filter(p => !['종결','취소'].includes(p[18]));
+
+    // 다음 대기 단계 카운트
+    const summary = { order: 0, recv: 0, tax: 0, pay: 0 };
+    activePOs.forEach(p => {
+      if (!isDone(p, 1)) summary.order++;
+      else if (!isDone(p, 10)) summary.recv++;
+      else if (!isDone(p, 13)) summary.tax++;
+      else if (!isDone(p, 15)) summary.pay++;
+    });
+
+    // 최근 주문 우선 정렬 (orderDt desc, 빈 값은 뒤)
+    activePOs.sort((a, b) => (b[1] || '').localeCompare(a[1] || ''));
+
+    let html = `
+      <div class="card info-box" style="background:#fff;border-left:4px solid var(--pri);margin-bottom:12px">
+        <div class="fs-13 fw-7 mb-6">📋 구매주문 현황 <span class="fs-11 c-txt-l">활성 ${activePOs.length}건</span></div>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <span class="fs-12"><span class="badge badge-gray">주문대기</span> <b>${summary.order}</b></span>
+          <span class="fs-12"><span class="badge badge-warn">수령대기</span> <b>${summary.recv}</b></span>
+          <span class="fs-12"><span class="badge badge-info">계산서대기</span> <b>${summary.tax}</b></span>
+          <span class="fs-12"><span class="badge badge-suc">입금대기</span> <b>${summary.pay}</b></span>
+        </div>
+      </div>
+    `;
+
+    if (activePOs.length === 0) {
+      html += `<div class="empty-state"><div class="es-icon">📋</div><div class="es-title">활성 구매주문 없음</div><div class="es-desc">신규 발주가 등록되면 여기에 표시됩니다</div></div>`;
+    } else {
+      html += activePOs.map(p => {
+        const orderDone = isDone(p, 1);
+        const recvDone = isDone(p, 10);
+        const taxDone = isDone(p, 13);
+        const payDone = isDone(p, 15);
+        const stColor = payDone ? 'suc' : taxDone ? 'info' : recvDone ? 'warn' : 'gray';
+        const stLabel = payDone ? '입금완료' : taxDone ? '계산서수령' : recvDone ? '수령완료' : orderDone ? '주문완료' : '주문대기';
+        const vendorName = vendorMap[p[3]] || p[3] || '-';
+        const qty = parseFloat(p[6]) || 0;
+        const unitPrice = parseFloat(p[8]) || 0;
+        const totalAmt = parseFloat(p[9]) || (qty * unitPrice) || 0;
+        const dot = (done) => done ? '<span style="color:var(--suc);font-weight:bold">●</span>' : '<span style="color:var(--gray-l)">○</span>';
+        return `
+          <div class="card bl-${stColor}" style="margin-bottom:8px">
+            <div class="row between mb-4">
+              <span class="fs-13 fw-7">${p[0] || '-'}</span>
+              <span class="badge badge-${stColor}">${stLabel}</span>
+            </div>
+            <div class="fs-12 mb-4"><b>${vendorName}</b> · ${p[5] || ''} ${qty || ''}${p[7] || ''}</div>
+            <div class="fs-11 c-txt-l mb-6">단가 ${unitPrice.toLocaleString()}원 · 합계 ${totalAmt.toLocaleString()}원</div>
+            <div class="row" style="gap:10px;font-size:11px;flex-wrap:wrap">
+              <span>${dot(orderDone)} 주문 ${(p[1] || '').substring(0,10)}</span>
+              <span>${dot(recvDone)} 수령 ${(p[10] || '').substring(0,10)}</span>
+              <span>${dot(taxDone)} 계산서 ${(p[13] || '').substring(0,10)}</span>
+              <span>${dot(payDone)} 입금 ${(p[15] || '').substring(0,10)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    listEl.innerHTML = html;
   }
 
   else if (activeTab === '입고') {
