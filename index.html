@@ -966,6 +966,24 @@ const SheetsAPI = {
     tabs.forEach(t => this.invalidateCache(t));
   },
 
+  // Create a new sheet tab (+ optional header row). Use spreadsheets:batchUpdate
+  // (NOT values:batchUpdate) — addSheet 은 메타데이터 변경이라 별도 엔드포인트.
+  async createSheet(tabName, headerRow = null) {
+    const url = `${this.baseUrl()}:batchUpdate`;
+    const body = { requests: [{ addSheet: { properties: { title: tabName } } }] };
+    const res = await this._fetch(url, { method: 'POST', body: JSON.stringify(body) });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      let detail = ''; try { const j = JSON.parse(errText); detail = j.error?.message || ''; } catch {}
+      throw new Error(`Sheets createSheet ${tabName}: ${res.status}${detail ? ' — ' + detail : ''}`);
+    }
+    if (headerRow && headerRow.length > 0) {
+      await this.append(tabName, headerRow);
+    }
+    this.invalidateCache(tabName);
+    return res.json();
+  },
+
   // Batch get
   async batchGet(ranges) {
     const params = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
@@ -2761,6 +2779,14 @@ async function renderInventoryContent(activeTab) {
 }
 
 // ─── 구매주문 (PO) — 등록 / 상세·처리 ───
+// 구매주문 시트 헤더 (20개 컬럼) — 자동 생성 / append 시 일관성 보장
+const PO_SHEET_HEADER = [
+  'poId', 'orderDt', 'ordererEmail', 'vendorCode', 'itemCode', 'itemName',
+  'qty', 'unit', 'unitPrice', 'totalAmt', 'recvDt', 'receiverEmail',
+  'recvLotId', 'taxInvoiceDt', 'taxInvoiceNo', 'paymentDt',
+  'paymentAccount', 'paymentConfirmer', 'status', 'note'
+];
+
 Screens['po-new'] = async () => {
   if (!Role.isProducer() && !Role.isAdmin()) {
     toast('생산자/관리자 권한 필요', 'err');
@@ -2938,13 +2964,27 @@ async function submitNewPO() {
 
   try {
     showLoading();
-    // 사전 점검 — '구매주문' 시트 탭 존재 확인 (없으면 명확한 안내)
+    // 사전 점검 — '구매주문' 시트 탭 존재 확인. 없으면 자동 생성 제안.
     try {
       await SheetsAPI.getAll('구매주문');
     } catch (probeErr) {
       hideLoading();
-      toast('Google Sheets 에 "구매주문" 시트 탭이 없습니다. 시트에 탭을 추가하고 헤더 1행(20개 컬럼)을 입력한 뒤 다시 시도하세요.', 'err', 7000);
-      console.error('[po-new] 구매주문 시트 미존재:', probeErr);
+      console.warn('[po-new] 구매주문 시트 미존재 — 자동 생성 제안:', probeErr.message);
+      confirm(
+        '구매주문 시트 자동 생성',
+        'Google Sheets 에 "구매주문" 탭이 없습니다.\n지금 자동으로 생성하시겠습니까?\n(헤더 20개 컬럼 포함)',
+        async () => {
+          try {
+            showLoading();
+            await SheetsAPI.createSheet('구매주문', PO_SHEET_HEADER);
+            hideLoading();
+            toast('구매주문 시트 생성 완료 — 발주 등록 버튼을 다시 눌러주세요.', 'suc', 5000);
+          } catch (createErr) {
+            hideLoading();
+            toast('시트 자동 생성 실패: ' + createErr.message, 'err', 7000);
+          }
+        }
+      );
       return;
     }
     const poId = await generateSeqId('PO', '구매주문');
