@@ -2692,7 +2692,7 @@ async function renderInventoryContent(activeTab) {
     const isDone = (po, idx) => !!(po[idx] && String(po[idx]).trim());
 
     // 종결·취소 제외한 활성 PO
-    const activePOs = purchaseOrders.filter(p => !['종결','취소'].includes(p[18]));
+    const activePOs = purchaseOrders.filter(p => !['종결','취소','삭제'].includes(p[18]));
 
     // 다음 대기 단계 카운트
     const summary = { order: 0, recv: 0, tax: 0, pay: 0 };
@@ -2809,9 +2809,10 @@ Screens['po-new'] = async () => {
   // RM002(물) 및 비활성 제외
   const activeItems = rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성');
 
-  // 품목 → 거래처 이력 매핑 (구매주문 + 입고기록 합산)
+  // 품목 → 거래처 이력 매핑 (구매주문 + 입고기록 합산, 삭제된 PO 제외)
   const itemVendors = {};
   pos.forEach(p => {
+    if (p[18] === '삭제') return;
     if (p[4] && p[3]) (itemVendors[p[4]] = itemVendors[p[4]] || new Set()).add(p[3]);
   });
   rcvs.forEach(r => {
@@ -3058,9 +3059,32 @@ Screens['po-detail'] = async (params = {}) => {
       ${poTaxSection(po, canTax, taxDone)}
       ${poPaySection(po, canPay, payDone, taxDone)}
       ${poRecvSection(po, canRecv, recvDone, payDone)}
+
+      ${poDeleteSection(po)}
     </div>
   `;
 };
+
+function poDeleteSection(po) {
+  if (po[18] === '삭제') {
+    return `
+      <div class="card mb-12" style="border:2px solid var(--err);background:#fff0f0">
+        <div class="fs-13 fw-7 c-err">🗑️ 삭제됨</div>
+        <div class="fs-11 c-txt-l mt-4">${po[19] || ''}</div>
+      </div>
+    `;
+  }
+  const isAdmin = State.user?.role === 'admin';
+  const isOwner = po[2] === State.user?.email;
+  if (!isAdmin && !isOwner) return '';
+  return `
+    <div class="card mb-12" style="border:1px dashed var(--err)">
+      <div class="fs-13 fw-7 c-err mb-6">위험 구역</div>
+      <div class="fs-11 c-txt-l mb-8">발주를 삭제하면 목록에서 사라지고 상태는 '삭제' 로 변경됩니다. 감사 추적용으로 데이터는 보존됩니다.</div>
+      <button class="btn btn-sm btn-err btn-full" onclick="deletePO('${po[0]}')">🗑️ 발주 삭제</button>
+    </div>
+  `;
+}
 
 function poStepRow(label, done, meta) {
   const dotStyle = done
@@ -3319,6 +3343,118 @@ async function savePOPayment(poId) {
   } catch (e) {
     toast('처리 실패: ' + e.message, 'err');
   } finally { hideLoading(); }
+}
+
+async function deletePO(poId) {
+  showLoading();
+  try {
+    SheetsAPI.invalidateCache('구매주문');
+    const pos = await SheetsAPI.getAll('구매주문', false);
+    const po = pos.find(p => p[0] === poId);
+    if (!po) { hideLoading(); toast('PO 를 찾을 수 없습니다', 'err'); return; }
+    if (po[18] === '삭제') { hideLoading(); toast('이미 삭제된 발주입니다', 'warn'); return; }
+
+    const isAdmin = State.user?.role === 'admin';
+    const isOwner = po[2] === State.user?.email;
+    if (!isAdmin && !isOwner) { hideLoading(); toast('본인 또는 관리자만 삭제 가능합니다', 'err'); return; }
+
+    const recvLotId = po[12] || '';
+    let lotStatus = '';
+    let lotCascadable = false;
+    if (recvLotId) {
+      const lots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
+      const lot = lots.find(l => l[0] === recvLotId);
+      lotStatus = lot ? (lot[9] || '') : '';
+      lotCascadable = lot && lot[9] === '미사용';  // 미사용 LOT 만 자동 입고취소 가능
+    }
+    hideLoading();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+      <div class="dialog" style="max-width:380px">
+        <div class="d-title">발주 삭제</div>
+        <div class="d-msg">${poId} · ${po[5]||''} ${po[6]||''}${po[7]||''}<br><span class="fs-11 c-txt-l">상태: ${po[18]||'-'}</span></div>
+        ${recvLotId ? `
+          <div class="card bl-err" style="background:#fff0f0;padding:10px;margin-bottom:10px">
+            <div class="fs-12 c-err fw-7">⚠ 수령 완료된 발주</div>
+            <div class="fs-11 c-txt-l mt-4">연결 LOT: ${recvLotId} (${lotStatus||'-'})</div>
+            ${lotCascadable
+              ? `<div class="check-item" id="cascade-lot-row" style="margin-top:8px;cursor:pointer"><div class="check-box" id="cascade-lot-box" style="border:2px solid var(--err)"></div><span class="fs-12">LOT 도 함께 '입고취소' 처리 (미사용 상태에서만 가능)</span></div>`
+              : `<div class="fs-11 c-txt-l mt-4">LOT 이 이미 사용/소진/폐기 상태 — LOT 은 보존됩니다</div>`}
+          </div>
+        ` : ''}
+        <div class="input-group" style="margin-bottom:8px">
+          <label>삭제 사유 (필수)</label>
+          <select id="po-del-reason-preset" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+            <option value="">— 사유 선택 —</option>
+            <option value="오등록">오등록</option>
+            <option value="중복">중복 등록</option>
+            <option value="거래처변경">거래처 변경</option>
+            <option value="수량변경">수량 변경 (재등록)</option>
+            <option value="발주취소">발주 취소</option>
+            <option value="테스트">테스트</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="input-group" style="margin-bottom:12px">
+          <textarea id="po-del-reason-detail" rows="2" placeholder="상세 사유 (선택)" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></textarea>
+        </div>
+        <div class="d-actions">
+          <button class="btn btn-sm btn-outline btn-gray" id="po-del-cancel">취소</button>
+          <button class="btn btn-sm btn-err" id="po-del-ok">삭제</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cascadeRow = overlay.querySelector('#cascade-lot-row');
+    if (cascadeRow) {
+      cascadeRow.onclick = () => {
+        const box = overlay.querySelector('#cascade-lot-box');
+        const checked = box.classList.toggle('checked');
+        box.style.background = checked ? 'var(--err)' : '';
+        box.textContent = checked ? '✓' : '';
+        box.style.color = checked ? '#fff' : '';
+      };
+    }
+    overlay.querySelector('#po-del-cancel').onclick = () => overlay.remove();
+    overlay.querySelector('#po-del-ok').onclick = () => {
+      const preset = overlay.querySelector('#po-del-reason-preset').value;
+      const detail = overlay.querySelector('#po-del-reason-detail').value?.trim();
+      if (!preset) { toast('삭제 사유를 선택하세요', 'err'); return; }
+      const reason = detail ? `${preset} — ${detail}` : preset;
+      const cascadeLot = !!(lotCascadable && overlay.querySelector('#cascade-lot-box')?.classList.contains('checked'));
+      overlay.remove();
+
+      confirm('정말 삭제하시겠습니까?', `${poId}\n사유: ${reason}${cascadeLot ? `\n+ LOT ${recvLotId} '입고취소' 처리` : ''}`, async () => {
+        if (!acquireLock('deletePO')) return;
+        try {
+          showLoading();
+          const existingNote = po[19] || '';
+          const noteUpdate = `[삭제 ${formatDateTime()} by ${State.user?.email||''}] ${reason}${existingNote ? ` | 기존: ${existingNote}` : ''}`;
+          await SheetsAPI.updateRow('구매주문', 0, poId, {
+            18: '삭제',
+            19: noteUpdate
+          });
+          if (cascadeLot && recvLotId) {
+            await SheetsAPI.updateRow('원재료LOT', 0, recvLotId, { 9: '입고취소' });
+            SheetsAPI.invalidateCache('원재료LOT');
+          }
+          SheetsAPI.invalidateCache('구매주문');
+          toast('발주 삭제 완료' + (cascadeLot ? ` (LOT ${recvLotId} 입고취소)` : ''), 'suc');
+          Router.go('inventory');
+        } catch (e) {
+          toast('삭제 실패: ' + e.message, 'err');
+        } finally {
+          hideLoading();
+          releaseLock('deletePO');
+        }
+      });
+    };
+  } catch (e) {
+    hideLoading();
+    toast('삭제 처리 실패: ' + e.message, 'err');
+  }
 }
 
 // ─── LOT DETAIL ───
