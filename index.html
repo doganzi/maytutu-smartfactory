@@ -4401,9 +4401,38 @@ Screens.more = () => {
           </div>
         </div>
       `).join('')}
+      <div class="fs-11 c-txt-l" style="text-align:center;padding:16px 0;opacity:0.7">
+        ${buildVersionLabel()}
+      </div>
     </div>
   `;
 };
+
+// 빌드 버전 라벨 — document.lastModified 활용 (GitHub Pages 가 빌드 시각 기록)
+function buildVersionLabel() {
+  const lm = document.lastModified;
+  let label = '버전 정보 없음';
+  if (lm) {
+    const d = new Date(lm);
+    if (!isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0');
+      label = `배포: ${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+  return `${label} · <a href="#" onclick="forceRefresh();return false" style="color:var(--info)">강제 새로고침</a>`;
+}
+
+// 캐시 무시하고 페이지 재로드
+function forceRefresh() {
+  if (!window.confirm('캐시를 비우고 최신 버전을 가져옵니다. 진행할까요?')) return;
+  if ('caches' in window) {
+    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).finally(() => {
+      window.location.reload(true);
+    });
+  } else {
+    window.location.reload(true);
+  }
+}
 
 // ─── SETTINGS ───
 Screens.settings = () => {
@@ -4440,6 +4469,7 @@ Screens.settings = () => {
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
         <div class="fs-12 c-txt-l">메이투투 스마트팩토리 v1.0</div>
         <div class="fs-12 c-txt-l">HACCP 기반 생산공정 관리 시스템</div>
+        <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:8px">${buildVersionLabel()}</div>
       </div>
       <button class="btn btn-outline btn-err btn-full mt-16" onclick="Auth.logout()">로그아웃</button>
     </div>
