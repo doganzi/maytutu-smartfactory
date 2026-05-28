@@ -786,7 +786,8 @@ const Auth = {
    ROLE — 역할별 권한 헬퍼
    사용자 시트 role 컬럼 값: admin / producer / accounting / worker
    구매주문 단계별 편집 권한:
-     order(주문)·recv(수령) → producer + admin
+     order(주문) → producer + worker + admin
+     recv(수령)  → producer + admin
      tax(세금계산서)·pay(입금) → accounting + admin
    ═══════════════════════════════════════════════ */
 const Role = {
@@ -794,11 +795,13 @@ const Role = {
   isAdmin() { return this.current() === 'admin'; },
   isProducer() { return this.current() === 'producer'; },
   isAccounting() { return this.current() === 'accounting'; },
+  canCreateOrder() { const r = this.current(); return r === 'admin' || r === 'producer' || r === 'worker'; },
   /** 구매주문 단계별 편집 가능 여부 */
   canEditPO(stage) {
     const r = this.current();
     if (r === 'admin') return true;
-    if ((stage === 'order' || stage === 'recv') && r === 'producer') return true;
+    if (stage === 'order' && (r === 'producer' || r === 'worker')) return true;
+    if (stage === 'recv' && r === 'producer') return true;
     if ((stage === 'tax' || stage === 'pay') && r === 'accounting') return true;
     return false;
   },
@@ -2754,8 +2757,8 @@ async function renderInventoryContent(activeTab) {
     }
 
     listEl.innerHTML = html;
-    // FAB(+) — 신규 발주 등록 (producer / admin 만 노출)
-    if (Role.isProducer() || Role.isAdmin()) {
+    // FAB(+) — 신규 발주 등록 (worker / producer / admin 노출)
+    if (Role.canCreateOrder()) {
       listEl.innerHTML += `<div class="fab" onclick="Router.go('po-new')">+</div>`;
     }
   }
@@ -2789,8 +2792,8 @@ const PO_SHEET_HEADER = [
 ];
 
 Screens['po-new'] = async () => {
-  if (!Role.isProducer() && !Role.isAdmin()) {
-    toast('생산자/관리자 권한 필요', 'err');
+  if (!Role.canCreateOrder()) {
+    toast('발주 등록 권한이 없습니다', 'err');
     Router.go('inventory');
     return;
   }
