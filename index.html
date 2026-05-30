@@ -10460,9 +10460,13 @@ async function generateWOPdf(woId) {
       }
 
       const ROW_H = 12;
+      // 페이지 브레이크 임계: rect + 내부 텍스트(drawText 자체 임계 PH-12)가 동시에 안전하게 들어가도록.
+      // drawText 는 yy+totalH > PH-12 일 때 자동 addPage 하므로, 루프에서 rect 만 그리고 텍스트가 다음 페이지로 넘어가
+      // 한 항목 텍스트가 외톨이로 다음 페이지 상단에 표시되는 현상 방지.
+      const ROW_BREAK = PH - 12 - ROW_H;
       if (lotOrder.length < allLots.length) {
         for (let gi = 0; gi < lotOrder.length; gi++) {
-          if (y > PH - 14) { doc.addPage(); y = M; }
+          if (y > ROW_BREAK) { doc.addPage(); y = M; }
           const lotId = lotOrder[gi];
           const cnt = lotGroups[lotId];
           doc.setFillColor(gi % 2 === 0 ? 242 : 232, gi % 2 === 0 ? 247 : 245, 253);
@@ -10475,7 +10479,7 @@ async function generateWOPdf(woId) {
         }
       } else {
         for (let li = 0; li < allLots.length; li++) {
-          if (y > PH - 14) { doc.addPage(); y = M; }
+          if (y > ROW_BREAK) { doc.addPage(); y = M; }
           doc.setFillColor(li % 2 === 0 ? 242 : 232, li % 2 === 0 ? 247 : 245, 253);
           doc.rect(M, y, CW, ROW_H, 'F');
           doc.setDrawColor(210, 220, 240); doc.setLineWidth(0.1);
@@ -10485,8 +10489,9 @@ async function generateWOPdf(woId) {
         }
       }
 
-      // 총 투입 수량 요약
+      // 총 투입 수량 요약 — 동일 사유로 rect+text 가 같은 페이지에 들어가도록 미리 페이지 브레이크 검사
       y += 1.5;
+      if (y > ROW_BREAK) { doc.addPage(); y = M; }
       doc.setFillColor(248, 250, 255);
       doc.rect(M, y, CW, 12, 'F');
       const summaryText = lotOrder.length < allLots.length
