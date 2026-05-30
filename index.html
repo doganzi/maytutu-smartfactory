@@ -391,8 +391,7 @@ function acquireLock(name) {
 function releaseLock(name) { _actionLocks[name] = false; clearTimeout(_lockTimers[name]); }
 
 function showLoading() { $id('loading').classList.remove('hidden'); }
-function hideLoading() { $id('loading').classList.add('hidden'); setLoadingMsg('로딩 중...'); }
-function setLoadingMsg(msg) { const el = $id('loading'); if (!el) return; const m = el.children[1]; if (m) m.textContent = msg || '로딩 중...'; }
+function hideLoading() { $id('loading').classList.add('hidden'); }
 
 function toast(msg, type = 'info', duration = 2500) {
   const el = $id('toast');
@@ -6314,11 +6313,6 @@ Screens['wo-pdfs'] = async () => {
         <div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:12px">
           <div class="fs-13 fw-7 c-info mb-4">📄 ${pdfWos.length}건 PDF 저장됨</div>
           <div class="fs-11 c-txt-l">${isAdmin ? '관리자 — 전체 작업지시서' : '본인이 작업한 건만 표시'} · 최신순</div>
-          ${isAdmin && pdfWos.length > 0 ? `
-            <button class="btn btn-sm btn-outline btn-pri" style="width:100%;margin-top:8px" onclick="regenerateAllPdfs()">
-              🔄 모든 PDF 재생성 (${pdfWos.length}건) — 최신 코드 반영
-            </button>
-          ` : ''}
         </div>
 
         ${filterStatuses.length > 1 ? `
@@ -10667,48 +10661,6 @@ async function generateAndSaveWOPdf(woId) {
   } catch (e) {
     console.error(`[PDF] PDF 생성/저장 실패:`, e);
     throw e;
-  }
-}
-
-/* 모든 저장된 PDF 일괄 재생성 — 관리자 전용 */
-async function regenerateAllPdfs() {
-  if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
-  try {
-    SheetsAPI.invalidateCache('작업지시서');
-    const wos = await SheetsAPI.getAll('작업지시서', false);
-    const targets = wos.filter(w => w[19] && (w[19]+'').trim() && w[12] !== '삭제');
-    if (targets.length === 0) { toast('재생성할 PDF 없음', 'info'); return; }
-    const estMin = Math.max(1, Math.ceil(targets.length * 10 / 60));
-    confirm('PDF 일괄 재생성',
-      `저장된 ${targets.length}건의 PDF를 새로 생성합니다.\n약 ${estMin}분 소요 예상.\n진행 중 앱을 닫지 마세요.`,
-      async () => {
-        if (!acquireLock('regenAllPdfs')) { toast('이미 진행 중입니다', 'warn'); return; }
-        let success = 0, fail = 0;
-        const failed = [];
-        showLoading();
-        try {
-          for (let i = 0; i < targets.length; i++) {
-            const w = targets[i];
-            setLoadingMsg(`PDF 재생성 중 (${i+1}/${targets.length}) — ${w[0]}`);
-            try {
-              await generateAndSaveWOPdf(w[0]);
-              success++;
-            } catch (e) {
-              fail++;
-              failed.push(w[0]);
-              console.warn(`[일괄 PDF] ${w[0]} 실패:`, e);
-            }
-          }
-        } finally {
-          hideLoading();
-          releaseLock('regenAllPdfs');
-        }
-        const failNote = fail > 0 ? ` / ${fail}건 실패 (${failed.slice(0,3).join(', ')}${failed.length>3?'...':''})` : '';
-        toast(`재생성 완료: ${success}건 성공${failNote}`, fail === 0 ? 'suc' : 'warn', 8000);
-        Screens['wo-pdfs']();
-      });
-  } catch (e) {
-    toast('실패: ' + e.message, 'err');
   }
 }
 
