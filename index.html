@@ -744,6 +744,8 @@ const Auth = {
   },
 
   async login() {
+    // iOS 홈화면 PWA(standalone): GIS 팝업이 Safari 브라우저로 빠져 callback 유실 → 전체 리다이렉트 로그인(webview 내 유지)
+    if (this._isStandalone()) { this._redirectLogin(); return; }
     try {
       await this.ensureTokenClient();
     } catch (e) {
@@ -752,6 +754,19 @@ const Auth = {
     }
     // prompt:'' — 첫 로그인만 동의 1회, 이후 자동. GIS 팝업(전체 리다이렉트 아님) → 세션 유지·매번 계정선택 제거
     this._tokenClient.requestAccessToken({ prompt: '' });
+  },
+
+  // iOS 홈화면 앱 등 standalone 표시 모드 감지
+  _isStandalone() {
+    return window.navigator.standalone === true
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  },
+  // standalone 전용: 팝업 대신 전체 페이지 리다이렉트 OAuth (토큰은 hash 로 돌아와 init() 이 처리)
+  _redirectLogin() {
+    let redirect = window.location.origin + window.location.pathname;
+    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=select_account&hd=anghodu.biz`;
+    window.location.href = url;
   },
 
   logout() {
