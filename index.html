@@ -1292,7 +1292,7 @@ const LiveSync = {
     // 'lot-detail' / 'inventory' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (자동 재렌더 시
     // 펼침 상태 손실로 페이지 높이가 짧아져 scrollY 복원이 무효화되는 이슈 방지).
     const screenForGuard = State.currentScreen;
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail'];
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm'];
     if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
@@ -6850,6 +6850,14 @@ Screens['items-rm'] = async () => {
               .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
           const rmNeedsOrder = !isWater && rpVal > 0 && totalRemain <= rpVal;
           const lotCount = lots.filter(l => l[1] === code).length;
+          // 표시 단위 환산 (계란: 30알/판 = 1.5kg/판 → 발주점도 판 단위로 표시)
+          const parsed = parseSkuUnit(sku);
+          let rpDispBody = rpVal > 0 ? `${rpVal}${unit}` : '미설정';
+          if (parsed && parsed.perUnit > 0 && rpVal > 0) {
+            const u = Math.round(rpVal / parsed.perUnit * 10) / 10;
+            rpDispBody = `${u}${parsed.unitName} (${rpVal}${unit})`;
+          }
+          const editPayload = `'${code}','${(name||'').replace(/'/g,"\\'")}',${rpVal},'${(sku||'').replace(/'/g,"\\'")}','${unit}'`;
           return `
             <div class="card" ${rmNeedsOrder ? 'style="border-left:3px solid var(--warn)"' : ''}>
               <div class="row between mb-4">
@@ -6862,17 +6870,84 @@ Screens['items-rm'] = async () => {
               </div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit} · SKU: ${sku || '-'}</div>
               <div class="fs-12 c-txt-l">분류: ${category || '-'} · 보관: ${storage} · 알레르겐: ${allergen || '없음'}</div>
-              ${!isWater ? `<div class="fs-12" style="margin-top:4px">현재고: <b>${totalRemain}${unit}</b>${rpVal > 0 ? ` · 발주점: ${rpVal}${unit}` : ''}${lotCount > 0 ? ` · LOT ${lotCount}건` : ''}</div>` : ''}
+              ${!isWater ? `
+                <div class="row between" style="margin-top:4px;align-items:center;gap:6px">
+                  <div class="fs-12">현재고: <b>${totalRemain}${unit}</b> · 발주점: <b>${rpDispBody}</b>${lotCount > 0 ? ` · LOT ${lotCount}건` : ''}</div>
+                  <button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px;flex-shrink:0" onclick="openReorderPointEditor(${editPayload})">✏️ 발주점</button>
+                </div>
+              ` : ''}
               ${!isWater && (leadDays || orderCycle) ? `<div class="fs-11 c-txt-l">리드타임: ${leadDays || '-'}일 · 주문주기: ${orderCycle || '-'}</div>` : ''}
             </div>`;
         }).join('')
       }
       <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
-        <div class="fs-12 c-txt-l">품목 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/edit#gid=0','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+        <div class="fs-12 c-txt-l">품목 추가는 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/edit#gid=0','_blank')"><b>Google Sheets</b></span>에서 관리됩니다 · 발주점은 위 ✏️ 버튼으로 직접 수정 가능</div>
       </div>
     </div>
   `;
 };
+
+/* 발주점 편집 모달 — SKU 단위(판/통/봉) 인식해 친화적 입력 */
+function openReorderPointEditor(code, name, currentRpKg, sku, unit) {
+  const parsed = parseSkuUnit(sku);
+  const hasSkuUnit = parsed && parsed.perUnit > 0;
+  const perUnit = hasSkuUnit ? parsed.perUnit : 1;
+  const unitName = hasSkuUnit ? parsed.unitName : (unit || 'kg');
+  const curInUnit = hasSkuUnit ? (currentRpKg / perUnit) : currentRpKg;
+  const step = hasSkuUnit ? 1 : 0.1;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:340px">
+      <div class="fs-16 fw-7 mb-8">📦 발주점 수정</div>
+      <div class="fs-12 c-txt-l mb-8">${code} · ${name}${sku ? ' · ' + sku : ''}</div>
+      <div class="input-group" style="margin-bottom:8px">
+        <label>발주점 (${unitName} 단위)</label>
+        <input type="number" id="rp-input" value="${curInUnit}" min="0" step="${step}" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      ${hasSkuUnit ? `
+        <div class="card bl-info" style="background:#e3f2fd;padding:8px;margin-bottom:12px">
+          <div class="fs-11 c-info">${unitName} 1개 = ${perUnit}${unit || 'kg'}</div>
+          <div class="fs-11 c-txt-l">예: 46${unitName} → ${(46 * perUnit).toFixed(1)}${unit || 'kg'} · 시트에는 kg 환산값 저장</div>
+          <div class="fs-11 c-txt-l">현재값: ${currentRpKg}${unit || 'kg'} (${(currentRpKg / perUnit).toFixed(1)}${unitName})</div>
+        </div>
+      ` : `
+        <div class="fs-11 c-txt-l mb-12">SKU 단위 정보 없음 — ${unitName} 단위로 입력</div>
+      `}
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="rp-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="rp-save">저장</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#rp-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#rp-save').onclick = () => saveReorderPoint(code, name, perUnit, unit, close);
+  setTimeout(() => $id('rp-input')?.focus(), 50);
+}
+
+async function saveReorderPoint(code, name, perUnit, unit, closeFn) {
+  const raw = $id('rp-input')?.value;
+  const input = parseFloat(raw);
+  if (isNaN(input) || input < 0) { toast('0 이상의 숫자를 입력하세요', 'err'); return; }
+  const kg = Math.round(input * perUnit * 100) / 100;
+  if (!acquireLock('saveReorderPoint')) return;
+  try {
+    showLoading();
+    await SheetsAPI.updateCell('원재료품목', 0, code, 9, String(kg));
+    SheetsAPI.invalidateCache('원재료품목');
+    toast(`${code} ${name} 발주점 ${kg}${unit || 'kg'} 저장`, 'suc');
+    closeFn && closeFn();
+    await Screens['items-rm']();
+  } catch (e) {
+    toast('저장 실패: ' + e.message, 'err', 5000);
+  } finally {
+    hideLoading();
+    releaseLock('saveReorderPoint');
+  }
+}
 
 /* 원재료 품목 비활성화 (관리자) — i[12] = '비활성'.
    삭제가 아닌 soft delete: 시트 row 보존, UI 에서만 숨김.
@@ -6990,19 +7065,24 @@ Screens.vendors = async () => {
   try { vendors = await SheetsAPI.getAll('거래처').catch(() => []); } catch(e) {}
   hideLoading();
 
+  window._vendorsCache = vendors;
+
   $id('content').innerHTML = `
-    <div style="padding:16px">
-      <div class="fs-12 c-txt-l mb-8">총 ${vendors.length}개 거래처 · DB 연동 조회</div>
+    <div style="padding:16px;position:relative">
+      <div class="fs-12 c-txt-l mb-8">총 ${vendors.length}개 거래처 · 우측 ✏️ 로 수정 · 하단 + 로 추가</div>
       ${vendors.length === 0 ?
-        `<div class="empty-state"><div class="es-icon">🏢</div><div class="es-title">등록된 거래처 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        `<div class="empty-state"><div class="es-icon">🏢</div><div class="es-title">등록된 거래처 없음</div><div class="es-desc">하단 + 버튼으로 신규 등록</div></div>` :
         vendors.map(v => {
-          const code = v[0], name = v[1], type = v[2] || '', contact = v[3] || '';
+          const code = v[0], name = v[1] || '', type = v[2] || '', contact = v[3] || '';
           const phone = v[4] || '', addr = v[5] || '', note = v[6] || '';
           return `
             <div class="card">
               <div class="row between mb-4">
-                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
-                <span class="badge badge-${type === '공급' ? 'pri' : type === '고객' ? 'suc' : 'gray'}">${type || '기타'}</span>
+                <div class="fs-14 fw-6" style="flex:1;min-width:0">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                <div class="row" style="gap:6px;align-items:center;flex-shrink:0">
+                  <span class="badge badge-${type === '공급' ? 'pri' : type === '고객' ? 'suc' : 'gray'}">${type || '기타'}</span>
+                  <button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openVendorEditor('${code}')">✏️</button>
+                </div>
               </div>
               <div class="fs-12 c-txt-l">${contact ? '담당: ' + contact : ''}${phone ? ' · ☎ ' + phone : ''}</div>
               ${addr ? `<div class="fs-12 c-txt-l">${addr}</div>` : ''}
@@ -7010,12 +7090,98 @@ Screens.vendors = async () => {
             </div>`;
         }).join('')
       }
-      <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
-        <div class="fs-12 c-txt-l">거래처 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
-      </div>
+      <div class="fab" onclick="openVendorEditor()">+</div>
     </div>
   `;
 };
+
+/* 거래처 편집 모달 — code 미지정 시 신규 등록 */
+function openVendorEditor(code) {
+  const vendors = window._vendorsCache || [];
+  const v = code ? vendors.find(x => x[0] === code) : null;
+  const isEdit = !!v;
+  const esc = s => String(s || '').replace(/"/g, '&quot;');
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px">
+      <div class="fs-16 fw-7 mb-8">🏢 ${isEdit ? '거래처 수정' : '신규 거래처 등록'}</div>
+      ${isEdit ? `<div class="fs-12 c-txt-l mb-8">코드: <b>${v[0]}</b></div>` : ''}
+      <div class="input-group" style="margin-bottom:10px">
+        <label>거래처명 *</label>
+        <input type="text" id="vd-name" value="${esc(v?.[1])}" placeholder="예: ㈜ABC식품" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label>유형</label>
+        <select id="vd-type" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          <option value="공급" ${v?.[2] === '공급' ? 'selected' : ''}>공급 (원재료 공급처)</option>
+          <option value="고객" ${v?.[2] === '고객' ? 'selected' : ''}>고객 (완제품 출하처)</option>
+          <option value="기타" ${v?.[2] === '기타' ? 'selected' : ''}>기타</option>
+        </select>
+      </div>
+      <div class="grid-2" style="gap:8px;margin-bottom:10px">
+        <div class="input-group">
+          <label>담당자</label>
+          <input type="text" id="vd-contact" value="${esc(v?.[3])}" placeholder="이름" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+        <div class="input-group">
+          <label>전화</label>
+          <input type="tel" id="vd-phone" value="${esc(v?.[4])}" placeholder="010-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+      </div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label>주소</label>
+        <input type="text" id="vd-addr" value="${esc(v?.[5])}" placeholder="시·도 ..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>비고</label>
+        <input type="text" id="vd-note" value="${esc(v?.[6])}" placeholder="결제조건, 메모 등" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="vd-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="vd-save">${isEdit ? '저장' : '등록'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#vd-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#vd-save').onclick = () => saveVendor(isEdit ? v[0] : null, close);
+}
+
+async function saveVendor(existingCode, closeFn) {
+  const name = $id('vd-name')?.value?.trim();
+  if (!name) { toast('거래처명 필수', 'err'); return; }
+  const type = $id('vd-type')?.value || '공급';
+  const contact = $id('vd-contact')?.value?.trim() || '';
+  const phone = $id('vd-phone')?.value?.trim() || '';
+  const addr = $id('vd-addr')?.value?.trim() || '';
+  const note = $id('vd-note')?.value?.trim() || '';
+  if (!acquireLock('saveVendor')) return;
+  try {
+    showLoading();
+    if (existingCode) {
+      await SheetsAPI.updateRow('거래처', 0, existingCode, { 1: name, 2: type, 3: contact, 4: phone, 5: addr, 6: note });
+      toast(`거래처 수정 완료: ${name}`, 'suc');
+    } else {
+      const vendors = await SheetsAPI.getAll('거래처').catch(() => []);
+      let max = 0;
+      vendors.forEach(x => { const m = (x[0]||'').match(/^V(\d+)$/); if (m) max = Math.max(max, parseInt(m[1])); });
+      const code = 'V' + String(max + 1).padStart(3, '0');
+      await SheetsAPI.append('거래처', [code, name, type, contact, phone, addr, note]);
+      toast(`거래처 등록 완료: ${code} ${name}`, 'suc');
+    }
+    SheetsAPI.invalidateCache('거래처');
+    closeFn && closeFn();
+    await Screens.vendors();
+  } catch (e) {
+    toast('저장 실패: ' + e.message, 'err', 5000);
+  } finally {
+    hideLoading();
+    releaseLock('saveVendor');
+  }
+}
 
 // ─── HACCP ───
 Screens.haccp = async () => {
