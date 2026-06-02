@@ -1297,6 +1297,16 @@ const LiveSync = {
       console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
       return;
     }
+    // 출하 선택 모드 — 완제품 LOT 에 출하 선택(체크박스) 1개라도 있으면 자동 트리거 스킵.
+    // (재고/Lot-detail 외 다른 화면으로 잠시 옮겨가는 동안에도 폴링 차단 효과)
+    if (trigger !== 'manual' && State._selectedShipIds instanceof Map) {
+      let pendingCount = 0;
+      for (const s of State._selectedShipIds.values()) pendingCount += s.size || 0;
+      if (pendingCount > 0) {
+        console.log(`[LiveSync] 출하 선택 ${pendingCount}건 진행 중 — ${trigger} 스킵`);
+        return;
+      }
+    }
     // 모달 다이얼로그 오픈 중이면 자동 트리거 시 스킵 — 모달 사라짐/페이지 튕김 방지
     if (trigger !== 'manual') {
       const openDialog = document.querySelector('.dialog-overlay:not(.hidden)');
@@ -2674,6 +2684,21 @@ async function renderInventoryContent(activeTab) {
         });
       });
       listEl.innerHTML = html;
+      // 펼침 상태 자동 복원 — State._invFgExpandedLots 에 남은 LOT 들을 다시 열어 사용자가
+      // 작업 중이던 위치를 유지. 출하 후 부분 갱신/Router.go 재진입 시에도 적용.
+      if (State._invFgExpandedLots && State._invFgExpandedLots.size > 0) {
+        const stillPresent = new Set();
+        for (const lotId of [...State._invFgExpandedLots]) {
+          const lot = (State.finishedGoodsLots || []).find(l => l[0] === lotId);
+          if (!lot) continue; // 출하완료 등으로 LOT 사라지면 Set 에서도 제거
+          stillPresent.add(lotId);
+          const itemCode = lot[1] || 'FG002';
+          const itemName = grouped[itemCode]?.name || '';
+          // 다음 tick 에서 펼침 (DOM 안정 후) — toggle 동작이므로 닫힌 상태→열림으로 전환
+          setTimeout(() => showLotIndividuals(lotId, itemName, 'fg'), 0);
+        }
+        State._invFgExpandedLots = stillPresent;
+      }
     }
   }
 
@@ -3625,12 +3650,18 @@ async function showLotIndividuals(lotId, itemName, type) {
   const container = $id('indiv-list-' + safeId);
   if (!container) return;
 
+  // 완제품 탭 펼침 상태 영속화 — 화면 재렌더 후에도 자동 복원되도록 State 에 저장.
+  if (!State._invFgExpandedLots) State._invFgExpandedLots = new Set();
+  const isFG = type === 'fg';
+
   // 토글
   if (container.style.display !== 'none') {
     container.style.display = 'none';
+    if (isFG) State._invFgExpandedLots.delete(lotId);
     return;
   }
   container.style.display = 'block';
+  if (isFG) State._invFgExpandedLots.add(lotId);
   container.innerHTML = '<div class="loading-inline"><div class="spinner-s"></div> 개별 조회 중...</div>';
 
   try {
@@ -3867,14 +3898,7 @@ async function executeSelectedShipment(lotId, indivIds, itemName, customerName) 
     // 선택 상태 초기화
     State._selectedShipIds?.delete(lotId);
     toast(`${lotId} 선택 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
-    const cur = State.currentScreen;
-    if (cur === 'lot-detail') {
-      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
-      const params = State._screenParams?.['lot-detail'] || {};
-      setTimeout(() => Router.go('lot-detail', params), 800);
-    } else {
-      setTimeout(() => Router.go('inventory'), 1200);
-    }
+    refreshAfterShipment(lotId, 800);
   } catch (e) {
     toast('선택 출하 실패: ' + e.message, 'err', 5000);
     console.error('[executeSelectedShipment]', e);
@@ -11167,6 +11191,23 @@ async function showShipmentPopup(indivId, lotId, itemName) {
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
 
+/* 출하 완료 후 공통 갱신 — Router.go 강제 재진입 대신 현재 화면별로 최적 처리.
+   - lot-detail: Router.go 재호출 (단일 LOT 포커스라 비용 작음) + scroll 보존.
+   - inventory(완제품 출하 화면): scroll 위치 저장 + Router.go 재진입 시 펼침 상태/
+     스크롤 동시 복원 (State._invFgExpandedLots + sessionStorage). */
+function refreshAfterShipment(lotId, delay = 800) {
+  const cur = State.currentScreen;
+  if (cur === 'lot-detail') {
+    try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
+    const params = State._screenParams?.['lot-detail'] || {};
+    setTimeout(() => Router.go('lot-detail', params), delay);
+  } else {
+    // inventory 등 — 펼친 LOT 컨테이너 안으로 스크롤이 가 있으면 그 위치 보존
+    try { sessionStorage.setItem('mt_scroll:inventory', String(window.scrollY)); } catch(e) {}
+    setTimeout(() => Router.go('inventory'), delay + 200);
+  }
+}
+
 /* ─── LOT 전체 출하 팝업 — 거래처 미선택. 출하 메모(자유입력)만 받음. ─── */
 async function showLotShipmentPopup(lotId, itemName, expectedCount) {
   const overlay = document.createElement('div');
@@ -11258,15 +11299,7 @@ async function executeLotShipment(lotId, itemName, customerName, customerCode) {
     SheetsAPI.invalidateCache('완제품LOT');
     SheetsAPI.invalidateCache('완제품개별');
     toast(`${lotId} 전체 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
-    const cur = State.currentScreen;
-    if (cur === 'lot-detail') {
-      // 현재 lot-detail 화면 유지 — 스크롤 위치 보존 + 데이터만 fresh 재렌더
-      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
-      const params = State._screenParams?.['lot-detail'] || {};
-      setTimeout(() => Router.go('lot-detail', params), 800);
-    } else {
-      setTimeout(() => Router.go('inventory'), 1200);
-    }
+    refreshAfterShipment(lotId, 800);
   } catch (e) {
     toast('전체 출하 실패: ' + e.message, 'err', 5000);
     console.error('[executeLotShipment]', e);
@@ -11339,16 +11372,10 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     }
 
     toast(`출하 완료: ${indivId} → ${customerName}`, 'suc');
-    const cur = State.currentScreen;
-    if (cur === 'qr-scan') {
+    if (State.currentScreen === 'qr-scan') {
       setTimeout(() => Router.go('qr-scan'), 1000);
-    } else if (cur === 'lot-detail') {
-      // 현재 lot-detail 화면 유지 — 스크롤 위치 보존 + 데이터만 fresh 재렌더
-      try { sessionStorage.setItem('mt_scroll:lot-detail', String(window.scrollY)); } catch(e) {}
-      const params = State._screenParams?.['lot-detail'] || {};
-      setTimeout(() => Router.go('lot-detail', params), 600);
     } else {
-      setTimeout(() => Router.go('inventory'), 1000);
+      refreshAfterShipment(lotId, 600);
     }
   } catch (e) {
     toast('출하 실패: ' + e.message, 'err');
