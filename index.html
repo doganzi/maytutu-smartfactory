@@ -250,6 +250,8 @@ a { text-decoration:none; color:inherit; }
 .printer-setting-row select, .printer-setting-row input { font-size:13px; padding:6px 8px; border:1px solid var(--gray-l); border-radius:6px; flex:1; }
 .printer-info-box { background:#f0f7ff; border:1px solid #cce0ff; border-radius:8px; padding:10px 12px; font-size:11px; color:#1a5276; line-height:1.5; margin-top:8px; }
 </style>
+<!-- Google Identity Services — GIS 토큰 클라이언트 (silent SSO + FedCM, 1회 동의 후 무화면 세션 유지) -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -558,7 +560,10 @@ const Auth = {
   _silentRefreshing: false,  // 동시 갱신 방지
 
   init() {
-    // 0. silent refresh 응답 처리 (prompt=none 의 error= 케이스)
+    // GIS 토큰 클라이언트 백그라운드 초기화 + 탭 복귀 시 토큰 신선도 재확인 (런처 동일 패턴)
+    this.ensureTokenClient().catch(e => console.warn('[Auth] GIS init deferred:', e && e.message));
+    this._wireVisibility();
+    // 0. silent refresh 응답 처리 (레거시 prompt=none redirect 의 error= 케이스 — GIS 도입 후 미사용)
     const hash = window.location.hash;
     if (hash && hash.includes('error=')) {
       const params = new URLSearchParams(hash.substring(1));
@@ -612,96 +617,125 @@ const Auth = {
     console.log(`[Auth] Token refresh scheduled in ${Math.round(refreshIn/1000)}s`);
   },
 
-  // iframe silent refresh — 동기 호출 가능, 실패 시 full-page 로 폴백
-  _silentRefreshOrFullPage() {
-    if (this._silentRefreshing) return;
-    this._silentRefreshing = true;
-    let resolved = false;
+  // ── GIS 토큰 클라이언트 (런처 검증 패턴 — FedCM, 무화면 갱신, Safari ITP 우회) ──
+  _tokenClient: null,
+  _tokenClientPromise: null,
+  _silentInProgress: false,
+  _visibilityWired: false,
 
-    const onSuccess = () => { resolved = true; this._silentRefreshing = false; };
-
-    // 1차: iframe 시도
-    this._silentRefresh(() => {
-      onSuccess();
-      // 갱신 성공 → API 자연스럽게 동작
+  _wireVisibility() {
+    if (this._visibilityWired) return;
+    this._visibilityWired = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!this._tokenExpiry) return;                                  // 미로그인
+      if (this._tokenExpiry - Date.now() < 5 * 60 * 1000) this.signInSilently();
     });
-
-    // 2차: 5초 후에도 갱신 안 됐으면 full-page redirect (UX 잠깐 깜박임)
-    setTimeout(() => {
-      if (!resolved && !this.isTokenFresh()) {
-        console.warn('[Auth] iframe silent refresh failed, falling back to full-page prompt=none');
-        this._silentRefreshing = false;
-        this._fullPageSilentRefresh();
-      }
-    }, 5000);
   },
 
-  _silentRefresh(onSuccess) {
-    let redirect = window.location.origin + window.location.pathname;
-    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
-    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=none`;
-
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = url;
-    let handled = false;
-
-    const cleanup = () => {
-      if (handled) return;
-      handled = true;
-      try { document.body.removeChild(iframe); } catch(e) {}
-    };
-
-    iframe.onload = () => {
-      try {
-        const iframeHash = iframe.contentWindow.location.hash;
-        if (iframeHash && iframeHash.includes('access_token')) {
-          const params = new URLSearchParams(iframeHash.substring(1));
-          State.token = params.get('access_token');
-          const expiresIn = parseInt(params.get('expires_in')) || 3600;
-          this._tokenExpiry = Date.now() + expiresIn * 1000;
-          localStorage.setItem('mt_token', State.token);
-          localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
-          this._scheduleRefresh(expiresIn);
-          console.log('[Auth] Token silently refreshed (iframe)');
-          if (onSuccess) onSuccess();
+  _waitForGis(maxMs = 20000) {
+    return new Promise((resolve, reject) => {
+      const t0 = Date.now();
+      let reinjected = false;
+      const tick = () => {
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) return resolve();
+        const elapsed = Date.now() - t0;
+        if (!reinjected && elapsed > 5000) {                           // flaky 네트워크 — GIS 1회 재주입
+          reinjected = true;
+          try {
+            const s = document.createElement('script');
+            s.src = 'https://accounts.google.com/gsi/client';
+            s.async = true; s.defer = true;
+            document.head.appendChild(s);
+          } catch (e) {}
         }
-      } catch (e) {
-        console.warn('[Auth] Silent refresh iframe blocked (cross-origin), full-page fallback may run');
-      }
-      cleanup();
-    };
-    setTimeout(cleanup, 10000);
-    document.body.appendChild(iframe);
+        if (elapsed > maxMs) return reject(new Error('GIS 로드 timeout'));
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
   },
 
-  // full-page redirect — iframe 차단 환경에서도 동작. 성공 시 hash 에 토큰 들어와 재진입
-  _fullPageSilentRefresh() {
-    // 무한 루프 방지: 1분 내 2회 이상 시도하면 정상 로그인으로
-    const lastAttempt = parseInt(sessionStorage.getItem('mt_silent_refresh_ts')) || 0;
-    const now = Date.now();
-    if (now - lastAttempt < 60000) {
-      console.warn('[Auth] silent refresh loop detected, falling back to login');
-      sessionStorage.removeItem('mt_silent_refresh');
-      sessionStorage.removeItem('mt_silent_refresh_ts');
-      this.logout();
+  ensureTokenClient() {
+    if (this._tokenClient) return Promise.resolve(this._tokenClient);
+    if (this._tokenClientPromise) return this._tokenClientPromise;
+    this._tokenClientPromise = (async () => {
+      await this._waitForGis();
+      this._tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.CLIENT_ID,
+        scope: CONFIG.SCOPES,
+        hd: 'anghodu.biz',
+        use_fedcm_for_prompt: true,                                    // Safari 17+ / 3rd-party 쿠키 차단 우회
+        callback: (resp) => this._onToken(resp),
+        error_callback: (err) => {
+          console.warn('[Auth] GIS error:', err);
+          const t = (err && (err.type || err.error)) || '';
+          if (!this._silentInProgress) {
+            let msg = (err && err.message) || t || 'unknown';
+            if (t === 'popup_closed' || t === 'popup_blocked_by_browser') msg = '팝업 차단됨 — 브라우저 팝업 차단을 끄고 다시 시도하세요';
+            toast('로그인 실패: ' + msg, 'err', 6000);
+          }
+          this._silentInProgress = false;
+        },
+      });
+      return this._tokenClient;
+    })();
+    this._tokenClientPromise.catch(() => { this._tokenClientPromise = null; });
+    return this._tokenClientPromise;
+  },
+
+  // prompt:'' — Google 세션 살아있고 동의 끝났으면 무화면으로 새 access_token (첫 1회만 동의 화면)
+  async signInSilently() {
+    try {
+      await this.ensureTokenClient();
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isSafari) { console.info('[Auth] Safari 감지 — silent refresh 건너뜀 (ITP 우회)'); return; }
+      this._silentInProgress = true;
+      this._tokenClient.requestAccessToken({ prompt: '' });
+    } catch (e) {
+      this._silentInProgress = false;
+      console.warn('[Auth] silent refresh failed:', e && e.message);
+    }
+  },
+
+  _onToken(resp) {
+    const wasSilent = this._silentInProgress;
+    this._silentInProgress = false;
+    if (resp && resp.error) {
+      if (!wasSilent) toast('OAuth 에러: ' + resp.error, 'err', 5000);
+      else console.warn('[Auth] silent resp.error:', resp.error);
       return;
     }
-    sessionStorage.setItem('mt_silent_refresh', '1');
-    sessionStorage.setItem('mt_silent_refresh_ts', String(now));
-    let redirect = window.location.origin + window.location.pathname;
-    redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
-    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=none`;
-    window.location.href = url;
+    State.token = resp.access_token;
+    const expiresIn = resp.expires_in || 3600;
+    this._tokenExpiry = Date.now() + expiresIn * 1000;
+    localStorage.setItem('mt_token', State.token);
+    localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
+    this._scheduleRefresh(expiresIn);
+    // 무화면 갱신 + 이미 로그인 상태 → userinfo 재조회/이동 skip (다음 API 호출이 새 토큰 사용)
+    if (wasSilent && State.user) {
+      try { SheetsAPI.invalidateAllCache(); } catch (e) {}
+      return;
+    }
+    this.loadUserInfo().then(() => { if (State.user) Router.go('home'); });
   },
 
-  // 외부에서 호출 가능한 갱신 진입점 (401 핸들러용)
+  // 레거시 호출 호환 (init·타이머·폴백) → 모두 GIS silent 로 위임
+  _silentRefreshOrFullPage() { this.signInSilently(); },
+  _silentRefresh(onSuccess) { this.signInSilently(); },
+  _fullPageSilentRefresh() { this.signInSilently(); },
+
+  // 외부에서 호출 가능한 갱신 진입점 (401 핸들러용) — GIS silent 후 신선도 폴링 반환
   async tryRefreshToken() {
+    this.signInSilently();
     return new Promise((resolve) => {
-      let done = false;
-      const finish = (ok) => { if (done) return; done = true; resolve(ok); };
-      this._silentRefresh(() => finish(true));
-      setTimeout(() => finish(this.isTokenFresh()), 4000);
+      const t0 = Date.now();
+      const check = () => {
+        if (this.isTokenFresh()) return resolve(true);
+        if (Date.now() - t0 > 4500) return resolve(this.isTokenFresh());
+        setTimeout(check, 200);
+      };
+      check();
     });
   },
 
@@ -709,10 +743,29 @@ const Auth = {
     return this._tokenExpiry > Date.now() + 60000;
   },
 
-  login() {
+  async login() {
+    // iOS 홈화면 PWA(standalone): GIS 팝업이 Safari 브라우저로 빠져 callback 유실 → 전체 리다이렉트 로그인(webview 내 유지)
+    if (this._isStandalone()) { this._redirectLogin(); return; }
+    try {
+      await this.ensureTokenClient();
+    } catch (e) {
+      toast('Google 로그인 서비스 로드 실패 — 네트워크(데이터/Wi-Fi) 확인 후 다시 시도하세요.', 'err', 6000);
+      return;
+    }
+    // prompt:'' — 첫 로그인만 동의 1회, 이후 자동. GIS 팝업(전체 리다이렉트 아님) → 세션 유지·매번 계정선택 제거
+    this._tokenClient.requestAccessToken({ prompt: '' });
+  },
+
+  // iOS 홈화면 앱 등 standalone 표시 모드 감지
+  _isStandalone() {
+    return window.navigator.standalone === true
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  },
+  // standalone 전용: 팝업 대신 전체 페이지 리다이렉트 OAuth (토큰은 hash 로 돌아와 init() 이 처리)
+  _redirectLogin() {
     let redirect = window.location.origin + window.location.pathname;
     redirect = redirect.replace(/\/index\.html.*$/, '/').replace(/\?.*$/, '');
-    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=select_account`;
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CONFIG.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token&scope=${encodeURIComponent(CONFIG.SCOPES)}&prompt=select_account&hd=anghodu.biz`;
     window.location.href = url;
   },
 
