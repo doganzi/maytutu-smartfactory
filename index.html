@@ -673,8 +673,16 @@ const Auth = {
           console.warn('[Auth] GIS error:', err);
           const t = (err && (err.type || err.error)) || '';
           if (!this._silentInProgress) {
+            // 인앱 브라우저/웹뷰(런처에서 진입한 Custom Tab 등)는 GIS 팝업을 차단함
+            //   → 팝업 대신 전체페이지 리다이렉트 OAuth 로 폴백 (토큰은 hash 로 복귀, init() 처리)
+            if (t === 'popup_blocked_by_browser' || t === 'popup_failed_to_open') {
+              console.info('[Auth] 팝업 차단 감지 — 리다이렉트 로그인으로 폴백');
+              this._silentInProgress = false;
+              this._redirectLogin();
+              return;
+            }
             let msg = (err && err.message) || t || 'unknown';
-            if (t === 'popup_closed' || t === 'popup_blocked_by_browser') msg = '팝업 차단됨 — 브라우저 팝업 차단을 끄고 다시 시도하세요';
+            if (t === 'popup_closed') msg = '로그인 창이 닫혔습니다 — 다시 시도하세요';
             toast('로그인 실패: ' + msg, 'err', 6000);
           }
           this._silentErrored = true;   // 부팅 silent 폴백이 4.5초 안 기다리고 즉시 로그인 화면으로
