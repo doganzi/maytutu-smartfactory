@@ -622,6 +622,8 @@ const Auth = {
   _tokenClientPromise: null,
   _silentInProgress: false,
   _visibilityWired: false,
+  _bootInProgress: false,   // 부팅 silent 로그인 진행 중 (화면 이동은 initApp 이 담당)
+  _silentErrored: false,    // 직전 silent 시도가 에러(미동의/세션없음)로 끝남 → 부팅 폴백 즉시
 
   _wireVisibility() {
     if (this._visibilityWired) return;
@@ -675,6 +677,7 @@ const Auth = {
             if (t === 'popup_closed' || t === 'popup_blocked_by_browser') msg = '팝업 차단됨 — 브라우저 팝업 차단을 끄고 다시 시도하세요';
             toast('로그인 실패: ' + msg, 'err', 6000);
           }
+          this._silentErrored = true;   // 부팅 silent 폴백이 4.5초 안 기다리고 즉시 로그인 화면으로
           this._silentInProgress = false;
         },
       });
@@ -717,6 +720,8 @@ const Auth = {
       try { SheetsAPI.invalidateAllCache(); } catch (e) {}
       return;
     }
+    // 부팅 silent 로그인 — 토큰만 저장하고 유저로드/화면이동은 initApp 후처리에 위임 (이중 진입 방지)
+    if (this._bootInProgress) return;
     this.loadUserInfo().then(() => { if (State.user) Router.go('home'); });
   },
 
@@ -741,6 +746,35 @@ const Auth = {
 
   isTokenFresh() {
     return this._tokenExpiry > Date.now() + 60000;
+  },
+
+  // ── SSO 부팅: 저장 토큰이 없을 때 무화면 silent 로그인 1회 시도 ──
+  // 런처(maytutu-erp)에서 진입 시 동일 구글 워크스페이스 세션을 재사용 → 로그인 화면/버튼 클릭 없이 바로 진입.
+  // 성공: _onToken 이 토큰 저장(부팅 중이라 화면이동은 initApp 이 담당) → true.
+  // 실패/미동의/Safari·standalone(PWA): false → 호출측이 로그인 화면 노출.
+  async trySilentBoot() {
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari || this._isStandalone()) return false;   // silent 불가 환경 → 로그인 버튼 화면
+    this._bootInProgress = true;
+    this._silentErrored = false;
+    try { showLoading(); } catch (e) {}
+    try {
+      await this.signInSilently();   // prompt:'' — 성공 시 _onToken 콜백이 토큰 저장
+    } catch (e) {}
+    // GIS 콜백은 비동기 → 토큰 신선도 폴링 (에러 즉시 폴백 / 최대 4.5초)
+    const ok = await new Promise((resolve) => {
+      const t0 = Date.now();
+      const check = () => {
+        if (this.isTokenFresh()) return resolve(true);
+        if (this._silentErrored) return resolve(false);
+        if (Date.now() - t0 > 4500) return resolve(false);
+        setTimeout(check, 150);
+      };
+      check();
+    });
+    this._bootInProgress = false;
+    if (!ok) { try { hideLoading(); } catch (e) {} }   // 성공 시엔 initApp 후처리가 로딩 제어
+    return ok;
   },
 
   async login() {
@@ -11470,7 +11504,12 @@ async function initApp() {
   CONFIG.DRIVE_FOLDER_ID = localStorage.getItem('mt_drive_folder') || CONFIG.DRIVE_FOLDER_ID;
 
   // Check auth FIRST (before replaceState, to preserve OAuth callback hash)
-  const hasToken = Auth.init();
+  let hasToken = Auth.init();
+  // SSO: 저장 토큰이 없으면(런처에서 막 진입 등) 동일 구글 세션으로 무화면 silent 로그인 1회 시도.
+  // 성공 시 로그인 화면·버튼 클릭 없이 바로 진입(재로그인 번거로움 제거). 실패 시에만 아래 로그인 화면.
+  if (!hasToken) {
+    hasToken = await Auth.trySilentBoot();
+  }
 
   // Set initial browser history state AFTER auth (prevents immediate exit on first back press)
   history.replaceState({ screen: 'init' }, '', window.location.href.split('#')[0] + '#init');
