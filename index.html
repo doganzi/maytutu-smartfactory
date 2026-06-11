@@ -8812,6 +8812,59 @@ function migrate7stepToGrid(d) {
   return { checks: rows, 통과량: d.ccpTotal ? d.ccpTotal + '개' : '', _fmt: 'ccpGrid-v1', _migrated: '7step' };
 }
 
+// ── 상세(읽기) 화면용: 신 격자(ccpGrid-v1) 기록을 종이양식 격자 그대로 비편집 렌더 ──
+function ccpGridReadView(d) {
+  const rows = Array.isArray(d.checks) ? d.checks : [];
+  const cell = (g, v, label) => {
+    const ok = ccpCellNormal(g, v);
+    const txt = g === '제품통과' ? (v || '') : label;
+    return `<span style="flex:1;min-width:28px;text-align:center;padding:5px 2px;border-radius:5px;font-size:11px;color:#fff;background:${ok ? '#1e8e3e' : '#d93025'}">${txt}</span>`;
+  };
+  const grp3 = (r, g, glabel, hint) => {
+    let h = `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:5px"><span style="width:92px;font-size:11px;flex-shrink:0;line-height:1.2">${glabel}<br><span style="font-size:10px;color:var(--txt-l)">${hint}</span></span><div style="display:flex;gap:4px;flex:1">`;
+    for (let i = 0; i < 3; i++) h += cell(g, (r[g] || [])[i], CCP_POS3[i]);
+    return h + `</div></div>`;
+  };
+  const grpP = (r) => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="width:92px;font-size:11px;flex-shrink:0;line-height:1.2">제품 통과<br><span style="font-size:10px;color:var(--txt-l)">정상=불검출</span></span><div style="display:flex;flex:1">${cell('제품통과', r.제품통과, '')}</div></div>`;
+  const grp6 = (r, g, glabel, hint) => {
+    let h = `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:5px"><span style="width:92px;font-size:11px;flex-shrink:0;line-height:1.2">${glabel}<br><span style="font-size:10px;color:var(--txt-l)">${hint}</span></span><div style="flex:1">`;
+    ['상', '하'].forEach(s => {
+      h += `<div style="display:flex;gap:4px;align-items:center;margin-bottom:4px"><span style="width:24px;font-size:10px;color:var(--txt-l);flex-shrink:0">${s}단</span>`;
+      for (let i = 0; i < 3; i++) h += cell(g, ((r[g] || {})[s] || [])[i], CCP_POS3[i]);
+      h += `</div>`;
+    });
+    return h + `</div></div>`;
+  };
+  let html = '';
+  if (d.제품명) html += `<div class="fs-11 c-txt-l mt-4">제품명: <strong>${d.제품명}</strong></div>`;
+  rows.forEach(r => {
+    const ok = ccpRowJudge(r) === '적합';
+    const badge = ok
+      ? `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#e6f4ea;color:#137333">정상</span>`
+      : `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#fce8e6;color:#c5221f">⚠ 이탈</span>`;
+    html += `<div class="card" style="padding:10px;margin:8px 0;border-left:3px solid ${ok ? '#1e8e3e' : '#d93025'}">` +
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:13px">${r.구분 === '작업중2h' ? '작업 중(2h)' : (r.구분 || '')}</b>` +
+      `${r.시각 ? `<span class="fs-11 c-txt-l">${r.시각}</span>` : ''}${badge}</div>`;
+    html += grp3(r, '시편Fe', '시편 철(Fe)', '정상=검출');
+    html += grp3(r, '시편SUS', '시편 SUS', '정상=검출');
+    html += grpP(r);
+    html += grp6(r, '제품시편Fe', '제품+시편(Fe)', '정상=검출');
+    html += grp6(r, '제품시편SUS', '제품+시편(SUS)', '정상=검출');
+    html += `</div>`;
+  });
+  const sum = [];
+  if (d.통과량) sum.push(['통과량', d.통과량]);
+  if (d.검출량) sum.push(['검출량', d.검출량]);
+  if (d.특이사항) sum.push(['특이사항', d.특이사항]);
+  if (d.이탈내용) sum.push(['이탈내용', d.이탈내용]);
+  if (d.개선조치) sum.push(['개선조치', d.개선조치]);
+  if (sum.length) html += sum.map(([k, v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
+  const verdict = rows.length ? (rows.every(r => ccpRowJudge(r) === '적합') ? '적합' : '부적합') : (d.판정종합 || '');
+  if (verdict) html += `<div class="info-box" style="margin-top:8px"><div class="fs-13 fw-6">판정종합: <span class="fw-8" style="color:${verdict === '적합' ? '#1e8e3e' : '#d93025'}">${verdict}</span></div></div>`;
+  if (d._migrated) html += `<div class="fs-10 c-txt-l mt-4" style="font-style:italic">※ 구 7단계 기록 자동 변환본 (위치값 없는 칸은 정상 기본)</div>`;
+  return html;
+}
+
 // ── 공정 입력값 수집 (JSON string 리턴) ──
 function collectStepData(stepNo, stepType, step) {
   const data = {};
@@ -9925,15 +9978,20 @@ function renderProcessRecordCard(r) {
     bodyHtml += `<div class="info-box" style="background:rgba(198,40,40,0.1)">
       <div class="fs-12 fw-6" style="color:#c62828">CCP 금속검출 검사</div>
     </div>`;
-    if (stepData.ccpTotal) bodyHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
-    if (stepData.passCount != null) bodyHtml += `<div class="fs-11 c-txt-l">합격: ${stepData.passCount}개 · 불합격: ${stepData.failCount||0}개</div>`;
-    if (stepData.checks?.length) {
-      bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
-      bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
-    }
-    if (stepData.times) {
-      bodyHtml += `<div class="fs-11 fw-6 mt-8 mb-4">CCP 모니터링 시간</div>`;
-      bodyHtml += Object.entries(stepData.times).map(([k,v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
+    const _ccpIsGrid = stepData._fmt === 'ccpGrid-v1' || (Array.isArray(stepData.checks) && stepData.checks[0] && stepData.checks[0].구분);
+    if (_ccpIsGrid) {
+      bodyHtml += ccpGridReadView(stepData);
+    } else {
+      if (stepData.ccpTotal) bodyHtml += `<div class="fs-11 c-txt-l mt-4">검사 수량: <strong>${stepData.ccpTotal}개</strong></div>`;
+      if (stepData.passCount != null) bodyHtml += `<div class="fs-11 c-txt-l">합격: ${stepData.passCount}개 · 불합격: ${stepData.failCount||0}개</div>`;
+      if (stepData.checks?.length) {
+        bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
+        bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
+      }
+      if (stepData.times) {
+        bodyHtml += `<div class="fs-11 fw-6 mt-8 mb-4">CCP 모니터링 시간</div>`;
+        bodyHtml += Object.entries(stepData.times).map(([k,v]) => `<div class="fs-11 c-txt-l">${k}: ${v}</div>`).join('');
+      }
     }
     if (photoUrls.length) {
       bodyHtml += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${photoUrls.map((url,pi) => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l)" onerror="this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pri)\\'>사진${pi+1}</div>'"></a>`).join('')}</div>`;
