@@ -730,7 +730,7 @@ const Auth = {
     }
     // 부팅 silent 로그인 — 토큰만 저장하고 유저로드/화면이동은 initApp 후처리에 위임 (이중 진입 방지)
     if (this._bootInProgress) return;
-    this.loadUserInfo().then(() => { if (State.user) Router.go('home'); });
+    this.loadUserInfo().then(() => { if (State.user) Router.go('dashboard'); });
   },
 
   // 레거시 호출 호환 (init·타이머·폴백) → 모두 GIS silent 로 위임
@@ -915,6 +915,13 @@ const Role = {
 const ROLE_LABELS = { admin: '관리자', worker: '작업자', producer: '생산자', accounting: '회계' };
 const PREVIEWABLE_ROLES = ['admin', 'worker', 'producer', 'accounting'];
 function roleLabel(r) { return ROLE_LABELS[r] || r || '-'; }
+/** 미리보기 모드 여부: 관리자가 다른 역할 화면을 미리보는 중. 실데이터 쓰기 차단·필수값 우회에 사용. */
+function isPreviewing() { return State.realRole === 'admin' && State.user && State.user.role !== State.realRole; }
+let _previewToastAt = 0;
+function _previewSkipWrite() {
+  const now = Date.now();
+  if (now - _previewToastAt > 2500) { _previewToastAt = now; try { toast('👁 미리보기 모드 — 실제 저장은 되지 않습니다', 'info', 2000); } catch (e) {} }
+}
 
 /** 부팅·역할확정 직후 호출(중복 안전): 실제역할 보존 + (admin 한정) 저장된 미리보기 적용 */
 function applyRolePreview() {
@@ -1077,6 +1084,7 @@ const SheetsAPI = {
 
   // Append rows — 반드시 A열부터 시작하도록 범위 지정 (데이터 밀림 방지)
   async append(tab, rows) {
+    if (isPreviewing()) { _previewSkipWrite(); return { updates: { updatedRange: `${tab}!A1`, updatedRows: 0 }, _preview: true }; }
     const body = { values: Array.isArray(rows[0]) ? rows : [rows] };
     const colCount = Array.isArray(rows[0]) ? rows[0].length : rows.length;
     const endCol = String.fromCharCode(64 + Math.min(colCount, 26)); // A=65, 최대 Z
@@ -1100,6 +1108,7 @@ const SheetsAPI = {
 
   // Update specific cell(s)
   async update(range, values) {
+    if (isPreviewing()) { _previewSkipWrite(); return { _preview: true }; }
     const body = { values: Array.isArray(values[0]) ? values : [values] };
     const res = await this._fetch(
       `${this.baseUrl()}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
@@ -1113,6 +1122,7 @@ const SheetsAPI = {
 
   // Batch update (청크 분할 내장)
   async batchUpdate(data) {
+    if (isPreviewing()) { _previewSkipWrite(); return; }
     if (data.length === 0) return;
     const CHUNK = 50;
     for (let i = 0; i < data.length; i += CHUNK) {
@@ -1132,6 +1142,7 @@ const SheetsAPI = {
   // Create a new sheet tab (+ optional header row). Use spreadsheets:batchUpdate
   // (NOT values:batchUpdate) — addSheet 은 메타데이터 변경이라 별도 엔드포인트.
   async createSheet(tabName, headerRow = null) {
+    if (isPreviewing()) { _previewSkipWrite(); return { _preview: true }; }
     const url = `${this.baseUrl()}:batchUpdate`;
     const body = { requests: [{ addSheet: { properties: { title: tabName } } }] };
     const res = await this._fetch(url, { method: 'POST', body: JSON.stringify(body) });
@@ -1209,6 +1220,7 @@ const SheetsAPI = {
    ═══════════════════════════════════════════════ */
 const DriveAPI = {
   async uploadPhoto(file) {
+    if (isPreviewing()) { _previewSkipWrite(); return ''; }
     const metadata = {
       name: `${Date.now()}_${file.name}`,
       mimeType: file.type,
@@ -1249,6 +1261,7 @@ const DriveAPI = {
   },
 
   async uploadPdf(pdfBlob, fileName) {
+    if (isPreviewing()) { _previewSkipWrite(); return ''; }
     const metadata = {
       name: fileName,
       mimeType: 'application/pdf',
@@ -9152,6 +9165,17 @@ async function tempSaveWO() {
 async function handleCompleteStep(isFinal = false) {
   const step = State.woExec?.steps?.[State.woExec?.currentStep];
   if (!step) return;
+  // 미리보기 모드: 검증·저장 없이 화면 흐름만 다음 단계로 (실데이터 생성 안 함)
+  if (isPreviewing()) {
+    const we = State.woExec;
+    if (isFinal || !we || we.currentStep >= (we.steps?.length || 0) - 1) {
+      toast('👁 미리보기 — 마지막 단계 (저장 없음)', 'info', 1600); Router.go('production'); return;
+    }
+    we.currentStep++;
+    toast('👁 미리보기 — 저장 없이 다음 단계', 'info', 1300);
+    renderWOExecute();
+    return;
+  }
   const stepNo = parseInt(step[1]);
   const stepType = step[3] || 'input';
   const isWater = (step[4] || '') === 'RM002';
@@ -9758,6 +9782,13 @@ function setUseType(stepNo, type) {}
 function validateStepInputs(stepNo) {
   const step = State.woExec?.steps?.[State.woExec?.currentStep];
   if (!step) return;
+  // 미리보기 모드: 필수값 검증 없이 '공정 완료' 버튼 활성화 (모든 단계 화면 열람용)
+  if (isPreviewing()) {
+    document.querySelectorAll('#content > div:last-child button').forEach(btn => {
+      if (btn.textContent.includes('공정 완료') || btn.textContent.includes('전체 완료')) { btn.dataset.valid = 'true'; btn.style.opacity = '1'; }
+    });
+    return;
+  }
   const stepType = step[3] || 'input';
   const isWater = (step[4] || '') === 'RM002';
 
