@@ -2082,7 +2082,7 @@ function renderProductionContent(activeTab, isAdmin) {
       listEl.innerHTML = myWO.map(wo => {
         const lastStep = parseInt(wo[13]) || 0;
         const progress = Math.round((lastStep / 11) * 100);
-        const canDelete = wo[12] !== '진행중' || lastStep === 0;
+        const canDelete = wo[12] !== '진행중' || lastStep === 0 || State.user.role === 'admin';
         const isPending = wo[12] === '승인대기';
         const progColor = progress >= 80 ? 'var(--suc)' : progress >= 40 ? 'var(--info)' : 'var(--warn)';
         const startStr = (wo[9] || '').length >= 16 ? `${wo[9].substring(5,10)} ${wo[9].substring(11,16)}` : '';
