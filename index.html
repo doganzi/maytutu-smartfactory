@@ -10787,9 +10787,17 @@ async function generateWOPdf(woId) {
           const cells = v => arr3(v).map((x, i) => `${CCP_POS3[i]} ${x}`).join('  ');
           const abn = (v, nm) => arr3(v).some(x => x !== nm);
           const abn6 = (o, nm) => ['상', '하'].some(s => abn(o && o[s], nm));
-          y = sectionTitle('CCP 금속검출 모니터링 기록부', y, '#c62828');
-          const cr = drawText('한계기준 Fe 2.5mm / SUS 4.0mm 이상 100% 검출 · 정상 = 시편(Fe·SUS) 검출 / 제품통과 불검출 / 제품+시편 검출 (위치 좌·중·우)', M, y, 11, 'normal', '#666', CW);
-          y = cr.y + cr.h + 3;
+          y = sectionTitle('금속검출기(CCP) 모니터링 기록부', y, '#c62828');
+          // 종이 양식 안내부 (위해요소·한계기준·방법·빈도·개선조치·결재)
+          let _fr;
+          _fr = tableRow('점검방법', '판정(적합/부적합)', y, 35); y = _fr.nextY;
+          _fr = tableRow('위해요소', '금속성 이물질 잔존(SUS·Fe의 나사·칼날·톱날·못 등)', y, 35); y = _fr.nextY;
+          _fr = tableRow('한계기준', 'Fe 2.5mm / SUS 4.0mm 이상의 금속성 이물질 100% 검출할 것 (전제품)', y, 35); y = _fr.nextY;
+          _fr = tableRow('모니터링 방법', '작업시작 전: 시편만 통과 시 감지확인 · 작업 중 2시간마다: 시편만·제품 단독·시편+제품 동시 통과 시 감지확인 · 작업종료: 시편+마지막 제품 동시 통과 시 감지확인 (시편은 제품 위쪽 가운데에 놓고 점검)', y, 35); y = _fr.nextY;
+          _fr = tableRow('빈도', '작업시작 전 · 작업 중 2시간마다 · 작업종료 후', y, 35); y = _fr.nextY;
+          _fr = tableRow('개선조치', '감도미흡: 2~3회 반복통과로 감도조정 · 이물발견: 재통과·확인 후 제거, 오염품 폐기, 재검사 후 이상없을 때 재사용 · 기계고장: 고장 2시간 전 생산품 별도보관, 수리 후 재검사', y, 35); y = _fr.nextY;
+          _fr = tableRow('결재', `작성 ${(stepData.점검자 || wo[8] || '-').split('@')[0]}  /  승인 ${wo[15] ? (wo[15]).split('@')[0] : '미승인'}`, y, 35); y = _fr.nextY;
+          y += 2;
           (stepData.checks || []).forEach((c, ci) => {
             if (y + 38 > PH - 12) { doc.addPage(); y = M; }
             const gubun = c.구분 === '작업중2h' ? '작업 중 (2h)' : (c.구분 || `점검 ${ci + 1}`);
@@ -10829,7 +10837,7 @@ async function generateWOPdf(woId) {
           drawText(`종합 판정: ${verdict}`, M + 3, y + 2, 18, 'bold', vp ? '#2e7d32' : '#c62828', CW - 6);
           y += 19;
           // 요약 (통과량 / 검출량 / 점검자 / 특이사항 / 이탈 / 개선조치)
-          const sum = [['통과량', stepData.통과량], ['검출량', stepData.검출량], ['점검자', stepData.점검자], ['특이사항', stepData.특이사항]];
+          const sum = [['품명', stepData.제품명 || wo[4] || ''], ['통과량', stepData.통과량], ['검출량', stepData.검출량 || 'X'], ['점검자', (stepData.점검자 || '').split('@')[0]], ['특이사항', stepData.특이사항 || 'X']];
           if (stepData.이탈내용) sum.push(['이탈내용', stepData.이탈내용]);
           if (stepData.개선조치) sum.push(['개선조치 및 결과', stepData.개선조치]);
           for (const [l, v] of sum) { if (v) { const r = tableRow(l, v, y); y = r.nextY; } }
