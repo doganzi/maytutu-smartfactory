@@ -10812,34 +10812,40 @@ async function generateWOPdf(woId) {
           _fr = tableRow('개선조치', '감도미흡: 2~3회 반복통과로 감도조정 · 이물발견: 재통과·확인 후 제거, 오염품 폐기, 재검사 후 이상없을 때 재사용 · 기계고장: 고장 2시간 전 생산품 별도보관, 수리 후 재검사', y, 35); y = _fr.nextY;
           _fr = tableRow('결재', `작성 ${(stepData.점검자 || wo[8] || '-').split('@')[0]}  /  승인 ${wo[15] ? (wo[15]).split('@')[0] : '미승인'}`, y, 35); y = _fr.nextY;
           y += 2;
+          // ── 종이 격자표: 감시시각 × 시편Fe/SUS · 제품통과 · 제품+시편Fe/SUS(상하) · 판정 ──
+          const colsX = [M, M + 28, M + 50, M + 72, M + 88, M + 120, M + 152, M + 170];
+          const grpTxt = (vals, nm) => { const a = (Array.isArray(vals) && vals.length) ? vals : [nm, nm, nm]; return a.map(v => v === '검출' ? '검' : v === '불검출' ? '불' : '·').join(' '); };
+          const grpAbn = (vals, nm) => Array.isArray(vals) && vals.some(v => v && v !== nm);
+          const rowBox = (yy, h) => { doc.setDrawColor(140, 140, 140); doc.setLineWidth(0.25); doc.rect(M, yy, 170, h); for (let i = 1; i < colsX.length - 1; i++) doc.line(colsX[i], yy, colsX[i], yy + h); };
+          const gridHeader = () => {
+            if (y + 9 > PH - 12) { doc.addPage(); y = M; }
+            doc.setFillColor(238, 238, 238); doc.rect(M, y, 170, 9, 'F'); rowBox(y, 9);
+            const hd = (t, i) => drawText(t, colsX[i] + 1, y + 2.2, 8.5, 'bold', '#333', colsX[i + 1] - colsX[i] - 1.5);
+            hd('감시시각', 0); hd('시편Fe', 1); hd('시편SUS', 2); hd('제품통과', 3); hd('제품+시편Fe', 4); hd('제품+시편SUS', 5); hd('판정', 6);
+            y += 9;
+          };
+          gridHeader();
           (stepData.checks || []).forEach((c, ci) => {
-            if (y + 38 > PH - 12) { doc.addPage(); y = M; }
-            const gubun = c.구분 === '작업중2h' ? '작업 중 (2h)' : (c.구분 || `점검 ${ci + 1}`);
-            const feA = abn(c.시편Fe, NM.시편Fe), suA = abn(c.시편SUS, NM.시편SUS);
+            const RH = 12;
+            if (y + RH > PH - 12) { doc.addPage(); y = M; gridHeader(); }
+            const gubun = c.구분 === '작업중2h' ? '작업중(2h)' : (c.구분 || `점검${ci + 1}`);
+            const feA = grpAbn(c.시편Fe, NM.시편Fe), suA = grpAbn(c.시편SUS, NM.시편SUS);
             const ptA = (c.제품통과 || '불검출') !== NM.제품통과;
             const psFeA = abn6(c.제품시편Fe, NM.제품시편Fe), psSuA = abn6(c.제품시편SUS, NM.제품시편SUS);
             const judge = c.판정 || ((feA || suA || ptA || psFeA || psSuA) ? '부적합' : '적합');
-            const ok = judge === '적합';
-            // 점검 시점 헤더 바 (구분 · 시각 · 판정)
-            doc.setFillColor(ok ? 232 : 255, ok ? 245 : 235, ok ? 233 : 238);
-            doc.rect(M, y, CW, 9, 'F');
-            doc.setDrawColor(ok ? 46 : 211, ok ? 125 : 47, ok ? 50 : 47); doc.setLineWidth(0.3); doc.rect(M, y, CW, 9);
-            drawText(`■ ${gubun}`, M + 2, y + 1.7, 12, 'bold', ok ? '#1b5e20' : '#b71c1c', CW * 0.4);
-            drawText(`시각 ${c.시각 || '-'}`, M + CW * 0.42, y + 1.9, 11, 'normal', '#333', CW * 0.3);
-            drawText(`판정 ${judge}`, M + CW * 0.7, y + 1.7, 12, 'bold', ok ? '#1b5e20' : '#b71c1c', CW * 0.3 - 2, 'right');
-            y += 11;
-            // 시편 Fe / SUS (좌·중·우)
-            drawText(`시편Fe   ${cells(c.시편Fe)}`, M, y, 12, 'normal', feA ? '#c62828' : '#1b5e20', CW / 2 - 2);
-            drawText(`시편SUS   ${cells(c.시편SUS)}`, M + CW / 2, y, 12, 'normal', suA ? '#c62828' : '#1b5e20', CW / 2 - 2);
-            y += 6;
-            // 제품 통과
-            drawText(`제품 통과 (정상=불검출): ${c.제품통과 || '불검출'}`, M, y, 12, 'normal', ptA ? '#c62828' : '#1b5e20', CW);
-            y += 6;
-            // 제품+시편 Fe / SUS (상/하 × 좌·중·우)
-            drawText(`제품+시편Fe   상 ${cells(c.제품시편Fe && c.제품시편Fe.상)}   하 ${cells(c.제품시편Fe && c.제품시편Fe.하)}`, M, y, 11.5, 'normal', psFeA ? '#c62828' : '#1b5e20', CW);
-            y += 5.5;
-            drawText(`제품+시편SUS  상 ${cells(c.제품시편SUS && c.제품시편SUS.상)}   하 ${cells(c.제품시편SUS && c.제품시편SUS.하)}`, M, y, 11.5, 'normal', psSuA ? '#c62828' : '#1b5e20', CW);
-            y += 8;
+            const jok = judge === '적합';
+            rowBox(y, RH);
+            drawText(gubun, colsX[0] + 1, y + 2, 9, 'bold', '#333', 27);
+            drawText(c.시각 || '-', colsX[0] + 1, y + 7, 8.5, 'normal', '#666', 27);
+            drawText(grpTxt(c.시편Fe, NM.시편Fe), colsX[1] + 1.5, y + 4, 10, 'bold', feA ? '#c62828' : '#1b5e20', 20);
+            drawText(grpTxt(c.시편SUS, NM.시편SUS), colsX[2] + 1.5, y + 4, 10, 'bold', suA ? '#c62828' : '#1b5e20', 20);
+            drawText((c.제품통과 || '불검출') === '검출' ? '검' : '불', colsX[3] + 5, y + 4, 10, 'bold', ptA ? '#c62828' : '#1b5e20', 14);
+            drawText(`상 ${grpTxt(c.제품시편Fe && c.제품시편Fe.상, NM.제품시편Fe)}`, colsX[4] + 1, y + 2, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
+            drawText(`하 ${grpTxt(c.제품시편Fe && c.제품시편Fe.하, NM.제품시편Fe)}`, colsX[4] + 1, y + 7, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
+            drawText(`상 ${grpTxt(c.제품시편SUS && c.제품시편SUS.상, NM.제품시편SUS)}`, colsX[5] + 1, y + 2, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
+            drawText(`하 ${grpTxt(c.제품시편SUS && c.제품시편SUS.하, NM.제품시편SUS)}`, colsX[5] + 1, y + 7, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
+            drawText(judge, colsX[6] + 1, y + 4, 9, 'bold', jok ? '#1b5e20' : '#c62828', 17);
+            y += RH;
           });
           // 종합 판정 강조 박스
           const verdict = stepData.판정종합 || ((stepData.checks || []).every(c => (c.판정 || '적합') === '적합') ? '적합' : '부적합');
