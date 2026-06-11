@@ -852,6 +852,7 @@ const Auth = {
         return;
       }
       localStorage.setItem('mt_user', JSON.stringify(State.user));
+      applyRolePreview();
     } catch (e) {
       console.warn('Role check failed, using default:', e);
     }
@@ -903,6 +904,68 @@ const Role = {
     return false;
   },
 };
+
+/* ═══════════════════════════════════════════════
+   ROLE PREVIEW — 관리자 전용 '다른 역할 화면' 미리보기
+   목적: 관리자가 자기 계정으로 작업자/생산자/회계 화면을 그대로 확인(CCP 흐름 검증 등).
+   안전: 실제 신원(email·token)·작성자 귀속 불변 — UI 게이팅용 role 라벨만 임시 교체.
+        실제 역할은 State.realRole 보존, mt_user(영속)는 항상 실제역할(미오염).
+        미리보기 선택은 localStorage 'mt_role_preview'(새로고침 생존). 관리자 외엔 무시.
+   ═══════════════════════════════════════════════ */
+const ROLE_LABELS = { admin: '관리자', worker: '작업자', producer: '생산자', accounting: '회계' };
+const PREVIEWABLE_ROLES = ['admin', 'worker', 'producer', 'accounting'];
+function roleLabel(r) { return ROLE_LABELS[r] || r || '-'; }
+
+/** 부팅·역할확정 직후 호출(중복 안전): 실제역할 보존 + (admin 한정) 저장된 미리보기 적용 */
+function applyRolePreview() {
+  if (!State.user) return;
+  // 실제역할 = mt_user(영속·미오염) 우선 → 미리보기로 덮인 메모리값을 실제로 오인하지 않음
+  let realRole = State.user.role;
+  try { const mu = JSON.parse(localStorage.getItem('mt_user') || 'null'); if (mu && mu.role) realRole = mu.role; } catch (e) {}
+  State.realRole = realRole;
+  State.user.role = realRole;  // 먼저 실제로 리셋(idempotent — 중복 호출 안전)
+  const pv = localStorage.getItem('mt_role_preview');
+  if (realRole === 'admin' && pv && PREVIEWABLE_ROLES.includes(pv) && pv !== 'admin') {
+    State.user.role = pv;      // 메모리만 교체 — mt_user 오염 안 함
+  }
+  updateRolePreviewBanner();
+}
+
+/** 설정 UI: 미리보기 역할 선택(admin 전용). 'admin' 선택 = 복귀. */
+function setRolePreview(role) {
+  if (State.realRole !== 'admin') { toast('관리자만 사용할 수 있습니다', 'err'); return; }
+  if (role === 'admin' || !PREVIEWABLE_ROLES.includes(role)) { clearRolePreview(); return; }
+  localStorage.setItem('mt_role_preview', role);
+  State.user.role = role;
+  updateRolePreviewBanner();
+  toast(`${roleLabel(role)} 화면 미리보기 — 상단 배너를 눌러 복귀`, 'suc', 2600);
+  Router.go(State.currentScreen || 'dashboard');
+}
+
+/** 미리보기 해제 → 관리자 화면 복귀 */
+function clearRolePreview() {
+  localStorage.removeItem('mt_role_preview');
+  if (State.realRole) State.user.role = State.realRole;
+  updateRolePreviewBanner();
+  Router.go(State.currentScreen || 'dashboard');
+}
+
+/** 미리보기 중 상시 배너(#app 최상단·헤더 위, flex 흐름) — 클릭 시 복귀 */
+function updateRolePreviewBanner() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  let bar = document.getElementById('role-preview-banner');
+  const previewing = State.realRole === 'admin' && State.user && State.user.role !== State.realRole;
+  if (!previewing) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'role-preview-banner';
+    bar.style.cssText = 'flex-shrink:0;background:var(--warn,#f5a623);color:#3a2a00;text-align:center;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;line-height:1.45;border-bottom:1px solid rgba(0,0,0,0.18)';
+    bar.onclick = clearRolePreview;
+    app.prepend(bar);
+  }
+  bar.innerHTML = `👁 <b>${roleLabel(State.user.role)}</b> 화면 미리보기 중 (실제: 관리자) · <u>관리자로 복귀 ✕</u>`;
+}
 
 /* ═══════════════════════════════════════════════
    GOOGLE SHEETS API WRAPPER
@@ -4571,8 +4634,21 @@ Screens.settings = () => {
         <div class="fs-14 fw-7 mb-8">계정 정보</div>
         <div class="fs-13">${State.user?.name || '-'}</div>
         <div class="fs-12 c-txt-l">${State.user?.email || '-'}</div>
-        <div class="fs-12 c-txt-l mt-4">역할: ${State.user?.role === 'admin' ? '관리자' : '작업자'}</div>
+        <div class="fs-12 c-txt-l mt-4">역할: ${roleLabel(State.realRole || State.user?.role)}</div>
       </div>
+      ${State.realRole === 'admin' ? `
+      <div class="card">
+        <div class="row between mb-8">
+          <div class="fs-14 fw-7">👁 화면 미리보기</div>
+          <span class="badge badge-gray">관리자 전용</span>
+        </div>
+        <div class="fs-12 c-txt-l mb-8">다른 역할의 화면을 내 계정으로 미리 봅니다. 실제 권한·작성자 신원은 관리자 그대로이고, 화면 표시만 바뀝니다.</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap">
+          ${PREVIEWABLE_ROLES.map(r => `<button class="btn btn-sm ${(State.user?.role||'worker')===r?'btn-pri':'btn-outline btn-gray'}" style="flex:1;min-width:60px" onclick="setRolePreview('${r}')">${roleLabel(r)}</button>`).join('')}
+        </div>
+        ${State.user?.role !== State.realRole ? `<div class="fs-11 mt-8" style="color:var(--warn)">● 현재 ${roleLabel(State.user?.role)} 화면 미리보기 중 — '관리자'를 누르면 복귀</div>` : ''}
+      </div>
+      ` : ''}
       <div class="card">
         <div class="row between mb-8">
           <div class="fs-14 fw-7">데이터 연결</div>
@@ -11520,6 +11596,7 @@ async function initApp() {
     const savedUser = localStorage.getItem('mt_user');
     if (savedUser) {
       State.user = JSON.parse(savedUser);
+      applyRolePreview();
     }
 
     // Validate token
