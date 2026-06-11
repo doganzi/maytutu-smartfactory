@@ -8232,6 +8232,11 @@ function renderStepContent(step, stepType) {
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
       </div>
       <div class="input-group mt-12">
+        <label>투입 냉동고 온도 (℃) <span class="c-err">*필수</span></label>
+        <input type="number" id="freeze-temp" step="0.1" placeholder="예: -19" oninput="validateStepInputs(${stepNo})">
+        <div class="input-hint">제품 투입 시점 냉동고 온도 — 한계기준 −18℃ 이하 (동결공정 모니터링일지)</div>
+      </div>
+      <div class="input-group mt-12">
         <label>보관 시작 시간</label>
         <input type="text" id="freeze-start" value="${formatDateTime()} (자동)" readonly>
         <div class="input-hint">현재 시간 자동 기록 — 이 시점부터 12시간 이후 출하승인 가능</div>
@@ -8949,6 +8954,8 @@ function collectStepData(stepNo, stepType, step) {
   }
   else if (stepType === 'store') {
     data.freezeStart = $id('freeze-start')?.value || '';
+    data.freezeTemp = $id('freeze-temp')?.value ? `${$id('freeze-temp').value}°C` : '';
+    data._fmt = 'ccpFreeze-v1';
   }
 
   return JSON.stringify(data);
@@ -9318,9 +9325,10 @@ async function handleCompleteStep(isFinal = false) {
   }
 
   if (stepType === 'store') {
-    // 냉동고 온도계 사진 필수
+    // 냉동고 온도계 사진 + 투입 냉동고온도 필수 (CCP-1 동결온도)
     const photoPreview = $id(`photo-preview-${stepNo}`);
     if (!photoPreview || !photoPreview.innerHTML.trim()) missing.push('냉동고 온도계 사진');
+    if (!$id('freeze-temp')?.value) missing.push('투입 냉동고 온도');
   }
 
   if (missing.length > 0) {
@@ -9925,6 +9933,7 @@ function validateStepInputs(stepNo) {
   if (stepType === 'store') {
     const photoPreview = $id(`photo-preview-${stepNo}`);
     if (!photoPreview || !photoPreview.innerHTML.trim()) allValid = false;
+    if (!$id('freeze-temp')?.value) allValid = false;
   }
 
   // Enable/disable next button
@@ -10054,9 +10063,10 @@ function renderProcessRecordCard(r) {
   }
   else if (type === 'store') {
     bodyHtml += `<div class="info-box" style="background:rgba(0,105,92,0.1)">
-      <div class="fs-12 fw-6" style="color:#00695c">냉동 보관</div>
+      <div class="fs-12 fw-6" style="color:#00695c">냉동 보관 (CCP-1 동결온도)</div>
     </div>`;
     if (stepData.freezeStart) bodyHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
+    if (stepData.freezeTemp) bodyHtml += `<div class="fs-11 c-txt-l mt-4">투입 냉동고 온도: <strong>${stepData.freezeTemp}</strong> <span style="color:var(--txt-l)">(한계 −18℃ 이하)</span></div>`;
     if (stepData.checks?.length) {
       bodyHtml += `<div class="fs-12 fw-6 c-txt-l mb-4 mt-8">체크항목</div>`;
       bodyHtml += stepData.checks.map(c => `<div class="check-item"><div class="check-box ${c.checked?'checked':''}" style="pointer-events:none">${c.checked?'✓':''}</div><span>${c.name}</span></div>`).join('');
