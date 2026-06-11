@@ -10531,8 +10531,8 @@ async function generateWOPdf(woId) {
         }
       }
 
-      // 체크항목 (HACCP 위생 점검)
-      if (stepData.checks && stepData.checks.length > 0) {
+      // 체크항목 (HACCP 위생 점검) — 단, CCP 격자(checks=격자행 {구분,시편Fe…})는 제외. 아래 isCCP 블록에서 종이양식 기록부로 렌더한다.
+      if (stepData.checks && stepData.checks.length > 0 && !(stepData.checks[0] && (stepData.checks[0].구분 || stepData.checks[0].시편Fe))) {
         y += 3;
         const chkR = drawText('체크항목 (위생/품질 점검)', M, y, 18, 'bold', '#333', CW);
         y = chkR.y + chkR.h + 3;
@@ -10584,27 +10584,88 @@ async function generateWOPdf(woId) {
 
       // CCP 검사 (금속검출 — HACCP 핵심)
       if (isCCP) {
-        if (stepData.ccpTotal != null) { const r = tableRow('검사 총 수량', `${stepData.ccpTotal} 개`, y); y = r.nextY; }
-        if (stepData.passCount != null) { const r = tableRow('합격 수량', `${stepData.passCount} 개`, y); y = r.nextY; }
-        if (stepData.failCount != null) { const r = tableRow('불합격 수량', `${stepData.failCount} 개`, y); y = r.nextY; }
-        if (stepData.times) {
-          y += 2;
-          const tr = drawText('CCP 모니터링 시간 기록', M, y, 18, 'bold', '#c62828', CW);
-          y = tr.y + tr.h + 2;
-          for (const [k, v] of Object.entries(stepData.times)) {
-            if (y > PH - 12) { doc.addPage(); y = M; }
-            const r = tableRow(k, v, y); y = r.nextY;
+        // 신 양식(격자) 자동 감지: _fmt 마커 또는 checks 행이 격자 구조(구분/시편Fe)인지
+        const isGrid = stepData._fmt === 'ccpGrid-v1' ||
+          (Array.isArray(stepData.checks) && stepData.checks[0] && (stepData.checks[0].구분 || stepData.checks[0].시편Fe));
+        if (isGrid) {
+          // ── 신 양식: 종이 기록부 격자 (위치별 검출/불검출 그대로 · 감사 바인더용) ──
+          const NM = { 시편Fe: '검출', 시편SUS: '검출', 제품통과: '불검출', 제품시편Fe: '검출', 제품시편SUS: '검출' };
+          const arr3 = v => (Array.isArray(v) && v.length) ? v : ['검출', '검출', '검출'];
+          const cells = v => arr3(v).map((x, i) => `${CCP_POS3[i]} ${x}`).join('  ');
+          const abn = (v, nm) => arr3(v).some(x => x !== nm);
+          const abn6 = (o, nm) => ['상', '하'].some(s => abn(o && o[s], nm));
+          y = sectionTitle('CCP 금속검출 모니터링 기록부', y, '#c62828');
+          const cr = drawText('한계기준 Fe 2.5mm / SUS 4.0mm 이상 100% 검출 · 정상 = 시편(Fe·SUS) 검출 / 제품통과 불검출 / 제품+시편 검출 (위치 좌·중·우)', M, y, 11, 'normal', '#666', CW);
+          y = cr.y + cr.h + 3;
+          (stepData.checks || []).forEach((c, ci) => {
+            if (y + 38 > PH - 12) { doc.addPage(); y = M; }
+            const gubun = c.구분 === '작업중2h' ? '작업 중 (2h)' : (c.구분 || `점검 ${ci + 1}`);
+            const feA = abn(c.시편Fe, NM.시편Fe), suA = abn(c.시편SUS, NM.시편SUS);
+            const ptA = (c.제품통과 || '불검출') !== NM.제품통과;
+            const psFeA = abn6(c.제품시편Fe, NM.제품시편Fe), psSuA = abn6(c.제품시편SUS, NM.제품시편SUS);
+            const judge = c.판정 || ((feA || suA || ptA || psFeA || psSuA) ? '부적합' : '적합');
+            const ok = judge === '적합';
+            // 점검 시점 헤더 바 (구분 · 시각 · 판정)
+            doc.setFillColor(ok ? 232 : 255, ok ? 245 : 235, ok ? 233 : 238);
+            doc.rect(M, y, CW, 9, 'F');
+            doc.setDrawColor(ok ? 46 : 211, ok ? 125 : 47, ok ? 50 : 47); doc.setLineWidth(0.3); doc.rect(M, y, CW, 9);
+            drawText(`■ ${gubun}`, M + 2, y + 1.7, 12, 'bold', ok ? '#1b5e20' : '#b71c1c', CW * 0.4);
+            drawText(`시각 ${c.시각 || '-'}`, M + CW * 0.42, y + 1.9, 11, 'normal', '#333', CW * 0.3);
+            drawText(`판정 ${judge}`, M + CW * 0.7, y + 1.7, 12, 'bold', ok ? '#1b5e20' : '#b71c1c', CW * 0.3 - 2, 'right');
+            y += 11;
+            // 시편 Fe / SUS (좌·중·우)
+            drawText(`시편Fe   ${cells(c.시편Fe)}`, M, y, 12, 'normal', feA ? '#c62828' : '#1b5e20', CW / 2 - 2);
+            drawText(`시편SUS   ${cells(c.시편SUS)}`, M + CW / 2, y, 12, 'normal', suA ? '#c62828' : '#1b5e20', CW / 2 - 2);
+            y += 6;
+            // 제품 통과
+            drawText(`제품 통과 (정상=불검출): ${c.제품통과 || '불검출'}`, M, y, 12, 'normal', ptA ? '#c62828' : '#1b5e20', CW);
+            y += 6;
+            // 제품+시편 Fe / SUS (상/하 × 좌·중·우)
+            drawText(`제품+시편Fe   상 ${cells(c.제품시편Fe && c.제품시편Fe.상)}   하 ${cells(c.제품시편Fe && c.제품시편Fe.하)}`, M, y, 11.5, 'normal', psFeA ? '#c62828' : '#1b5e20', CW);
+            y += 5.5;
+            drawText(`제품+시편SUS  상 ${cells(c.제품시편SUS && c.제품시편SUS.상)}   하 ${cells(c.제품시편SUS && c.제품시편SUS.하)}`, M, y, 11.5, 'normal', psSuA ? '#c62828' : '#1b5e20', CW);
+            y += 8;
+          });
+          // 종합 판정 강조 박스
+          const verdict = stepData.판정종합 || ((stepData.checks || []).every(c => (c.판정 || '적합') === '적합') ? '적합' : '부적합');
+          const vp = verdict === '적합';
+          if (y + 16 > PH - 12) { doc.addPage(); y = M; }
+          doc.setFillColor(vp ? 232 : 255, vp ? 245 : 235, vp ? 233 : 238);
+          doc.rect(M, y, CW, 16, 'F');
+          doc.setDrawColor(vp ? 46 : 211, vp ? 125 : 47, vp ? 50 : 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 16);
+          drawText(`종합 판정: ${verdict}`, M + 3, y + 2, 18, 'bold', vp ? '#2e7d32' : '#c62828', CW - 6);
+          y += 19;
+          // 요약 (통과량 / 검출량 / 점검자 / 특이사항 / 이탈 / 개선조치)
+          const sum = [['통과량', stepData.통과량], ['검출량', stepData.검출량], ['점검자', stepData.점검자], ['특이사항', stepData.특이사항]];
+          if (stepData.이탈내용) sum.push(['이탈내용', stepData.이탈내용]);
+          if (stepData.개선조치) sum.push(['개선조치 및 결과', stepData.개선조치]);
+          for (const [l, v] of sum) { if (v) { const r = tableRow(l, v, y); y = r.nextY; } }
+          if (stepData._migrated) { const mr = drawText('※ 구(舊) 7단계 기록에서 자동 변환됨 — 위치값은 정상 기본값으로 보정', M, y + 1, 10, 'normal', '#999', CW); y = mr.y + mr.h + 2; }
+          y += 3;
+        } else {
+          // ── 구 양식 (legacy: ccpTotal / passCount / failCount / times) ──
+          if (stepData.ccpTotal != null) { const r = tableRow('검사 총 수량', `${stepData.ccpTotal} 개`, y); y = r.nextY; }
+          if (stepData.passCount != null) { const r = tableRow('합격 수량', `${stepData.passCount} 개`, y); y = r.nextY; }
+          if (stepData.failCount != null) { const r = tableRow('불합격 수량', `${stepData.failCount} 개`, y); y = r.nextY; }
+          if (stepData.times) {
+            y += 2;
+            const tr = drawText('CCP 모니터링 시간 기록', M, y, 18, 'bold', '#c62828', CW);
+            y = tr.y + tr.h + 2;
+            for (const [k, v] of Object.entries(stepData.times)) {
+              if (y > PH - 12) { doc.addPage(); y = M; }
+              const r = tableRow(k, v, y); y = r.nextY;
+            }
           }
+          // CCP 판정 결과 강조 박스
+          y += 3;
+          const ccpResult = (stepData.failCount != null && stepData.failCount > 0) ? '불합격 발생' : '전량 합격';
+          const isPass = ccpResult === '전량 합격';
+          doc.setFillColor(isPass ? 232 : 255, isPass ? 245 : 235, isPass ? 233 : 238);
+          doc.rect(M, y, CW, 16, 'F');
+          if (!isPass) { doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 16); }
+          drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 18, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
+          y += 19;
         }
-        // CCP 판정 결과 강조 박스
-        y += 3;
-        const ccpResult = (stepData.failCount != null && stepData.failCount > 0) ? '불합격 발생' : '전량 합격';
-        const isPass = ccpResult === '전량 합격';
-        doc.setFillColor(isPass ? 232 : 255, isPass ? 245 : 235, isPass ? 233 : 238);
-        doc.rect(M, y, CW, 16, 'F');
-        if (!isPass) { doc.setDrawColor(211, 47, 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 16); }
-        drawText(`CCP 판정 결과: ${ccpResult}`, M + 3, y + 2, 18, 'bold', isPass ? '#2e7d32' : '#c62828', CW - 6);
-        y += 19;
       }
 
       // QR 라벨
@@ -10619,7 +10680,9 @@ async function generateWOPdf(woId) {
 
       // 기타 데이터 (JSON 파싱하여 읽기 쉽게 표시)
       const shownKeys = ['inputQty','targetQty','useType','checks','packQty','samples','sealQty',
-        'labelCheck','sealCheck','ccpTotal','passCount','failCount','times','qrQty','freezeStart','freezeTemp'];
+        'labelCheck','sealCheck','ccpTotal','passCount','failCount','times','qrQty','freezeStart','freezeTemp',
+        // CCP 격자(신 양식) 키 — 위 isCCP 블록에서 직접 렌더하므로 '기타'에 중복 노출 금지
+        '제품명','점검자','통과량','검출량','특이사항','판정종합','이탈내용','개선조치','_fmt','_migrated'];
       const extraKeys = Object.keys(stepData).filter(k => !shownKeys.includes(k));
       if (extraKeys.length > 0) {
         y += 2;
