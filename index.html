@@ -4623,15 +4623,33 @@ function buildVersionLabel() {
 }
 
 // 캐시 무시하고 페이지 재로드
-function forceRefresh() {
-  if (!window.confirm('캐시를 비우고 최신 버전을 가져옵니다. 진행할까요?')) return;
+function forceRefresh(skipConfirm) {
+  if (!skipConfirm && !window.confirm('캐시를 비우고 최신 버전을 가져옵니다. 진행할까요?')) return;
+  // 쿼리 캐시버스트 — location.reload(true) 의 true 인자는 최신 브라우저에서 무시되므로 URL 쿼리로 HTTP 캐시 우회.
+  const bust = location.pathname + '?v=' + Date.now();
+  const go = () => location.replace(bust);
   if ('caches' in window) {
-    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).finally(() => {
-      window.location.reload(true);
-    });
-  } else {
-    window.location.reload(true);
-  }
+    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).finally(go);
+  } else { go(); }
+}
+
+// 새 버전 자동 감지 — 서버 index.html Last-Modified 가 현재 로드본보다 충분히 새로우면 갱신 배너 표시.
+async function checkForUpdate() {
+  try {
+    const cur = Date.parse(document.lastModified || '');
+    if (!cur) return;
+    const res = await fetch(location.pathname + '?_chk=' + Date.now(), { cache: 'no-store' });
+    const lm = res.headers.get('Last-Modified');
+    const server = lm ? Date.parse(lm) : 0;
+    if (!server || server - cur <= 90000) return;   // 1.5분 이상 새로울 때만 (시계오차 오탐 방지)
+    if (document.getElementById('update-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'update-banner';
+    bar.style.cssText = 'background:#1e8e3e;color:#fff;padding:9px 12px;font-size:13px;font-weight:600;text-align:center;cursor:pointer';
+    bar.textContent = '🆕 새 버전이 배포되었습니다 — 눌러서 업데이트';
+    bar.onclick = () => forceRefresh(true);
+    (document.getElementById('app') || document.body).prepend(bar);
+  } catch (e) {}
 }
 
 // ─── SETTINGS ───
@@ -11717,6 +11735,9 @@ async function initApp() {
 
     // LiveSync 초기화 — PC↔모바일 실시간 동기화
     LiveSync.init();
+
+    // 새 버전 자동 감지 (배포 후 단말 캐시 stale 방지 — 서비스워커 없는 PWA 보완)
+    setTimeout(() => { try { checkForUpdate(); } catch (e) {} }, 4000);
 
     // [제거됨] 냉동 상태 체크 — 관리자 승인 경로만 사용
 
