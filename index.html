@@ -5624,10 +5624,92 @@ Screens['data-audit'] = async () => {
         <div class="fs-11 c-txt-l mb-8">원재료/완제품 LOT 잔량·상태, 입고취소·폐기 일관성, WO↔FG LOT 연결, 공정기록 고아, lastStep 정합성</div>
         <button class="btn btn-pri btn-full" onclick="runDataAudit()">검사 실행</button>
       </div>
+      <div class="card">
+        <div class="fs-13 fw-7 mb-4">🔄 공정기록 격자 변환 <span class="badge badge-gray">CCP · 1회성</span></div>
+        <div class="fs-11 c-txt-l mb-8">구 7단계 금속검출 기록을 신 격자 양식으로 변환합니다. <b>원본 7단계는 <code>_legacy</code>에 보존</b>(되돌리기 가능)되고, 구형에 없던 위치값은 추론(정상)이라 <code>_migrated</code>로 표기됩니다. <b>스캔(dry-run)으로 대상을 먼저 확인</b>한 뒤 실행하세요.</div>
+        <button class="btn btn-outline btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
+        <div id="ccp-migrate-result"></div>
+      </div>
       <div id="audit-result"></div>
     </div>
   `;
 };
+
+/* ── P3: 공정기록 구 7단계 → 신 격자 일괄변환 ──
+   비파괴: 원본 7단계를 _legacy 에 보존(되돌리기 가능) · idempotent(이미 격자/변환됨 skip) · admin.
+   주의: migrate7stepToGrid 는 구형에 없던 위치값을 '정상'으로 추론 → _migrated 표기 유지. */
+function ccpClassifyRecord(r) {
+  // 'grid'(이미 격자) | 'migrated'(이미 변환·_legacy 보유) | 'old'(구 7단계·변환대상) | 'other'
+  if ((r[3] || '') !== 'inspect') return 'other';
+  let d; try { d = JSON.parse(r[5] || 'null'); } catch (e) { return 'other'; }
+  if (!d || typeof d !== 'object') return 'other';
+  if (d._legacy) return 'migrated';
+  if (Array.isArray(d.checks)) return 'grid';
+  if (d.step1Time || d.step2 || d.step3 || d.step4Time || d.step5 || d.step6 || d.ccpTotal) return 'old';
+  return 'other';
+}
+
+async function ccpMigrateScan() {
+  const el = $id('ccp-migrate-result');
+  el.innerHTML = '<div class="loading-inline mt-8"><div class="spinner-s"></div> 공정기록 스캔 중…</div>';
+  try {
+    SheetsAPI.invalidateCache('공정기록');
+    const records = await SheetsAPI.getAll('공정기록', false);
+    const buckets = { grid: [], migrated: [], old: [], other: [] };
+    records.forEach((r, i) => { buckets[ccpClassifyRecord(r)].push({ r, i }); });
+    const old = buckets.old;
+    const inspectCnt = records.filter(r => (r[3] || '') === 'inspect').length;
+    const sample = old.slice(0, 2).map(({ r, i }) => {
+      let d = {}; try { d = JSON.parse(r[5] || '{}'); } catch (e) {}
+      const g = migrate7stepToGrid(d);
+      return `<div class="fs-11 mt-4" style="border-top:1px dashed var(--gray-l);padding-top:4px">
+        <b>${r[0] || '-'} / ${r[1] || '-'}단계</b> <span class="c-txt-l">(시트행 F${i + 2})</span><br>
+        before: 7단계(step1~6) → after: 격자 <b>${g.checks.length}</b>행 · <code>_migrated</code> · 원본 <code>_legacy</code> 보존</div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="card mt-8" style="background:#fffbf0">
+        <div class="fs-12 fw-7 mb-4">스캔 결과 (inspect 기록 ${inspectCnt}건 중)</div>
+        <div class="fs-13">변환 대상(구 7단계): <b class="c-warn">${old.length}건</b></div>
+        <div class="fs-11 c-txt-l mt-2">이미 격자 ${buckets.grid.length} · 이미 변환됨 ${buckets.migrated.length} · 기타 ${buckets.other.length}</div>
+        ${old.length ? sample + `<button class="btn btn-pri btn-full mt-8" onclick="ccpMigrateRun()">격자로 변환 실행 (${old.length}건)</button>`
+                     : '<div class="fs-12 c-suc mt-8">✓ 변환할 구 7단계 기록 없음</div>'}
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="card bl-err mt-8"><div class="c-err">스캔 실패: ${e.message}</div></div>`;
+  }
+}
+
+async function ccpMigrateRun() {
+  confirm('공정기록 격자 변환', '구 7단계 금속검출 기록을 격자 양식으로 변환합니다.\n\n• 원본 7단계는 _legacy 에 보존됩니다(되돌리기 가능)\n• 구형에 없던 위치값은 추론(정상)이라 _migrated 로 표기됩니다\n\n진행하시겠습니까?', async () => {
+    try {
+      showLoading();
+      // 확인 시점 fresh 재조회 → 인덱스 재계산(삭제로 인한 행 밀림 창 최소화)
+      SheetsAPI.invalidateCache('공정기록');
+      const records = await SheetsAPI.getAll('공정기록', false);
+      const now = formatDateTime();
+      const by = State.user?.email || '';
+      const batch = [];
+      records.forEach((r, i) => {
+        if (ccpClassifyRecord(r) !== 'old') return;
+        let d; try { d = JSON.parse(r[5] || '{}'); } catch (e) { return; }
+        const g = migrate7stepToGrid(d);
+        g._legacy = d;          // 원본 7단계 보존(비파괴·되돌리기 근거)
+        g._migratedAt = now;    // 감사: 변환시각(KST)
+        g._migratedBy = by;     // 감사: 변환자
+        batch.push({ range: `공정기록!F${i + 2}`, values: [[JSON.stringify(g)]] }); // col5=stepData=F, getAll 인덱스 i → 시트행 i+2
+      });
+      if (!batch.length) { hideLoading(); toast('변환할 대상이 없습니다', 'info'); return; }
+      await SheetsAPI.batchUpdate(batch);
+      SheetsAPI.invalidateCache('공정기록');
+      hideLoading();
+      toast(`${batch.length}건 변환 완료 — 원본은 _legacy 보존`, 'suc', 3000);
+      ccpMigrateScan();   // 재스캔: idempotent 확인(대상 0건이어야)
+    } catch (e) {
+      hideLoading();
+      toast('변환 실패: ' + e.message, 'err');
+    }
+  });
+}
 
 async function runDataAudit() {
   const resultEl = $id('audit-result');
