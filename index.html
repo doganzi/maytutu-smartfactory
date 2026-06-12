@@ -10671,6 +10671,8 @@ async function generateWOPdf(woId) {
 
   const records = (await SheetsAPI.getAll('공정기록', false)).filter(r => r[0] === woId);
   records.sort((a, b) => parseInt(a[1]) - parseInt(b[1]));
+  // 동결공정 일지의 '투입 시 냉동고 온도' — Tuya 센서 자동기록(동결온도로그)에서 보충
+  const tempLogs = await SheetsAPI.getAll('동결온도로그').catch(() => []) || [];
 
   /* ── 한글 폰트 로드 ── */
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -11354,29 +11356,132 @@ async function generateWOPdf(woId) {
       // QR 라벨
       if (stepData.qrQty) { const r = tableRow('QR 라벨 발행 수', `${stepData.qrQty} 매`, y); y = r.nextY; }
 
-      // 냉동보관 — 동결공정 모니터링일지 (CCP-1 동결온도)
-      if (stepData.freezeStart || stepData.제품온도) {
-        let r;
-        r = tableRow('한계기준', '냉동고 −18℃ 이하 · 최소 냉동 12시간 이상', y, 38); y = r.nextY;
-        r = tableRow('주기', '제품 투입 시 · 최소냉동시간(12h) 완료 시', y, 38); y = r.nextY;
-        r = tableRow('투입 — 냉동 시작', stepData.freezeStart || '-', y, 38); y = r.nextY;
-        r = tableRow('투입 — 냉동고 온도', stepData.freezeTemp ? fmtFreezeTemp(stepData.freezeTemp) : '센서 자동기록 (동결온도로그)', y, 38); y = r.nextY;
-        if (stepData.제품온도 || stepData.종료시각) {
-          r = tableRow('종료 — 냉동 종료시각', stepData.종료시각 || '-', y, 38); y = r.nextY;
-          r = tableRow('종료 — 냉동고 온도', fmtFreezeTemp(stepData.종료온도), y, 38); y = r.nextY;
-          r = tableRow('종료 — 제품 온도', fmtFreezeTemp(stepData.제품온도), y, 38); y = r.nextY;
-          if (stepData.이탈내용) { r = tableRow('이탈내용', stepData.이탈내용, y, 38); y = r.nextY; }
-          if (stepData.개선조치) { r = tableRow('개선조치 및 결과', stepData.개선조치, y, 38); y = r.nextY; }
-          const _fj = stepData.판정 || '-', _fok = _fj === '적합';
-          if (y + 14 > PH - 12) { doc.addPage(); y = M; }
-          doc.setFillColor(_fok ? 232 : 255, _fok ? 245 : 235, _fok ? 233 : 238);
-          doc.rect(M, y, CW, 14, 'F');
-          doc.setDrawColor(_fok ? 46 : 211, _fok ? 125 : 47, _fok ? 50 : 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 14);
-          drawText(`동결 판정: ${_fj}`, M + 3, y + 2, 16, 'bold', _fok ? '#2e7d32' : '#c62828', CW - 6);
-          y += 17;
-        } else {
-          const _nr = drawText('※ 종료 기록(제품온도·판정)은 12시간 후 출하승인 시 입력됩니다.', M, y + 1, 10, 'normal', '#999', CW); y = _nr.y + _nr.h + 2;
-        }
+      // 냉동보관 — 종이 '모니터링일지 (동결공정)' 1:1 재현 (CCP-1 동결온도)
+      if (stepData.freezeStart || stepData.제품온도 || stepData.종료시각) {
+        const LN2 = () => { doc.setDrawColor(70, 70, 70); doc.setLineWidth(0.28); };
+        const bx2 = (x, yy, w, h) => { LN2(); doc.rect(x, yy, w, h); };
+        const vl2 = (x, yy, h) => { LN2(); doc.line(x, yy, x, yy + h); };
+        if (y + 130 > PH - 12) { doc.addPage(); y = M; }
+
+        // ① 제목 + 결재칸
+        const AP2 = 44, APL = 8, APC = (AP2 - APL) / 2, TH2 = 15;
+        bx2(M, y, CW, TH2);
+        drawText('모니터링일지 (동결공정)', M + 3, y + 4, 15, 'bold', '#111', CW - AP2 - 6);
+        const ax = M + CW - AP2;
+        vl2(ax, y, TH2); vl2(ax + APL, y, TH2); vl2(ax + APL + APC, y, TH2);
+        drawText('결', ax + 2.2, y + 3, 7.5, 'normal', '#333', APL); drawText('재', ax + 2.2, y + 8.5, 7.5, 'normal', '#333', APL);
+        LN2(); doc.line(ax + APL, y + 5, M + CW, y + 5);
+        drawText('작성', ax + APL, y + 1, 7, 'normal', '#333', APC, 'center');
+        drawText('승인', ax + APL + APC, y + 1, 7, 'normal', '#333', APC, 'center');
+        drawText((wo[8] || '').split('@')[0], ax + APL, y + 8, 7.5, 'normal', '#222', APC, 'center');
+        drawText(wo[15] ? wo[15].split('@')[0] : '', ax + APL + APC, y + 8, 7.5, 'normal', '#222', APC, 'center');
+        y += TH2;
+
+        // ② 작성자 / 한계기준 / 주기 / 방법
+        bx2(M, y, CW, 6.5);
+        drawText(`생산팀 / 관리팀        작성자 : ${(wo[8] || '-').split('@')[0]}`, M + 3, y + 1.6, 8, 'normal', '#222', CW - 6);
+        y += 6.5;
+        const flab = (t, h) => { bx2(M, y, CW, h); vl2(M + 26, y, h); drawText(t, M + 3, y + h / 2 - 2.2, 8, 'bold', '#222', 22); };
+        flab('한계기준', 6.5);
+        drawText('○ 냉동 : -18℃ 이하   /   최소냉동시간 : 12시간 이상', M + 29, y + 1.6, 8, 'normal', '#222', CW - 32);
+        y += 6.5;
+        flab('주  기', 6.5);
+        drawText('제품 투입시, 최소냉동시간 완료시', M + 29, y + 1.6, 8, 'normal', '#222', CW - 32);
+        y += 6.5;
+        const fmT = '○ 온도 확인\n- 모니터링 담당자는 제품 투입 시 냉동창고의 온도계를 확인하고 냉동 종료 시 냉동고 온도 및 제품 온도를 확인하여 모니터링 일지에 작성한다.\n- 육안 확인이 불가능한 시간대의 냉동고 온도는 데이터로거 자료를 통해 확인한다.';
+        const fmH = Math.max(measureH(fmT, 7.2, 'normal', CW - 32) + 3, 16);
+        flab('방  법', fmH);
+        drawText(fmT, M + 29, y + 1.5, 7.2, 'normal', '#222', CW - 32);
+        y += fmH + 2;
+
+        // ③ 격자 — 날짜·품명·투입시각·냉동고온도 | 날짜·종료시각·냉동고온도·제품온도 | 제품상태 | 판정
+        const fxw = [14, 26, 16, 16, 14, 18, 16, 16, 24, 20];
+        const fx = [M]; fxw.forEach(w => fx.push(fx[fx.length - 1] + w));
+        const fline = (yy, h) => { bx2(M, yy, CW, h); for (let i = 1; i < fx.length - 1; i++) vl2(fx[i], yy, h); };
+        const fHead = () => {
+          if (y + 11 > PH - 12) { doc.addPage(); y = M; }
+          fline(y, 11);
+          const hd = (t, i, dy, fs) => drawText(t, fx[i], y + dy, fs || 7, 'bold', '#222', fx[i + 1] - fx[i], 'center');
+          hd('날 짜', 0, 4); hd('품  명', 1, 4); hd('투입시각', 2, 4);
+          hd('냉동고', 3, 2); hd('온도(℃)', 3, 6);
+          hd('날 짜', 4, 4); hd('냉동', 5, 2); hd('종료시각', 5, 6);
+          hd('냉동고', 6, 2); hd('온도(℃)', 6, 6);
+          hd('제품 온도', 7, 4);
+          hd('제품 상태', 8, 4);
+          hd('판정', 9, 1.5); hd('(적합:O/', 9, 5, 6); hd('부적합:X)', 9, 8, 6);
+          y += 11;
+        };
+        fHead();
+        // 투입 냉동고온도 — 수기값(legacy) 우선, 없으면 센서 자동기록에서 투입시각 ±40분 최근값
+        const dtOf = s => { const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); return m ? { d: `${+m[2]}/${+m[3]}`, t: `${m[4]}:${m[5]}` } : { d: '', t: '' }; };
+        const inTemp = (() => {
+          if (stepData.freezeTemp) return fmtFreezeTemp(stepData.freezeTemp);
+          const ts = parseLogTs(stepData.freezeStart || wo[11] || '');
+          if (!ts || !Array.isArray(tempLogs)) return '-';
+          let best = null;
+          tempLogs.forEach(tr => {
+            if (!String(tr[2] || tr[1] || '').includes('냉동창고')) return;
+            const lt = parseLogTs(tr[0]); const t = (tr[3] === '' || tr[3] == null) ? NaN : Number(tr[3]);
+            if (!lt || isNaN(t)) return;
+            const dd = Math.abs(lt - ts);
+            if (dd <= 40 * 60000 && (!best || dd < best.dd)) best = { dd, t };
+          });
+          return best ? `${best.t.toFixed(1)}°C` : '-';
+        })();
+        const stCkPair = (cx, cw, yy, state) => {   // 제품 상태: □양호 / □불량 (세로)
+          const bs = 2.2, sx = cx + (cw - 13) / 2;
+          [['양호', state === '양호', false], ['불량', state === '불량', true]].forEach(([lb, on, red], i) => {
+            const cy2 = yy + 1 + i * 3.8;
+            doc.setDrawColor(on && red ? 198 : 45, on && red ? 40 : 45, on && red ? 40 : 45); doc.setLineWidth(0.25);
+            doc.rect(sx, cy2, bs, bs);
+            if (on) { doc.setLineWidth(0.5); doc.line(sx + 0.4, cy2 + 1.2, sx + 0.9, cy2 + 1.8); doc.line(sx + 0.9, cy2 + 1.8, sx + 2.0, cy2 + 0.3); }
+            drawText(lb, sx + bs + 0.8, cy2 - 0.5, 6.5, 'normal', on && red ? '#c62828' : '#222', 9);
+          });
+        };
+        const FRH = 9;
+        const frow = (vals, state, judge) => {
+          if (y + FRH > PH - 12) { doc.addPage(); y = M; fHead(); }
+          fline(y, FRH);
+          vals.forEach((v, i) => { if (v !== null) drawText(String(v), fx[i], y + 2.8, 7.2, 'normal', '#222', fx[i + 1] - fx[i], 'center'); });
+          if (state !== null) stCkPair(fx[8], fxw[8], y, state);
+          if (judge) drawText(judge, fx[9], y + 2.4, 9.5, 'bold', judge === 'O' ? '#1b5e20' : '#c62828', fxw[9], 'center');
+          y += FRH;
+        };
+        const fin = dtOf(stepData.freezeStart || wo[11] || ''), fout = dtOf(stepData.종료시각 || '');
+        const done = !!(stepData.제품온도 || stepData.종료시각);
+        const judged = stepData.판정 === '적합' ? 'O' : stepData.판정 === '부적합' ? 'X' : '';
+        frow([fin.d, wo[4] || '', fin.t, inTemp, fout.d, fout.t || (done ? '' : ':'),
+          done ? fmtFreezeTemp(stepData.종료온도) : '', done ? fmtFreezeTemp(stepData.제품온도) : ''],
+          done ? (stepData.판정 === '부적합' ? '불량' : '양호') : null, judged);
+        for (let i = 0; i < 5; i++) frow(['', '', ':', '', '', ':', '', ''], null, '');
+
+        // ④ 개선조치 방법
+        const impT2 = '○ 냉동고 고장시\n 1) 정상작동 가능한 냉동고(또는 냉동차량)으로 이동 → 제품온도측정 → -18℃ 이상 부적합품처리 → 부적합품스티커에 선별로 표시 → 폐기\n○ 정상작동 가능한 냉동고 이동 → 제품온도측정 → -18℃이하 부적합품처리 → 부적합품스티커에 선별로 표시 → 미생물 검사 실시 → ① 검사결과 적합: 재반입 조치 ② 검사결과 부적합: 폐기\n○ 냉동고 제품온도 미달 시 추가 냉동 실시 후 최종 제품온도 -18℃이하 확인 후 출고\n○ 공통 : 개선조치 시\n - 문제 발생 시 HACCP팀장에게 보고 후 조치하며, 개선조치 후 모니터링 일지에 기록 후 HACCP팀장에게 승인을 받는다.';
+        const impH2 = measureH(impT2, 7, 'normal', CW - 32) + 3;
+        if (y + impH2 > PH - 12) { doc.addPage(); y = M; }
+        bx2(M, y, CW, impH2); vl2(M + 26, y, impH2);
+        drawText('개선조치\n방  법', M + 3, y + impH2 / 2 - 5, 8, 'bold', '#222', 22);
+        drawText(impT2, M + 29, y + 1.5, 7, 'normal', '#222', CW - 32);
+        y += impH2;
+
+        // ⑤ 이탈내용 | 개선조치 및 결과 | 개선조치자 | 승인자
+        const bw = [60, 60, 30, 30];
+        const bX = [M]; bw.forEach(w => bX.push(bX[bX.length - 1] + w));
+        const bline = (yy, h) => { bx2(M, yy, CW, h); for (let i = 1; i < bX.length - 1; i++) vl2(bX[i], yy, h); };
+        if (y + 18 > PH - 12) { doc.addPage(); y = M; }
+        bline(y, 6);
+        ['이탈내용', '개선조치 및 결과', '개선조치자', '승인자'].forEach((t, i) => drawText(t, bX[i], y + 1.4, 7.5, 'bold', '#222', bw[i], 'center'));
+        y += 6;
+        const devH2 = Math.max(measureH(stepData.이탈내용 || ' ', 7.2, 'normal', 56), measureH(stepData.개선조치 || ' ', 7.2, 'normal', 56)) + 4;
+        const bH = Math.max(devH2, 12);
+        bline(y, bH);
+        if (stepData.이탈내용) drawText(stepData.이탈내용, bX[0] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
+        if (stepData.개선조치) drawText(stepData.개선조치, bX[1] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
+        if (stepData.이탈내용 || stepData.개선조치) drawText((wo[8] || '').split('@')[0], bX[2], y + 2, 7.2, 'normal', '#222', bw[2], 'center');
+        drawText(wo[15] ? wo[15].split('@')[0] : '', bX[3], y + 2, 7.2, 'normal', '#222', bw[3], 'center');
+        y += bH;
+        if (!done) { const _nr = drawText('※ 종료 기록(냉동고·제품온도·판정)은 12시간 후 출하승인 시 입력됩니다.', M, y + 1.5, 8, 'normal', '#999', CW); y = _nr.y + _nr.h + 2; }
+        y += 3;
       }
 
       // 기타 데이터 (JSON 파싱하여 읽기 쉽게 표시)
