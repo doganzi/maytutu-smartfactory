@@ -8513,7 +8513,7 @@ function renderStepContent(step, stepType) {
       </div>
       <div class="grid-2" style="gap:8px">
         <div class="input-group"><label>통과량</label><input type="text" id="ccp-passQty-${stepNo}" placeholder="예: 20kg" oninput="validateStepInputs(${stepNo})"></div>
-        <div class="input-group"><label>검출량</label><input type="text" id="ccp-detQty-${stepNo}" placeholder="0"></div>
+        <div class="input-group"><label>통과수량</label><input type="text" id="ccp-detQty-${stepNo}" placeholder="예: 40봉"></div>
       </div>
       <div class="input-group"><label>특이사항</label><input type="text" id="ccp-note-${stepNo}" placeholder="특이사항"></div>
       <div class="input-group"><label>이탈내용 (이탈 발생 시)</label><input type="text" id="ccp-dev-${stepNo}" placeholder="이탈 발생 시 기록" oninput="validateStepInputs(${stepNo})"></div>
@@ -11175,19 +11175,16 @@ async function generateWOPdf(woId) {
           const checks = stepData.checks || [];
           const byG = g => checks.filter(c => (c.구분 || '') === g);
           const starts = byG('작업시작전'), works = byG('작업명'), twos = byG('작업중2h'), ends = byG('작업종료');
-          const queue = [...twos, ...starts.slice(1), ...works.slice(1), ...ends.slice(1),
-            ...checks.filter(c => !['작업시작전', '작업명', '작업중2h', '작업종료'].includes(c.구분 || ''))];
           const prodName = stepData.제품명 || wo[4] || '';
-          const skel = [
-            { label: '오전작업시작 전', d: starts[0] || null, spec: true },
-            { label: '', d: queue.shift() || null }, { label: '', d: queue.shift() || null }, { label: '', d: queue.shift() || null },
-            { label: '오전작업종료', d: null },
-            { label: '오후작업시작 전', d: null },
-            { label: prodName, d: works[0] || null },
-            { label: '', d: queue.shift() || null },
-            ...queue.map(c => ({ label: '', d: c })),
-            { label: '작업종료', d: ends[0] || null, spec: true },
-          ];
+          // 신 양식(종이 1:1) — 입력 격자 구분 순서 그대로. 오전/오후 구분 폐지.
+          // 작업 시작 전(시편만) → 작업명(품목명·전체검출) → 작업 중 2h(품목명·전체검출) → 작업 종료(시편만)
+          const mkRow = (label, d, spec) => ({ label, d: d || null, spec: !!spec });
+          const skel = [];
+          (starts.length ? starts : [null]).forEach((c, i) => skel.push(mkRow(i ? '' : '작업 시작 전', c, true)));
+          (works.length ? works : [null]).forEach((c) => skel.push(mkRow(prodName, c)));   // 작업명 = 품목명 행(전체 검출)
+          twos.forEach(c => skel.push(mkRow(prodName, c)));                                  // 2시간마다: 품목명 + 검출 기록
+          (ends.length ? ends : [null]).forEach((c, i) => skel.push(mkRow(i ? '' : '작업 종료', c, true)));
+          checks.filter(c => !['작업시작전', '작업명', '작업중2h', '작업종료'].includes(c.구분 || '')).forEach(c => skel.push(mkRow(c.구분 || '', c)));
 
           // 양식 시작 — 남은 공간 부족하면 새 페이지(제목~개선조치 상단블록 ~105mm가 통째로 들어가야 함)
           if (y + 115 > PH - 12) { doc.addPage(); y = M; }
@@ -11310,7 +11307,7 @@ async function generateWOPdf(woId) {
           const px = [M, M + 46, M + 92, M + 136, M + 180];
           const pline = (yy, h) => { bx(M, yy, CW, h); for (let i = 1; i < px.length - 1; i++) vline(px[i], yy, h); };
           pline(y, 6);
-          ['품  명', '통과량', '검출량', '특이사항'].forEach((t, i) => drawText(t, px[i], y + 1.4, 7.5, 'bold', '#222', px[i + 1] - px[i], 'center'));
+          ['품  명', '통과량', '통과수량', '특이사항'].forEach((t, i) => drawText(t, px[i], y + 1.4, 7.5, 'bold', '#222', px[i + 1] - px[i], 'center'));
           y += 6;
           pline(y, 7);
           [prodName, stepData.통과량 || '', stepData.검출량 || 'X', stepData.특이사항 || 'X'].forEach((t, i) => drawText(String(t), px[i], y + 2, 7.5, 'normal', '#222', px[i + 1] - px[i], 'center'));
