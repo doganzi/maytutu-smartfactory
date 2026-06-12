@@ -4502,6 +4502,14 @@ async function onQRScanSuccess(decodedText) {
         const lots = await SheetsAPI.getAll('완제품LOT');
         const lot = lots.find(l => l[0] === indiv[1]);
         data = { id, lotId: indiv[1], itemName: lot?.[2] || '', status: indiv[3], exp: lot?.[6] || '' };
+        // 출하 추적 — 출하완료 시 출하기록에서 냉동창고 출하온도 조회 (제품번호 → 출하 시점 온도)
+        if (indiv[3] === '출하완료') {
+          try {
+            const ships = await SheetsAPI.getAll('출하기록');
+            const ship = ships.filter(s => s[2] === id).sort((a, b) => String(b[6]).localeCompare(String(a[6])))[0];
+            if (ship) data.ship = { at: ship[6], customer: ship[3], temp: ship[8] || '', tempAt: ship[9] || '' };
+          } catch (e) {}
+        }
       }
     } else if (id.startsWith('SP-')) {
       type = '소모품';
@@ -4555,6 +4563,7 @@ async function onQRScanSuccess(decodedText) {
         <div class="fs-11 ${isInactive ? 'c-err' : (data.status === '냉동보관중' ? 'c-warn' : 'c-suc')} mt-4">상태: ${data.status || '냉동보관중'}</div>
       </div>
       ${inactiveWarning}
+      ${data.ship ? `<div class="card bl-info mt-8" style="background:rgba(0,105,92,0.06)"><div class="fs-12 fw-7" style="color:#00695c">❄ 출하 추적 — 냉동창고 온도</div><div class="fs-12 c-txt-l mt-4">출하 ${(data.ship.at || '').substring(0, 16)}${data.ship.customer ? ` · ${data.ship.customer}` : ''}</div><div class="fs-14 fw-7 mt-2">냉동창고 ${data.ship.temp ? `<span style="color:${parseFloat(data.ship.temp) <= -18 ? '#1e8e3e' : '#c62828'}">${data.ship.temp}</span>` : '<span class="c-err">기록 없음</span>'}${data.ship.tempAt ? ` <span class="fs-11 c-txt-l">(측정 ${(data.ship.tempAt || '').substring(11, 16)})</span>` : ''}</div></div>` : ''}
       <div class="row mt-12" style="gap:8px">
         ${shipBtn}
         ${disposalBtn}
