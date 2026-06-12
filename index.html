@@ -4577,6 +4577,7 @@ Screens.more = () => {
     { icon: '🗄️', label: 'DB 직접 조회·편집', desc: '모든 시트 탭 row 조회 / 셀 편집 / JSON 복사 (관리자)', target: 'db-browser', adminOnly: true },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
+    { icon: '🌡️', label: '동결온도 모니터링', desc: '냉장/냉동 실시간 온도 로그 · HACCP 기록 PDF', target: 'temp-log' },
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
     { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
     { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
@@ -7527,6 +7528,14 @@ Screens.haccp = async () => {
         </div>
       </div>
 
+      <div class="card clickable" style="border-left:4px solid #1565c0;margin-top:12px" onclick="Router.go('temp-log')">
+        <div class="row between">
+          <div><div class="fs-13 fw-7">🌡️ 동결온도 모니터링</div>
+            <div class="fs-11 c-txt-l">냉장/냉동 실시간 온도 로그 · HACCP 기록부 PDF 출력</div></div>
+          <span class="fs-16" style="color:var(--txt-l)">›</span>
+        </div>
+      </div>
+
       <div class="fs-14 fw-6 mt-12 mb-8">최근 CCP 금속검출 기록</div>
       ${recentCCP.length === 0 ?
         `<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">CCP 검사 기록이 없습니다</div></div>` :
@@ -7565,6 +7574,240 @@ Screens.haccp = async () => {
     </div>
   `;
 };
+
+/* ═══════════════════════════════════════════════
+   동결온도 모니터링 (Tuya 센서 온도로그) + HACCP 기록 PDF
+   데이터: '동결온도로그' 탭 — Apps Script가 10분마다 자동 적재
+   행: [0]기록시각KST [1]기기ID [2]기기명 [3]온도℃ [4]상태 [5]원시값
+   ※ generateWOPdf(WO 동결공정일지)와 별개 — 이쪽은 연속 센서로그
+   ═══════════════════════════════════════════════ */
+// HACCP 온도 기준(기기명 키). 이탈 = temp<min(있으면) 또는 temp>max(있으면). 여기서 조정.
+const TEMP_LIMITS = {
+  '냉동창고': { min: null, max: -18, label: '≤ −18℃' },
+  '냉장고1':  { min: 0,    max: 5,   label: '0~5℃' },
+  _default:   { min: null, max: null, label: '기준 미설정' },
+};
+function tempLimitFor(name) { return TEMP_LIMITS[name] || TEMP_LIMITS._default; }
+function tempNum(v) { return (v === '' || v == null) ? NaN : Number(v); }   // 빈값/센서에러 → NaN (Number('')=0 함정 회피)
+function isTempDeviation(temp, lim) {
+  const t = tempNum(temp); if (isNaN(t)) return false;
+  return (lim.min != null && t < lim.min) || (lim.max != null && t > lim.max);
+}
+function tempPeriodStart(days) {   // 기간(일)→시작 epoch(ms). 0=전체
+  if (!days) return 0;
+  const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (days - 1));
+  return d.getTime();
+}
+function parseLogTs(s) {   // 'YYYY-MM-DD HH:mm:ss'(KST) → epoch ms
+  const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) { const t = Date.parse(s); return isNaN(t) ? 0 : t; }
+  return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
+}
+const tempLogName = r => r[2] || r[1] || '(미상)';
+
+Screens['temp-log'] = async () => {
+  renderHeader('동결온도 모니터링', '냉장/냉동 실시간 온도 로그', { back: 'more' });
+  showLoading();
+  let rows = [];
+  try { rows = (await SheetsAPI.getAll('동결온도로그', false).catch(() => [])) || []; } catch(e) {}
+  hideLoading();
+  if (State.tempPeriod == null) State.tempPeriod = 1;
+
+  const periods = [{d:1,l:'오늘'},{d:7,l:'7일'},{d:30,l:'30일'},{d:0,l:'전체'}];
+  const sel = State.tempPeriod;
+  const startMs = tempPeriodStart(sel);
+
+  const inRange = rows.map(r => ({ ts: parseLogTs(r[0]), r }))
+    .filter(x => !startMs || x.ts >= startMs)
+    .sort((a, b) => b.ts - a.ts);
+
+  // 현황카드 — 기기별 최신값(기간 무관)
+  const latest = {};
+  rows.forEach(r => { const n = tempLogName(r), ts = parseLogTs(r[0]); if (!latest[n] || ts > latest[n].ts) latest[n] = { ts, r }; });
+  const cards = Object.keys(latest).sort().map(n => {
+    const r = latest[n].r, lim = tempLimitFor(n), dev = isTempDeviation(r[3], lim);
+    const col = dev ? 'var(--err,#c62828)' : 'var(--suc,#1e8e3e)';
+    const tv = isNaN(tempNum(r[3])) ? '-' : tempNum(r[3]).toFixed(1);
+    return `<div class="card" style="padding:12px 14px;border-left:4px solid ${col}">
+      <div class="row between">
+        <div><div class="fs-13 fw-7">${n} <span class="fs-11 c-txt-l">(기준 ${lim.label})</span></div>
+          <div class="fs-11 c-txt-l">${(r[0]||'').substring(5,16)} 기준</div></div>
+        <div style="text-align:right"><div class="fs-22 fw-8" style="color:${col}">${tv}℃</div>
+          <span class="badge badge-${dev?'err':'suc'}">${dev?'기준이탈':'적합'}</span></div>
+      </div></div>`;
+  }).join('') || `<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">아직 온도 기록이 없습니다 (10분마다 자동 적재)</div></div>`;
+
+  // 기간 통계 (기기별 min/max/avg/이탈수)
+  const devNames = [...new Set(inRange.map(x => tempLogName(x.r)))];
+  const statRows = devNames.map(n => {
+    const vals = inRange.filter(x => tempLogName(x.r) === n).map(x => tempNum(x.r[3])).filter(v => !isNaN(v));
+    if (!vals.length) return '';
+    const lim = tempLimitFor(n), mn = Math.min(...vals), mx = Math.max(...vals), av = vals.reduce((a,b)=>a+b,0)/vals.length;
+    const dc = inRange.filter(x => tempLogName(x.r) === n && isTempDeviation(x.r[3], lim)).length;
+    return `<tr><td style="padding:6px 8px;font-weight:600">${n}</td>
+      <td style="padding:6px 8px;text-align:right">${mn.toFixed(1)}</td>
+      <td style="padding:6px 8px;text-align:right">${mx.toFixed(1)}</td>
+      <td style="padding:6px 8px;text-align:right">${av.toFixed(1)}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600;color:${dc?'var(--err)':'inherit'}">${dc}</td></tr>`;
+  }).join('');
+
+  const MAXROW = 200;
+  const logHtml = inRange.slice(0, MAXROW).map(({r}) => {
+    const lim = tempLimitFor(tempLogName(r)), dev = isTempDeviation(r[3], lim);
+    const tv = isNaN(tempNum(r[3])) ? '-' : tempNum(r[3]).toFixed(1);
+    return `<tr style="${dev?'background:rgba(198,40,40,0.07)':''}">
+      <td style="padding:5px 8px;white-space:nowrap">${(r[0]||'').substring(5,16)}</td>
+      <td style="padding:5px 8px">${tempLogName(r)}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:600;color:${dev?'var(--err)':'inherit'}">${tv}</td>
+      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${dev?'err':'suc'}" style="font-size:10px">${dev?'이탈':'적합'}</span></td></tr>`;
+  }).join('');
+
+  $id('content').innerHTML = `
+    <div style="padding:16px">
+      ${cards}
+      <div style="display:flex;gap:6px;margin:12px 0 8px">
+        ${periods.map(p => `<div onclick="State.tempPeriod=${p.d};Router.go('temp-log')" style="flex:1;text-align:center;padding:7px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:${sel===p.d?'var(--pri)':'var(--white)'};color:${sel===p.d?'#fff':'var(--txt)'};border:1px solid var(--gray-l)">${p.l}</div>`).join('')}
+      </div>
+      <button class="btn btn-pri btn-full" style="margin-bottom:12px" onclick="exportTempLogPdf(${sel})">📄 HACCP 동결온도 기록부 출력 (PDF)</button>
+      ${statRows ? `<div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+        <div class="fs-13 fw-7" style="padding:10px 12px;border-bottom:1px solid var(--gray-l)">기간 통계 · ${periods.find(p=>p.d===sel)?.l}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">최저</th><th style="padding:6px 8px;text-align:right">최고</th><th style="padding:6px 8px;text-align:right">평균</th><th style="padding:6px 8px;text-align:right">이탈</th></tr></thead>
+          <tbody>${statRows}</tbody></table></div>` : ''}
+      <div class="fs-13 fw-7" style="margin:4px 0 6px">온도 로그 <span class="fs-11 c-txt-l">(${inRange.length>MAXROW?`최근 ${MAXROW}/${inRange.length}건`:`${inRange.length}건`})</span></div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th></tr></thead>
+          <tbody>${logHtml || `<tr><td colspan="4" style="padding:14px;text-align:center" class="c-txt-l fs-12">해당 기간 기록 없음</td></tr>`}</tbody></table></div>
+      <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록</div>
+    </div>`;
+};
+
+/* 동결온도 HACCP 기록부 PDF — 다운로드/새탭 (generateWOPdf 무수정·독립 구현) */
+async function exportTempLogPdf(days) {
+  try {
+    showLoading();
+    const { pdfBlob, fileName } = await generateTempLogPdf(days);
+    const url = URL.createObjectURL(pdfBlob);
+    const w = window.open(url, '_blank');
+    if (!w) { const a = document.createElement('a'); a.href = url; a.download = fileName; a.click(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    hideLoading();
+    toast('📄 동결온도 기록부 PDF 생성 완료', 'suc', 2000);
+  } catch (e) { hideLoading(); toast('PDF 생성 실패: ' + e.message, 'err'); }
+}
+
+async function generateTempLogPdf(days) {
+  const { jsPDF } = window.jspdf;
+  const rows = (await SheetsAPI.getAll('동결온도로그', false).catch(() => [])) || [];
+  const startMs = tempPeriodStart(days);
+  const data = rows.map(r => ({ ts: parseLogTs(r[0]), r }))
+    .filter(x => !startMs || x.ts >= startMs)
+    .sort((a, b) => a.ts - b.ts).map(x => x.r);   // 기록부는 시간 오름차순
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const PW = 210, PH = 297, M = 15, CW = PW - M * 2;
+  let y = M;
+
+  // 한글 폰트 (generateWOPdf 와 동일 CDN)
+  let fontLoaded = false;
+  try {
+    const urls = ['https://fonts.gstatic.com/s/nanumgothic/v23/PN_3Rfi-oW3hYwmKDpxS7F_z_tLfxno73g.ttf','https://cdn.jsdelivr.net/gh/nicecai/nanum-font@master/NanumGothic.ttf','https://fastly.jsdelivr.net/gh/nicecai/nanum-font@master/NanumGothic.ttf'];
+    let buf = null;
+    for (const u of urls) { try { const rs = await fetch(u, { signal: AbortSignal.timeout(8000) }); if (rs.ok) { buf = await rs.arrayBuffer(); break; } } catch(e) {} }
+    if (buf) {
+      let bin = ''; const by = new Uint8Array(buf);
+      for (let i = 0; i < by.byteLength; i++) bin += String.fromCharCode(by[i]);
+      doc.addFileToVFS('NanumGothic.ttf', btoa(bin));
+      doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal');
+      doc.addFont('NanumGothic.ttf', 'NanumGothic', 'bold');
+      doc.setFont('NanumGothic', 'normal');
+      fontLoaded = true;
+    }
+  } catch(e) {}
+  if (!fontLoaded) throw new Error('한글 폰트 로드 실패 — 네트워크 확인 후 다시 시도');
+
+  const T = (text, x, yy, fs, fw, color, mw, align) => {
+    const str = (text === 0 ? '0' : String(text == null ? '' : text));
+    const maxW = mw || CW;
+    doc.setFont('NanumGothic', fw === 'bold' ? 'bold' : 'normal');
+    doc.setFontSize(fs); doc.setTextColor(color || '#000');
+    const tx = align === 'center' ? x + maxW / 2 : (align === 'right' ? x + maxW : x);
+    doc.text(str, tx, yy + fs * 0.32, align ? { align } : {});
+  };
+  const hline = (yy) => { doc.setDrawColor(205); doc.setLineWidth(0.2); doc.line(M, yy, PW - M, yy); };
+  const pad = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const nowStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const periodLabel = { 1:'오늘', 7:'최근 7일', 30:'최근 30일', 0:'전체 기간' }[days] || '기간';
+
+  // ── 제목 ──
+  T('동결·냉장 온도 점검 기록부', M, y, 16, 'bold', '#111', CW, 'center'); y += 9;
+  T('HACCP CCP — 냉장/냉동 온도 모니터링 (Tuya 센서 10분 자동기록)', M, y, 8.5, 'normal', '#555', CW, 'center'); y += 7;
+  T(`대상 기간: ${periodLabel}      출력: ${nowStr}      작성: ${(State.user?.email||'').split('@')[0]||'-'}`, M, y, 8, 'normal', '#555', CW, 'center'); y += 5;
+  hline(y); y += 6;
+
+  // ── 기기별 요약 ──
+  T('■ 기기별 요약', M, y, 11, 'bold', '#111'); y += 7;
+  const SX = { name:M, mn:M+17, mx:M+45, av:M+73, dev:M+96, lim:M+120 };
+  T('기기', SX.name, y, 8.5, 'bold', '#333');
+  T('최저℃', SX.mn, y, 8.5, 'bold', '#333', 26, 'right');
+  T('최고℃', SX.mx, y, 8.5, 'bold', '#333', 26, 'right');
+  T('평균℃', SX.av, y, 8.5, 'bold', '#333', 26, 'right');
+  T('이탈', SX.dev, y, 8.5, 'bold', '#333', 18, 'right');
+  T('기준', SX.lim, y, 8.5, 'bold', '#333');
+  y += 5; hline(y); y += 4;
+  const devNames = [...new Set(data.map(tempLogName))];
+  devNames.forEach(n => {
+    if (y + 6 > PH - M) { doc.addPage(); y = M; }
+    const vals = data.filter(r => tempLogName(r) === n).map(r => tempNum(r[3])).filter(v => !isNaN(v));
+    const lim = tempLimitFor(n);
+    const dc = data.filter(r => tempLogName(r) === n && isTempDeviation(r[3], lim)).length;
+    T(n, SX.name, y, 8.5, 'normal', '#111');
+    if (vals.length) {
+      const mn = Math.min(...vals), mx = Math.max(...vals), av = vals.reduce((a,b)=>a+b,0)/vals.length;
+      T(mn.toFixed(1), SX.mn, y, 8.5, 'normal', '#111', 26, 'right');
+      T(mx.toFixed(1), SX.mx, y, 8.5, 'normal', '#111', 26, 'right');
+      T(av.toFixed(1), SX.av, y, 8.5, 'normal', '#111', 26, 'right');
+      T(String(dc), SX.dev, y, 8.5, 'bold', dc ? '#c62828' : '#111', 18, 'right');
+    } else { T('기록 없음', SX.mn, y, 8, 'normal', '#999'); }
+    T(lim.label, SX.lim, y, 8, 'normal', '#555');
+    y += 6;
+  });
+  y += 4; hline(y); y += 7;
+
+  // ── 상세 로그 ──
+  T(`■ 온도 로그 상세  (총 ${data.length}건)`, M, y, 11, 'bold', '#111'); y += 7;
+  const LX = { ts:M, dev:M+48, temp:M+90, jud:M+120 };
+  const logHead = () => {
+    T('기록시각(KST)', LX.ts, y, 8.5, 'bold', '#333');
+    T('기기', LX.dev, y, 8.5, 'bold', '#333');
+    T('온도℃', LX.temp, y, 8.5, 'bold', '#333', 24, 'right');
+    T('판정', LX.jud, y, 8.5, 'bold', '#333');
+    y += 5; hline(y); y += 4;
+  };
+  logHead();
+  if (!data.length) { T('해당 기간 기록 없음', M, y, 9, 'normal', '#999', CW, 'center'); y += 6; }
+  data.forEach(r => {
+    if (y + 6 > PH - M) { doc.addPage(); y = M; logHead(); }
+    const lim = tempLimitFor(tempLogName(r)), dev = isTempDeviation(r[3], lim);
+    const tv = isNaN(tempNum(r[3])) ? '-' : tempNum(r[3]).toFixed(1);
+    if (dev) { doc.setFillColor(252, 232, 232); doc.rect(M, y - 0.5, CW, 5.4, 'F'); }
+    T((r[0]||'').substring(0,19), LX.ts, y, 8, 'normal', '#222');
+    T(tempLogName(r), LX.dev, y, 8, 'normal', '#222');
+    T(tv, LX.temp, y, 8, dev ? 'bold' : 'normal', dev ? '#c62828' : '#222', 24, 'right');
+    T(dev ? '이탈' : '적합', LX.jud, y, 8, dev ? 'bold' : 'normal', dev ? '#c62828' : '#1e8e3e');
+    y += 5.4;
+  });
+  y += 6;
+  if (y + 22 > PH - M) { doc.addPage(); y = M; }
+  hline(y); y += 6;
+  T('판정 기준: 냉동창고 ≤ −18℃, 냉장고 0~5℃ (HACCP). 이탈 행은 음영 표시.', M, y, 7.5, 'normal', '#777', CW); y += 9;
+  T('점검자: _______________ (서명)            확인자: _______________ (서명)', M, y, 9, 'normal', '#333', CW);
+
+  const fileName = `동결온도기록부_${periodLabel.replace(/\s/g,'')}_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}.pdf`;
+  return { pdfBlob: doc.output('blob'), fileName };
+}
 
 // ─── EQUIPMENT ───
 Screens.equip = async () => {
