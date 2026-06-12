@@ -4027,12 +4027,14 @@ async function executeSelectedShipment(lotId, indivIds, itemName, customerName) 
     }
     const shipTime = formatDateTime();
     const shipperEmail = State.user?.email || '';
+    const tempStamp = await getShipFreezerStamp();   // 출하시점 냉동창고 온도 자동 스탬프 (executeLotShipment·executeShipment와 동일)
+    warnShipStamp(tempStamp);
 
     const shipRows = [];
     const indivUpdates = [];
     for (const iv of targetIndivs) {
       const shipId = await generateSeqId('SHP', '출하기록');
-      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail]);
+      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '']);
       const idx = await SheetsAPI.findRowIndex('완제품개별', 0, iv[0]);
       if (idx > 0) {
         indivUpdates.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
@@ -4068,7 +4070,7 @@ async function executeSelectedShipment(lotId, indivIds, itemName, customerName) 
     SheetsAPI.invalidateCache('완제품개별');
     // 선택 상태 초기화
     State._selectedShipIds?.delete(lotId);
-    toast(`${lotId} 선택 출하 완료 — ${targetIndivs.length}개 → ${customerName}`, 'suc', 4000);
+    toast(`${lotId} 선택 출하 완료 — ${targetIndivs.length}개 → ${customerName}${tempStamp ? ` · 냉동고 ${tempStamp.temp}°C 자동기록` : ''}`, 'suc', 4000);
     refreshAfterShipment(lotId, 800);
   } catch (e) {
     toast('선택 출하 실패: ' + e.message, 'err', 5000);
@@ -6441,7 +6443,7 @@ const DB_SHEETS = {
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
-  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper'],
+  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt'],
   '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
   '기기': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
 };
