@@ -8810,6 +8810,13 @@ function ccpRowJudge(r) {
   return bad === 0 ? '적합' : '부적합';
 }
 function ccpVerdictAll(stepNo) { return ccpGridState(stepNo).rows.every(r => ccpRowJudge(r) === '적합') ? '적합' : '부적합'; }
+// 검출 기대 칸(시편Fe·SUS / 제품+시편Fe·SUS)이 '불검출' = 금속검출기 미작동(결함) → 완료(통과) 차단 대상
+function ccpRowHasDetectFail(r) {
+  const a = arr => Array.isArray(arr) && arr.indexOf('불검출') !== -1;
+  if (a(r.시편Fe) || a(r.시편SUS)) return true;
+  return ['제품시편Fe', '제품시편SUS'].some(g => r[g] && (a(r[g].상) || a(r[g].하)));
+}
+function ccpHasDetectFail(grid) { return !!(grid && grid.rows && grid.rows.some(ccpRowHasDetectFail)); }
 function ccpGridToggle(stepNo, ri, group, sub, idx) {
   const r = ccpGridState(stepNo).rows[ri];
   const flip = v => v === '검출' ? '불검출' : '검출';
@@ -8825,7 +8832,7 @@ function ccpGridCellBtn(stepNo, ri, group, sub, idx, label) {
   const r = ccpGridState(stepNo).rows[ri];
   const val = group === '제품통과' ? r.제품통과 : (sub ? r[group][sub][idx] : r[group][idx]);
   const bg = ccpCellNormal(group, val) ? '#1e8e3e' : '#d93025';
-  const txt = group === '제품통과' ? val : label;
+  const txt = group === '제품통과' ? val : (ccpCellNormal(group, val) ? label : label + '✕');   // 검출 기대인데 불검출이면 ✕ (빨강과 함께 명확히)
   return `<button type="button" onclick="ccpGridToggle(${stepNo},${ri},'${group}',${sub ? `'${sub}'` : 'null'},${idx})" style="flex:1;min-width:30px;padding:6px 2px;border:none;border-radius:5px;font-size:11px;color:#fff;background:${bg}" title="${val}">${txt}</button>`;
 }
 function ccpGridGroup3(stepNo, ri, group, glabel, hint) {
@@ -8867,6 +8874,7 @@ function ccpGridRender(stepNo) {
     html += `</div>`;
   });
   cont.innerHTML = html;
+  if (ccpHasDetectFail(st)) cont.innerHTML += `<div style="background:#fce8e6;border:1px solid #d93025;border-radius:6px;padding:9px 10px;font-size:12px;color:#c5221f;font-weight:700;line-height:1.45">⚠ 시편/제품+시편 '불검출' = 금속검출기 미작동(결함)<br><span style="font-weight:500">감도조정·재시험으로 '검출' 확인 전에는 공정 완료가 불가합니다.</span></div>`;
   const vEl = $id(`ccp-verdict-${stepNo}`);
   if (vEl) { const v = ccpVerdictAll(stepNo); vEl.textContent = v; vEl.style.color = v === '적합' ? '#1e8e3e' : '#d93025'; }
   if (typeof validateStepInputs === 'function') validateStepInputs(stepNo);
@@ -9971,6 +9979,8 @@ function validateStepInputs(stepNo) {
     if (!grid || !grid.rows.length) allValid = false;
     else {
       if (grid.rows.some(r => !r.시각)) allValid = false;
+      // 시편/제품+시편 '불검출' = 검출기 결함 → 완료(통과) 불가 (이탈기록으로도 우회 불가)
+      if (ccpHasDetectFail(grid)) allValid = false;
       const hasDev = grid.rows.some(r => ccpRowJudge(r) === '부적합');
       if (hasDev && (!$id(`ccp-dev-${stepNo}`)?.value || !$id(`ccp-action-${stepNo}`)?.value)) allValid = false;
     }
