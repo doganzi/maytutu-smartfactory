@@ -11141,77 +11141,189 @@ async function generateWOPdf(woId) {
         const isGrid = stepData._fmt === 'ccpGrid-v1' ||
           (Array.isArray(stepData.checks) && stepData.checks[0] && (stepData.checks[0].구분 || stepData.checks[0].시편Fe));
         if (isGrid) {
-          // ── 신 양식: 종이 기록부 격자 (위치별 검출/불검출 그대로 · 감사 바인더용) ──
+          /* ── 종이 '금속검출기(CCP) 모니터링 기록부' 1:1 재현 ──
+             실물 양식과 동일: 제목+결재칸 / ◆점검방법·일자·점검자 / 위해요소 / 모니터링(대상·방법·빈도)
+             / 개선조치(감도미흡·이물발견·기계고장) / □검출/□불검출 체크박스 격자(고정 스켈레톤 행)
+             / 금속검출기 제품통과 표 / 이탈내역·인수인계. 이탈 체크만 빨간 잉크. */
           const NM = { 시편Fe: '검출', 시편SUS: '검출', 제품통과: '불검출', 제품시편Fe: '검출', 제품시편SUS: '검출' };
-          const arr3 = v => (Array.isArray(v) && v.length) ? v : ['검출', '검출', '검출'];
-          const cells = v => arr3(v).map((x, i) => `${CCP_POS3[i]} ${x}`).join('  ');
-          const abn = (v, nm) => arr3(v).some(x => x !== nm);
-          const abn6 = (o, nm) => ['상', '하'].some(s => abn(o && o[s], nm));
-          y = sectionTitle('금속검출기(CCP) 모니터링 기록부', y, '#c62828');
-          // 종이 양식 안내부 (위해요소·한계기준·방법·빈도·개선조치·결재)
-          let _fr;
-          _fr = tableRow('점검방법', '판정(적합/부적합)', y, 35); y = _fr.nextY;
-          _fr = tableRow('위해요소', '금속성 이물질 잔존(SUS·Fe의 나사·칼날·톱날·못 등)', y, 35); y = _fr.nextY;
-          _fr = tableRow('한계기준', 'Fe 2.5mm / SUS 4.0mm 이상의 금속성 이물질 100% 검출할 것 (전제품)', y, 35); y = _fr.nextY;
-          _fr = tableRow('모니터링 방법', '작업시작 전: 시편만 통과 시 감지확인 · 작업 중 2시간마다: 시편만·제품 단독·시편+제품 동시 통과 시 감지확인 · 작업종료: 시편+마지막 제품 동시 통과 시 감지확인 (시편은 제품 위쪽 가운데에 놓고 점검)', y, 35); y = _fr.nextY;
-          _fr = tableRow('빈도', '작업시작 전 · 작업 중 2시간마다 · 작업종료 후', y, 35); y = _fr.nextY;
-          _fr = tableRow('개선조치', '감도미흡: 2~3회 반복통과로 감도조정 · 이물발견: 재통과·확인 후 제거, 오염품 폐기, 재검사 후 이상없을 때 재사용 · 기계고장: 고장 2시간 전 생산품 별도보관, 수리 후 재검사', y, 35); y = _fr.nextY;
-          _fr = tableRow('결재', `작성 ${(stepData.점검자 || wo[8] || '-').split('@')[0]}  /  승인 ${wo[15] ? (wo[15]).split('@')[0] : '미승인'}`, y, 35); y = _fr.nextY;
-          y += 2;
-          // ── 종이 격자표: 감시시각 × 시편Fe/SUS · 제품통과 · 제품+시편Fe/SUS(상하) · 판정 ──
-          const colsX = [M, M + 28, M + 50, M + 72, M + 88, M + 120, M + 152, M + 170];
-          const grpTxt = (vals, nm) => { if (vals == null) return ''; const a = (Array.isArray(vals) && vals.length) ? vals : [nm, nm, nm]; return a.map(v => v === '검출' ? '검' : v === '불검출' ? '불' : '·').join(' '); };   // 미점검(시편만 행) 칸은 빈칸
-          const grpAbn = (vals, nm) => Array.isArray(vals) && vals.some(v => v && v !== nm);
-          const rowBox = (yy, h) => { doc.setDrawColor(140, 140, 140); doc.setLineWidth(0.25); doc.rect(M, yy, 170, h); for (let i = 1; i < colsX.length - 1; i++) doc.line(colsX[i], yy, colsX[i], yy + h); };
-          const gridHeader = () => {
-            if (y + 9 > PH - 12) { doc.addPage(); y = M; }
-            doc.setFillColor(238, 238, 238); doc.rect(M, y, 170, 9, 'F'); rowBox(y, 9);
-            const hd = (t, i) => drawText(t, colsX[i] + 1, y + 2.2, 8.5, 'bold', '#333', colsX[i + 1] - colsX[i] - 1.5);
-            hd('감시시각', 0); hd('시편Fe', 1); hd('시편SUS', 2); hd('제품통과', 3); hd('제품+시편Fe', 4); hd('제품+시편SUS', 5); hd('판정', 6);
-            y += 9;
+          // 종이 셀은 그룹당 □검출/□불검출 1쌍 — 위치(좌중우·상하) 전부 정상일 때만 '검출'(시편) / 하나라도 검출이면 '검출'(제품통과)
+          const g3 = a => (!Array.isArray(a) || !a.length) ? null : (a.every(v => v === '검출') ? '검출' : '불검출');
+          const g6 = o => !o ? null : (['상', '하'].every(s => (o[s] || []).every(v => v === '검출')) ? '검출' : '불검출');
+          const LN = () => { doc.setDrawColor(70, 70, 70); doc.setLineWidth(0.28); };
+          const bx = (x, yy, w, h) => { LN(); doc.rect(x, yy, w, h); };
+          const vline = (x, yy, h) => { LN(); doc.line(x, yy, x, yy + h); };
+
+          // □검출/□불검출 체크쌍 (셀 중앙) — val null=빈 쌍(미기재), abn=이탈 시 빨간 체크·글씨
+          const ckPair = (cx, cw, cy, val, nm) => {
+            const bs = 2.4, fs = 6.5, abn = val != null && val !== nm;
+            const total = 21.5; let x = cx + (cw - total) / 2;
+            const markBox = (bxx, on) => {
+              doc.setDrawColor(abn && on ? 198 : 45, abn && on ? 40 : 45, abn && on ? 40 : 45);
+              doc.setLineWidth(0.25); doc.rect(bxx, cy, bs, bs);
+              if (on) { doc.setLineWidth(0.55); doc.line(bxx + 0.4, cy + 1.3, bxx + 1.0, cy + 2.0); doc.line(bxx + 1.0, cy + 2.0, bxx + 2.2, cy + 0.3); }
+            };
+            markBox(x, val === '검출');
+            drawText('검출', x + bs + 0.6, cy - 0.5, fs, 'normal', abn && val === '검출' ? '#c62828' : '#222', 7);
+            x += bs + 0.6 + 4.8; drawText('/', x, cy - 0.5, fs, 'normal', '#222', 2); x += 1.8;
+            markBox(x, val === '불검출');
+            drawText('불검출', x + bs + 0.6, cy - 0.5, fs, 'normal', abn && val === '불검출' ? '#c62828' : '#222', 9.5);
           };
-          gridHeader();
-          (stepData.checks || []).forEach((c, ci) => {
-            const RH = 12;
-            if (y + RH > PH - 12) { doc.addPage(); y = M; gridHeader(); }
-            const gubun = c.구분 === '작업중2h' ? '작업중(2h)' : (c.구분 === '작업명' ? (stepData.제품명 || '작업명') : (c.구분 || `점검${ci + 1}`));
-            const feA = grpAbn(c.시편Fe, NM.시편Fe), suA = grpAbn(c.시편SUS, NM.시편SUS);
-            const ptA = c.제품통과 != null && c.제품통과 !== NM.제품통과;
-            const psFeA = abn6(c.제품시편Fe, NM.제품시편Fe), psSuA = abn6(c.제품시편SUS, NM.제품시편SUS);
-            const judge = c.판정 || ((feA || suA || ptA || psFeA || psSuA) ? '부적합' : '적합');
-            const jok = judge === '적합';
-            rowBox(y, RH);
-            drawText(gubun, colsX[0] + 1, y + 2, 9, 'bold', '#333', 27);
-            drawText(c.시각 || '-', colsX[0] + 1, y + 7, 8.5, 'normal', '#666', 27);
-            drawText(grpTxt(c.시편Fe, NM.시편Fe), colsX[1] + 1.5, y + 4, 10, 'bold', feA ? '#c62828' : '#1b5e20', 20);
-            drawText(grpTxt(c.시편SUS, NM.시편SUS), colsX[2] + 1.5, y + 4, 10, 'bold', suA ? '#c62828' : '#1b5e20', 20);
-            if (c.제품통과 != null) drawText(c.제품통과 === '검출' ? '검' : '불', colsX[3] + 5, y + 4, 10, 'bold', ptA ? '#c62828' : '#1b5e20', 14);
-            if (c.제품시편Fe) {
-              drawText(`상 ${grpTxt(c.제품시편Fe.상, NM.제품시편Fe)}`, colsX[4] + 1, y + 2, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
-              drawText(`하 ${grpTxt(c.제품시편Fe.하, NM.제품시편Fe)}`, colsX[4] + 1, y + 7, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
+
+          // ── 데이터 → 종이 스켈레톤 행 매핑 (빈 행도 종이처럼 빈 체크쌍 인쇄) ──
+          const checks = stepData.checks || [];
+          const byG = g => checks.filter(c => (c.구분 || '') === g);
+          const starts = byG('작업시작전'), works = byG('작업명'), twos = byG('작업중2h'), ends = byG('작업종료');
+          const queue = [...twos, ...starts.slice(1), ...works.slice(1), ...ends.slice(1),
+            ...checks.filter(c => !['작업시작전', '작업명', '작업중2h', '작업종료'].includes(c.구분 || ''))];
+          const prodName = stepData.제품명 || wo[4] || '';
+          const skel = [
+            { label: '오전작업시작 전', d: starts[0] || null, spec: true },
+            { label: '', d: queue.shift() || null }, { label: '', d: queue.shift() || null }, { label: '', d: queue.shift() || null },
+            { label: '오전작업종료', d: null },
+            { label: '오후작업시작 전', d: null },
+            { label: prodName, d: works[0] || null },
+            { label: '', d: queue.shift() || null },
+            ...queue.map(c => ({ label: '', d: c })),
+            { label: '작업종료', d: ends[0] || null, spec: true },
+          ];
+
+          // 양식 시작 — 남은 공간 부족하면 새 페이지(제목~개선조치 상단블록 ~105mm가 통째로 들어가야 함)
+          if (y + 115 > PH - 12) { doc.addPage(); y = M; }
+
+          // ① 제목 밴드 + 결재칸 (작성/승인)
+          const AP_W = 44, AP_L = 8, AP_C = (AP_W - AP_L) / 2, T_H = 15;
+          bx(M, y, CW, T_H);
+          drawText('금속검출기(CCP) 모니터링 기록부', M + 3, y + 4, 15, 'bold', '#111', CW - AP_W - 6);
+          const apx = M + CW - AP_W;
+          vline(apx, y, T_H); vline(apx + AP_L, y, T_H); vline(apx + AP_L + AP_C, y, T_H);
+          drawText('결', apx + 2.2, y + 3, 7.5, 'normal', '#333', AP_L); drawText('재', apx + 2.2, y + 8.5, 7.5, 'normal', '#333', AP_L);
+          LN(); doc.line(apx + AP_L, y + 5, M + CW, y + 5);
+          drawText('작성', apx + AP_L, y + 1, 7, 'normal', '#333', AP_C, 'center');
+          drawText('승인', apx + AP_L + AP_C, y + 1, 7, 'normal', '#333', AP_C, 'center');
+          drawText((stepData.점검자 || wo[8] || '').split('@')[0], apx + AP_L, y + 8, 7.5, 'normal', '#222', AP_C, 'center');
+          drawText(wo[15] ? wo[15].split('@')[0] : '', apx + AP_L + AP_C, y + 8, 7.5, 'normal', '#222', AP_C, 'center');
+          y += T_H;
+
+          // ② ◆ 점검방법 / 점검일자 / 점검자
+          const verdict = stepData.판정종합 || (checks.every(c => (c.판정 || '적합') === '적합') ? '적합' : '부적합');
+          const vok = verdict === '적합';
+          bx(M, y, CW, 11);
+          drawText('◆ 점검방법 : 판정(적합/부적합)  →', M + 3, y + 1.2, 8.5, 'normal', '#222', 70);
+          drawText(verdict, M + 62, y + 0.8, 10, 'bold', vok ? '#1b5e20' : '#c62828', 20);
+          const _d10 = (wo[9] || '').substring(0, 10).split('-');
+          const dateStr = _d10.length === 3 ? `20${_d10[0].slice(2)}년 ${Number(_d10[1])}월 ${Number(_d10[2])}일` : '-';
+          drawText(`◆ 점검일자 : ${dateStr}      ◆ 점검자 : ${(stepData.점검자 || wo[8] || '-').split('@')[0]}`, M + 3, y + 6.3, 8.5, 'normal', '#222', CW - 6);
+          y += 11;
+
+          // ③ 위해요소
+          bx(M, y, CW, 7); vline(M + 26, y, 7);
+          drawText('위해요소', M + 2, y + 1.8, 8, 'bold', '#222', 23);
+          drawText('금속성 이물질 잔존(SUS, Fe의 나사, 칼날, 톱날, 못 등)', M + 29, y + 1.8, 8, 'normal', '#222', CW - 32);
+          y += 7;
+
+          // ④ 모니터링 (대상 | 방법 | 빈도) — 좌측 세로 라벨
+          const SUB_X = M + 26, SUB_W = 14, CON_X = SUB_X + SUB_W;
+          const monTopY = y;
+          // 대상 행 (대상 | 내용 | 전제품 | 한계기준 | 기준내용)
+          const tgtH = 13;
+          bx(M, y, CW, tgtH); vline(SUB_X, y, tgtH); vline(CON_X, y, tgtH);
+          drawText('대상', SUB_X + 2, y + 4, 8, 'normal', '#222', SUB_W - 3);
+          drawText('-금속성 이물질 검출 여부\n-금속검출기의 검출력 유지\n (정상작동 유무)', CON_X + 2, y + 1.4, 7.2, 'normal', '#222', 54);
+          vline(CON_X + 57, y, tgtH); drawText('전제품', CON_X + 59, y + 4.5, 7.5, 'normal', '#222', 14);
+          vline(CON_X + 74, y, tgtH); drawText('한계기준', CON_X + 75.5, y + 4.5, 7.5, 'bold', '#222', 15);
+          vline(CON_X + 91, y, tgtH);
+          drawText('Fe 2.5mm / SUS 4.0mm 이상의\n금속성이물질 100% 검출할 것', CON_X + 93, y + 2.6, 7.2, 'normal', '#222', CW - 26 - SUB_W - 95);
+          y += tgtH;
+          // 방법 행
+          const mTxt = '1. CCP-2P 모니터링 담당자는 금속검출기의 정상작동 유무를 확인한다.\n- 작업시작 전: 시편만 통과 시 감지확인\n- 2시간마다: 시편만 통과, 제품 단독통과, 시편과 제품을 동시에 통과 시 감지확인\n- 작업종료(마지막공정품): 시편과 마지막 제품을 동시에 통과 시 감지 확인\n2. 시편을 이용하여 금속검출기의 가운데(제품위쪽가운데)에 놓고 점검한다.\n   시편과 제품을 이용하여 금속검출기를 통과 시킨 후 모니터링일지에 기록한다.';
+          const mH = Math.max(measureH(mTxt, 7.2, 'normal', CW - 26 - SUB_W - 4) + 3, 24);
+          bx(M, y, CW, mH); vline(SUB_X, y, mH); vline(CON_X, y, mH);
+          drawText('방법', SUB_X + 2, y + mH / 2 - 2, 8, 'normal', '#222', SUB_W - 3);
+          drawText(mTxt, CON_X + 2, y + 1.5, 7.2, 'normal', '#222', CW - 26 - SUB_W - 4);
+          y += mH;
+          // 빈도 행
+          bx(M, y, CW, 6.5); vline(SUB_X, y, 6.5); vline(CON_X, y, 6.5);
+          drawText('빈도', SUB_X + 2, y + 1.6, 8, 'normal', '#222', SUB_W - 3);
+          drawText('작업시작 전, 작업 중 2시간마다 및 작업종료 후', CON_X + 2, y + 1.6, 7.5, 'normal', '#222', CW - 26 - SUB_W - 4);
+          y += 6.5;
+          drawText('모니터링\n방법', M + 4, monTopY + (y - monTopY) / 2 - 5, 8, 'bold', '#222', 20);
+
+          // ⑤ 개선조치 (감도미흡시 | 이물발견시 | 기계고장시)
+          const impTopY = y;
+          const impRows = [
+            ['감도\n미흡시', '금속검출기 부저가 울리면 해당제품을 2~3회 반복하여 통과시켜 적정 감도로 조정한다.'],
+            ['이물\n발견시', '-금속검출기가 작동한 제품을 금속검출기에 재 통과하여 이물질 확인 후 제거\n-이물질 오염된 제품은 폐기  -금속검출 재 실시 후 이상 없을 때 재사용'],
+            ['기계\n고장시', '-기기고장 2시간 전 생산제품 별도보관  -기기수리 후 재검사 실시'],
+          ];
+          impRows.forEach(([l, t]) => {
+            const h = Math.max(measureH(t, 7.2, 'normal', CW - 26 - SUB_W - 4) + 2.6, 8);
+            bx(M, y, CW, h); vline(SUB_X, y, h); vline(CON_X, y, h);
+            drawText(l, SUB_X + 2, y + h / 2 - 4, 7.2, 'normal', '#222', SUB_W - 3);
+            drawText(t, CON_X + 2, y + 1.4, 7.2, 'normal', '#222', CW - 26 - SUB_W - 4);
+            y += h;
+          });
+          drawText('개선\n조치', M + 6, impTopY + (y - impTopY) / 2 - 5, 8, 'bold', '#222', 16);
+          y += 2;
+
+          // ⑥ 체크박스 격자 — 제품명 | 감시시각 | 시편Fe | 시편SUS | 제품통과 | 제품+시편Fe | 제품+시편SUS
+          const gx = [M, M + 26, M + 40, M + 67, M + 94, M + 117, M + 148.5, M + 180];
+          const gridLine = (yy, h) => { bx(M, yy, CW, h); for (let i = 1; i < gx.length - 1; i++) vline(gx[i], yy, h); };
+          const gridHead = () => {
+            if (y + 12 > PH - 12) { doc.addPage(); y = M; }
+            gridLine(y, 12);
+            const hd = (t, i, dy) => drawText(t, gx[i], y + dy, 7, 'bold', '#222', gx[i + 1] - gx[i], 'center');
+            hd('제품명', 0, 4.5); hd('감시시각', 1, 4.5);
+            hd('시편 철(Fe)', 2, 2); hd('좌 . 중 . 우', 2, 6.5);
+            hd('시편 써스(SUS)', 3, 2); hd('좌 . 중 . 우', 3, 6.5);
+            hd('제품 통과', 4, 4.5);
+            hd('제품+시편(Fe)', 5, 1.2); hd('상단 + 하단', 5, 4.8); hd('좌 . 중 . 우', 5, 8.2);
+            hd('제품+시편(Sus)', 6, 1.2); hd('상단 + 하단', 6, 4.8); hd('좌 . 중 . 우', 6, 8.2);
+            y += 12;
+          };
+          gridHead();
+          const RH = 8.6;
+          skel.forEach(row => {
+            if (y + RH > PH - 12) { doc.addPage(); y = M; gridHead(); }
+            gridLine(y, RH);
+            const d = row.d;
+            const specOnly = row.spec || (d && d.제품통과 == null && !d.제품시편Fe);
+            drawText(row.label, gx[0] + 1, y + 2.6, 7.2, row.label === prodName && row.label ? 'bold' : 'normal', '#222', gx[1] - gx[0] - 2);
+            drawText(d && d.시각 ? d.시각 : ':', gx[1], y + 2.6, 7.5, 'normal', '#222', gx[2] - gx[1], 'center');
+            const cy = y + (RH - 2.4) / 2;
+            ckPair(gx[2], gx[3] - gx[2], cy, d ? g3(d.시편Fe) : null, NM.시편Fe);
+            ckPair(gx[3], gx[4] - gx[3], cy, d ? g3(d.시편SUS) : null, NM.시편SUS);
+            if (!specOnly) {
+              ckPair(gx[4], gx[5] - gx[4], cy, d ? (d.제품통과 || null) : null, NM.제품통과);
+              ckPair(gx[5], gx[6] - gx[5], cy, d ? g6(d.제품시편Fe) : null, NM.제품시편Fe);
+              ckPair(gx[6], gx[7] - gx[6], cy, d ? g6(d.제품시편SUS) : null, NM.제품시편SUS);
             }
-            if (c.제품시편SUS) {
-              drawText(`상 ${grpTxt(c.제품시편SUS.상, NM.제품시편SUS)}`, colsX[5] + 1, y + 2, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
-              drawText(`하 ${grpTxt(c.제품시편SUS.하, NM.제품시편SUS)}`, colsX[5] + 1, y + 7, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
-            }
-            drawText(judge, colsX[6] + 1, y + 4, 9, 'bold', jok ? '#1b5e20' : '#c62828', 17);
             y += RH;
           });
-          // 종합 판정 강조 박스
-          const verdict = stepData.판정종합 || ((stepData.checks || []).every(c => (c.판정 || '적합') === '적합') ? '적합' : '부적합');
-          const vp = verdict === '적합';
-          if (y + 16 > PH - 12) { doc.addPage(); y = M; }
-          doc.setFillColor(vp ? 232 : 255, vp ? 245 : 235, vp ? 233 : 238);
-          doc.rect(M, y, CW, 16, 'F');
-          doc.setDrawColor(vp ? 46 : 211, vp ? 125 : 47, vp ? 50 : 47); doc.setLineWidth(0.5); doc.rect(M, y, CW, 16);
-          drawText(`종합 판정: ${verdict}`, M + 3, y + 2, 18, 'bold', vp ? '#2e7d32' : '#c62828', CW - 6);
-          y += 19;
-          // 요약 (통과량 / 검출량 / 점검자 / 특이사항 / 이탈 / 개선조치)
-          const sum = [['품명', stepData.제품명 || wo[4] || ''], ['통과량', stepData.통과량], ['검출량', stepData.검출량 || 'X'], ['점검자', (stepData.점검자 || '').split('@')[0]], ['특이사항', stepData.특이사항 || 'X']];
-          if (stepData.이탈내용) sum.push(['이탈내용', stepData.이탈내용]);
-          if (stepData.개선조치) sum.push(['개선조치 및 결과', stepData.개선조치]);
-          for (const [l, v] of sum) { if (v) { const r = tableRow(l, v, y); y = r.nextY; } }
-          if (stepData._migrated) { const mr = drawText('※ 구(舊) 7단계 기록에서 자동 변환됨 — 위치값은 정상 기본값으로 보정', M, y + 1, 10, 'normal', '#999', CW); y = mr.y + mr.h + 2; }
+
+          // ⑦ 금속검출기 제품통과 표
+          if (y + 34 > PH - 12) { doc.addPage(); y = M; }
+          bx(M, y, CW, 6.5);
+          drawText('금속검출기 제품통과', M, y + 1.6, 8.5, 'bold', '#222', CW, 'center');
+          y += 6.5;
+          const px = [M, M + 46, M + 92, M + 136, M + 180];
+          const pline = (yy, h) => { bx(M, yy, CW, h); for (let i = 1; i < px.length - 1; i++) vline(px[i], yy, h); };
+          pline(y, 6);
+          ['품  명', '통과량', '검출량', '특이사항'].forEach((t, i) => drawText(t, px[i], y + 1.4, 7.5, 'bold', '#222', px[i + 1] - px[i], 'center'));
+          y += 6;
+          pline(y, 7);
+          [prodName, stepData.통과량 || '', stepData.검출량 || 'X', stepData.특이사항 || 'X'].forEach((t, i) => drawText(String(t), px[i], y + 2, 7.5, 'normal', '#222', px[i + 1] - px[i], 'center'));
+          y += 7;
+          pline(y, 7); y += 7;
+
+          // ⑧ 이탈내역 및 개선조치 인수인계, 특이사항
+          const devTxt = [stepData.이탈내용 ? `이탈내용: ${stepData.이탈내용}` : '', stepData.개선조치 ? `개선조치: ${stepData.개선조치}` : ''].filter(Boolean).join('\n');
+          const dvH = Math.max(measureH(devTxt || ' ', 7.5, 'normal', CW - 50) + 4, 13);
+          if (y + dvH > PH - 12) { doc.addPage(); y = M; }
+          bx(M, y, CW, dvH); vline(M + 46, y, dvH);
+          drawText('이탈내역 및 개선조치\n인수인계, 특이사항', M + 4, y + dvH / 2 - 5, 7.5, 'normal', '#222', 40);
+          if (devTxt) drawText(devTxt, M + 49, y + 2, 7.5, 'normal', '#c62828', CW - 52);
+          y += dvH;
+          if (stepData._migrated) { const mr = drawText('※ 구(舊) 7단계 기록에서 자동 변환됨 — 위치값은 정상 기본값으로 보정', M, y + 1, 8, 'normal', '#999', CW); y = mr.y + mr.h + 1; }
           y += 3;
         } else {
           // ── 구 양식 (legacy: ccpTotal / passCount / failCount / times) ──
