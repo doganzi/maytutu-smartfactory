@@ -93,7 +93,7 @@
 ### 진행 중 (오픈 PR · 라이브검증 대기)
 - **역할 화면 미리보기** — PR `claude/role-preview-switcher`(오픈). 관리자 전용 작업자/생산자/회계 화면 미리보기(설정 셀렉터 + 배너). vm 파싱 + node 동작테스트 6/6 통과, **머지 후 노트북 로그인 라이브 검증** 필요.
 - **CCP 금속검출 P2 픽셀검증** — #67 머지됨, PDF 픽셀 레이아웃 육안검증만 미완(로컬 pdf.js CJK 한계 → 노트북 로그인 필요).
-- **CCP 금속검출 P3** — `공정기록` 7단계 일괄변환(`migrate7stepToGrid` 재사용). 미착수.
+- **CCP 금속검출 P3** — `공정기록` 7단계→격자 **일괄변환 도구 추가됨**(data-audit 관리자, 비파괴·원본 `_legacy` 보존·dry-run·idempotent). 배포≠실행 → **관리자가 노트북에서 dry-run 스캔 후 변환 실행** 필요(1회성).
 - **동결온도(CCP-1) 가동** — #68 Tuya 로거 백업됨. 사용자 Tuya 콘솔 자격증명(Access ID/Secret·Device ID) 회신 → `discoverStatus()`→`TEMP_CODE/SCALE` 확정→가동.
 
 ### 다음 PR 후보 (사용자 확정 필요)
