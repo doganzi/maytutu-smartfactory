@@ -1260,8 +1260,25 @@ const DriveAPI = {
     return `https://drive.google.com/file/d/${data.id}/view`;
   },
 
-  async uploadPdf(pdfBlob, fileName) {
+  async uploadPdf(pdfBlob, fileName, existingFileId) {
     if (isPreviewing()) { _previewSkipWrite(); return ''; }
+    // 기존 파일이 있으면 내용만 교체(덮어쓰기) — 같은 링크 유지, Drive 중복 방지
+    if (existingFileId) {
+      try {
+        const up = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media&fields=id&supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${State.token}`, 'Content-Type': 'application/pdf' },
+          body: pdfBlob,
+        });
+        if (up.status === 401) {
+          toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+          localStorage.removeItem('mt_token'); setTimeout(() => Auth.login(), 1500);
+          throw new Error('토큰 만료 — 재로그인 필요');
+        }
+        if (up.ok) { const d = await up.json(); return { id: d.id, url: `https://drive.google.com/file/d/${d.id}/view` }; }
+        console.warn('[PDF] 덮어쓰기 실패, 신규 생성으로 진행:', up.status);
+      } catch (e) { if (String(e).includes('토큰')) throw e; console.warn('[PDF] 덮어쓰기 예외, 신규 생성:', e); }
+    }
     const metadata = {
       name: fileName,
       mimeType: 'application/pdf',
@@ -11739,8 +11756,16 @@ async function generateAndSaveWOPdf(woId) {
     const { pdfBlob, fileName } = await generateWOPdf(woId);
     console.log(`[PDF] PDF 생성 완료: ${fileName} (${(pdfBlob.size/1024).toFixed(1)}KB)`);
 
-    // Drive 업로드
-    const { url } = await DriveAPI.uploadPdf(pdfBlob, fileName);
+    // 기존 pdfUrl 의 파일을 덮어쓰기(중복 방지) — fileId 추출
+    let existingFileId = null;
+    try {
+      const _wos = await SheetsAPI.getAll('작업지시서');
+      const _wo = _wos.find(w => w[0] === woId);
+      if (_wo && _wo[19]) existingFileId = (typeof extractFileId === 'function' ? extractFileId(String(_wo[19])) : ((String(_wo[19]).match(/\/d\/([\w-]+)/) || [])[1] || null));
+    } catch (e) {}
+
+    // Drive 업로드 (기존 파일 있으면 덮어쓰기 → 같은 링크 유지)
+    const { url } = await DriveAPI.uploadPdf(pdfBlob, fileName, existingFileId);
     console.log(`[PDF] Drive 업로드 완료: ${url}`);
 
     // 작업지시서 col 19 (pdfUrl) 에 저장
