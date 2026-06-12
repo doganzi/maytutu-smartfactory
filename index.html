@@ -8248,14 +8248,13 @@ function renderStepContent(step, stepType) {
       <div class="info-box warn">
         <div class="fs-13 fw-7 c-warn">금속검출기(CCP) 모니터링 기록부</div>
         <div class="fs-11 c-txt-l mt-4">위해요소 금속성 이물질(SUS·Fe 나사·칼날·톱날·못) · 한계기준 Fe 2.5mm / SUS 4.0mm 이상 100% 검출</div>
-        <div class="fs-11 c-txt-l mt-4">빈도: 작업시작 전 · 2시간마다 · 작업종료 후 · 정상이 기본값(초록), 이탈만 탭하면 빨강</div>
+        <div class="fs-11 c-txt-l mt-4">기본 구성: 작업시작전(시편만) → 작업명(전체) → 작업종료(시편만) · 작업 중 2시간마다 행 추가 · <b>색=정상여부</b>(초록 정상/빨강 이탈) · <b>글씨=현재값</b>(검출/불검출, 탭하여 전환)</div>
         <div class="fs-11 c-txt-l mt-4">정상 기준 — 시편(Fe·SUS)=검출 / 제품 통과=불검출 / 제품+시편=검출</div>
       </div>
       <div class="input-group mt-8"><label>제품명</label><input type="text" id="ccp-prod-${stepNo}" value="${ccpProd}" placeholder="제품명" oninput="validateStepInputs(${stepNo})"></div>
       <div id="ccp-grid-${stepNo}"></div>
       <div class="row" style="gap:6px;margin:2px 0 10px">
-        <button type="button" class="btn btn-sm btn-outline btn-warn flex-1" onclick="ccpGridAddRow(${stepNo},'작업중2h')">+ 2시간 검증</button>
-        <button type="button" class="btn btn-sm btn-outline btn-pri flex-1" onclick="ccpGridAddRow(${stepNo},'작업종료')">+ 작업종료</button>
+        <button type="button" class="btn btn-sm btn-outline btn-warn flex-1" onclick="ccpGridAddRow(${stepNo},'작업중2h')">+ 2시간 검증 행 추가</button>
       </div>
       <div class="grid-2" style="gap:8px">
         <div class="input-group"><label>통과량</label><input type="text" id="ccp-passQty-${stepNo}" placeholder="예: 20kg" oninput="validateStepInputs(${stepNo})"></div>
@@ -8794,19 +8793,23 @@ const CCP_NORMAL = { '시편Fe':'검출','시편SUS':'검출','제품통과':'�
 const CCP_POS3 = ['좌','중','우'];
 function ccpGridState(stepNo) {
   if (!State.woExec._ccpGrid) State.woExec._ccpGrid = {};
-  if (!State.woExec._ccpGrid[stepNo]) State.woExec._ccpGrid[stepNo] = { rows: [ ccpGridNewRow('작업시작전') ] };
+  if (!State.woExec._ccpGrid[stepNo]) State.woExec._ccpGrid[stepNo] = { rows: [ ccpGridNewRow('작업시작전'), ccpGridNewRow('작업명'), ccpGridNewRow('작업종료') ] };   // 종이양식 기본 골격
   return State.woExec._ccpGrid[stepNo];
 }
+// 구분별 점검 구성(종이양식 동일): 작업시작전·작업종료=시편Fe/SUS만, 작업명·작업중2h=전체(제품통과·제품+시편 포함)
+function ccpRowIsSpecimenOnly(gubun) { return gubun === '작업시작전' || gubun === '작업종료'; }
 function ccpGridNewRow(gubun) {
   const a3 = () => ['검출','검출','검출'];
-  return { 구분: gubun, 시각: '', 시편Fe: a3(), 시편SUS: a3(), 제품통과: '불검출', 제품시편Fe: { 상: a3(), 하: a3() }, 제품시편SUS: { 상: a3(), 하: a3() } };
+  const r = { 구분: gubun, 시각: '', 시편Fe: a3(), 시편SUS: a3() };
+  if (!ccpRowIsSpecimenOnly(gubun)) { r.제품통과 = '불검출'; r.제품시편Fe = { 상: a3(), 하: a3() }; r.제품시편SUS = { 상: a3(), 하: a3() }; }
+  return r;
 }
 function ccpCellNormal(g, v) { return v === CCP_NORMAL[g]; }
 function ccpRowJudge(r) {
-  let bad = 0;
-  ['시편Fe','시편SUS'].forEach(g => r[g].forEach(v => { if (!ccpCellNormal(g, v)) bad++; }));
-  if (!ccpCellNormal('제품통과', r.제품통과)) bad++;
-  ['제품시편Fe','제품시편SUS'].forEach(g => ['상','하'].forEach(s => r[g][s].forEach(v => { if (!ccpCellNormal(g, v)) bad++; })));
+  let bad = 0;   // 시편만 행(작업시작전·작업종료)은 제품통과·제품+시편 필드가 없음 → 있는 것만 판정
+  ['시편Fe','시편SUS'].forEach(g => (r[g] || []).forEach(v => { if (!ccpCellNormal(g, v)) bad++; }));
+  if (r.제품통과 != null && !ccpCellNormal('제품통과', r.제품통과)) bad++;
+  ['제품시편Fe','제품시편SUS'].forEach(g => { if (r[g]) ['상','하'].forEach(s => (r[g][s] || []).forEach(v => { if (!ccpCellNormal(g, v)) bad++; })); });
   return bad === 0 ? '적합' : '부적합';
 }
 function ccpVerdictAll(stepNo) { return ccpGridState(stepNo).rows.every(r => ccpRowJudge(r) === '적합') ? '적합' : '부적합'; }
@@ -8825,15 +8828,20 @@ function ccpGridToggle(stepNo, ri, group, sub, idx) {
   else r[group][idx] = flip(r[group][idx]);
   ccpGridRender(stepNo);
 }
-function ccpGridAddRow(stepNo, gubun) { ccpGridState(stepNo).rows.push(ccpGridNewRow(gubun)); ccpGridRender(stepNo); }
+function ccpGridAddRow(stepNo, gubun) {   // 2시간 검증은 작업종료 행 앞에 끼워넣기 (종이 순서 유지)
+  const st = ccpGridState(stepNo);
+  const i = (st.rows.length && st.rows[st.rows.length - 1].구분 === '작업종료') ? st.rows.length - 1 : st.rows.length;
+  st.rows.splice(i, 0, ccpGridNewRow(gubun)); ccpGridRender(stepNo);
+}
 function ccpGridDelRow(stepNo, ri) { const st = ccpGridState(stepNo); if (st.rows.length > 1) { st.rows.splice(ri, 1); ccpGridRender(stepNo); } }
 function ccpGridSetTime(stepNo, ri, val) { ccpGridState(stepNo).rows[ri].시각 = val; }
 function ccpGridCellBtn(stepNo, ri, group, sub, idx, label) {
   const r = ccpGridState(stepNo).rows[ri];
   const val = group === '제품통과' ? r.제품통과 : (sub ? r[group][sub][idx] : r[group][idx]);
   const bg = ccpCellNormal(group, val) ? '#1e8e3e' : '#d93025';
-  const txt = group === '제품통과' ? val : (ccpCellNormal(group, val) ? label : label + '✕');   // 검출 기대인데 불검출이면 ✕ (빨강과 함께 명확히)
-  return `<button type="button" onclick="ccpGridToggle(${stepNo},${ri},'${group}',${sub ? `'${sub}'` : 'null'},${idx})" style="flex:1;min-width:30px;padding:6px 2px;border:none;border-radius:5px;font-size:11px;color:#fff;background:${bg}" title="${val}">${txt}</button>`;
+  // 색=정상여부(초록 정상/빨강 이탈), 글씨=현재 선택값(검출/불검출). 위치(좌중우)는 작게 위에.
+  const txt = group === '제품통과' ? val : `<span style="font-size:9px;opacity:0.85">${label}</span><br><b>${val}</b>`;
+  return `<button type="button" onclick="ccpGridToggle(${stepNo},${ri},'${group}',${sub ? `'${sub}'` : 'null'},${idx})" style="flex:1;min-width:30px;padding:3px 2px;border:none;border-radius:5px;font-size:11px;line-height:1.3;color:#fff;background:${bg}" title="${val}">${txt}</button>`;
 }
 function ccpGridGroup3(stepNo, ri, group, glabel, hint) {
   let h = `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px"><span style="width:92px;font-size:11px;flex-shrink:0;line-height:1.2">${glabel}<br><span style="font-size:10px;color:var(--txt-l)">${hint}</span></span><div style="display:flex;gap:4px;flex:1">`;
@@ -8862,15 +8870,16 @@ function ccpGridRender(stepNo) {
     const badge = j === '적합'
       ? `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#e6f4ea;color:#137333">정상</span>`
       : `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#fce8e6;color:#c5221f">⚠ 이탈</span>`;
-    const delBtn = st.rows.length > 1 ? `<button type="button" onclick="ccpGridDelRow(${stepNo},${ri})" style="border:none;background:none;color:var(--txt-l);font-size:14px;cursor:pointer">✕</button>` : '';
+    const delBtn = r.구분 === '작업중2h' ? `<button type="button" onclick="ccpGridDelRow(${stepNo},${ri})" style="border:none;background:none;color:var(--txt-l);font-size:14px;cursor:pointer">✕</button>` : '';   // 기본 3행(시작전·작업명·종료)은 고정
+    const glabel = r.구분 === '작업중2h' ? '작업 중(2h)' : (r.구분 === '작업명' ? ((($id(`ccp-prod-${stepNo}`) || {}).value || '').trim() || '작업명') : r.구분);   // 작업명 행은 제품명 표시(종이의 품명 행)
     html += `<div class="card" style="padding:10px;margin-bottom:8px;border-left:3px solid ${j === '적합' ? '#1e8e3e' : '#d93025'}">` +
-      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><b style="font-size:13px">${r.구분 === '작업중2h' ? '작업 중(2h)' : r.구분}</b>` +
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><b style="font-size:13px">${glabel}</b>` +
       `<input type="time" value="${r.시각}" onchange="ccpGridSetTime(${stepNo},${ri},this.value)" style="width:104px;padding:4px 6px;border:1px solid var(--gray-l);border-radius:5px;font-size:12px">${badge}${delBtn}</div>`;
     html += ccpGridGroup3(stepNo, ri, '시편Fe', '시편 철(Fe)', '정상=검출');
     html += ccpGridGroup3(stepNo, ri, '시편SUS', '시편 SUS', '정상=검출');
-    html += ccpGridGroupProduct(stepNo, ri);
-    html += ccpGridGroup6(stepNo, ri, '제품시편Fe', '제품+시편(Fe)', '정상=검출');
-    html += ccpGridGroup6(stepNo, ri, '제품시편SUS', '제품+시편(SUS)', '정상=검출');
+    if (r.제품통과 != null) html += ccpGridGroupProduct(stepNo, ri);
+    if (r.제품시편Fe) html += ccpGridGroup6(stepNo, ri, '제품시편Fe', '제품+시편(Fe)', '정상=검출');
+    if (r.제품시편SUS) html += ccpGridGroup6(stepNo, ri, '제품시편SUS', '제품+시편(SUS)', '정상=검출');
     html += `</div>`;
   });
   cont.innerHTML = html;
@@ -8904,8 +8913,12 @@ function ccpGridRestore(stepNo, data) {
     if (c.제품시편SUS) r.제품시편SUS = c.제품시편SUS;
     return r;
   });
+  // 기본 골격(작업시작전·작업명·작업종료) 보장 — 구 기록(작업시작전 1행 등)도 새 구성으로 보충
+  if (!rows.some(r => r.구분 === '작업시작전')) rows.unshift(ccpGridNewRow('작업시작전'));
+  if (!rows.some(r => r.구분 === '작업명')) rows.splice(1, 0, ccpGridNewRow('작업명'));
+  if (!rows.some(r => r.구분 === '작업종료')) rows.push(ccpGridNewRow('작업종료'));
   if (!State.woExec._ccpGrid) State.woExec._ccpGrid = {};
-  State.woExec._ccpGrid[stepNo] = { rows: rows.length ? rows : [ ccpGridNewRow('작업시작전') ] };
+  State.woExec._ccpGrid[stepNo] = { rows };
   const setv = (id, v) => { const el = $id(id); if (el && v != null) el.value = v; };
   setv(`ccp-prod-${stepNo}`, data.제품명); setv(`ccp-passQty-${stepNo}`, data.통과량); setv(`ccp-detQty-${stepNo}`, data.검출량);
   setv(`ccp-note-${stepNo}`, data.특이사항); setv(`ccp-dev-${stepNo}`, data.이탈내용); setv(`ccp-action-${stepNo}`, data.개선조치);
@@ -8968,14 +8981,15 @@ function ccpGridReadView(d) {
     const badge = ok
       ? `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#e6f4ea;color:#137333">정상</span>`
       : `<span style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:6px;background:#fce8e6;color:#c5221f">⚠ 이탈</span>`;
+    const glabel = r.구분 === '작업중2h' ? '작업 중(2h)' : (r.구분 === '작업명' ? (d.제품명 || '작업명') : (r.구분 || ''));
     html += `<div class="card" style="padding:10px;margin:8px 0;border-left:3px solid ${ok ? '#1e8e3e' : '#d93025'}">` +
-      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:13px">${r.구분 === '작업중2h' ? '작업 중(2h)' : (r.구분 || '')}</b>` +
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:13px">${glabel}</b>` +
       `${r.시각 ? `<span class="fs-11 c-txt-l">${r.시각}</span>` : ''}${badge}</div>`;
     html += grp3(r, '시편Fe', '시편 철(Fe)', '정상=검출');
     html += grp3(r, '시편SUS', '시편 SUS', '정상=검출');
-    html += grpP(r);
-    html += grp6(r, '제품시편Fe', '제품+시편(Fe)', '정상=검출');
-    html += grp6(r, '제품시편SUS', '제품+시편(SUS)', '정상=검출');
+    if (r.제품통과 != null) html += grpP(r);
+    if (r.제품시편Fe) html += grp6(r, '제품시편Fe', '제품+시편(Fe)', '정상=검출');
+    if (r.제품시편SUS) html += grp6(r, '제품시편SUS', '제품+시편(SUS)', '정상=검출');
     html += `</div>`;
   });
   const sum = [];
@@ -10906,7 +10920,7 @@ async function generateWOPdf(woId) {
           y += 2;
           // ── 종이 격자표: 감시시각 × 시편Fe/SUS · 제품통과 · 제품+시편Fe/SUS(상하) · 판정 ──
           const colsX = [M, M + 28, M + 50, M + 72, M + 88, M + 120, M + 152, M + 170];
-          const grpTxt = (vals, nm) => { const a = (Array.isArray(vals) && vals.length) ? vals : [nm, nm, nm]; return a.map(v => v === '검출' ? '검' : v === '불검출' ? '불' : '·').join(' '); };
+          const grpTxt = (vals, nm) => { if (vals == null) return ''; const a = (Array.isArray(vals) && vals.length) ? vals : [nm, nm, nm]; return a.map(v => v === '검출' ? '검' : v === '불검출' ? '불' : '·').join(' '); };   // 미점검(시편만 행) 칸은 빈칸
           const grpAbn = (vals, nm) => Array.isArray(vals) && vals.some(v => v && v !== nm);
           const rowBox = (yy, h) => { doc.setDrawColor(140, 140, 140); doc.setLineWidth(0.25); doc.rect(M, yy, 170, h); for (let i = 1; i < colsX.length - 1; i++) doc.line(colsX[i], yy, colsX[i], yy + h); };
           const gridHeader = () => {
@@ -10920,9 +10934,9 @@ async function generateWOPdf(woId) {
           (stepData.checks || []).forEach((c, ci) => {
             const RH = 12;
             if (y + RH > PH - 12) { doc.addPage(); y = M; gridHeader(); }
-            const gubun = c.구분 === '작업중2h' ? '작업중(2h)' : (c.구분 || `점검${ci + 1}`);
+            const gubun = c.구분 === '작업중2h' ? '작업중(2h)' : (c.구분 === '작업명' ? (stepData.제품명 || '작업명') : (c.구분 || `점검${ci + 1}`));
             const feA = grpAbn(c.시편Fe, NM.시편Fe), suA = grpAbn(c.시편SUS, NM.시편SUS);
-            const ptA = (c.제품통과 || '불검출') !== NM.제품통과;
+            const ptA = c.제품통과 != null && c.제품통과 !== NM.제품통과;
             const psFeA = abn6(c.제품시편Fe, NM.제품시편Fe), psSuA = abn6(c.제품시편SUS, NM.제품시편SUS);
             const judge = c.판정 || ((feA || suA || ptA || psFeA || psSuA) ? '부적합' : '적합');
             const jok = judge === '적합';
@@ -10931,11 +10945,15 @@ async function generateWOPdf(woId) {
             drawText(c.시각 || '-', colsX[0] + 1, y + 7, 8.5, 'normal', '#666', 27);
             drawText(grpTxt(c.시편Fe, NM.시편Fe), colsX[1] + 1.5, y + 4, 10, 'bold', feA ? '#c62828' : '#1b5e20', 20);
             drawText(grpTxt(c.시편SUS, NM.시편SUS), colsX[2] + 1.5, y + 4, 10, 'bold', suA ? '#c62828' : '#1b5e20', 20);
-            drawText((c.제품통과 || '불검출') === '검출' ? '검' : '불', colsX[3] + 5, y + 4, 10, 'bold', ptA ? '#c62828' : '#1b5e20', 14);
-            drawText(`상 ${grpTxt(c.제품시편Fe && c.제품시편Fe.상, NM.제품시편Fe)}`, colsX[4] + 1, y + 2, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
-            drawText(`하 ${grpTxt(c.제품시편Fe && c.제품시편Fe.하, NM.제품시편Fe)}`, colsX[4] + 1, y + 7, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
-            drawText(`상 ${grpTxt(c.제품시편SUS && c.제품시편SUS.상, NM.제품시편SUS)}`, colsX[5] + 1, y + 2, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
-            drawText(`하 ${grpTxt(c.제품시편SUS && c.제품시편SUS.하, NM.제품시편SUS)}`, colsX[5] + 1, y + 7, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
+            if (c.제품통과 != null) drawText(c.제품통과 === '검출' ? '검' : '불', colsX[3] + 5, y + 4, 10, 'bold', ptA ? '#c62828' : '#1b5e20', 14);
+            if (c.제품시편Fe) {
+              drawText(`상 ${grpTxt(c.제품시편Fe.상, NM.제품시편Fe)}`, colsX[4] + 1, y + 2, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
+              drawText(`하 ${grpTxt(c.제품시편Fe.하, NM.제품시편Fe)}`, colsX[4] + 1, y + 7, 9, 'normal', psFeA ? '#c62828' : '#1b5e20', 31);
+            }
+            if (c.제품시편SUS) {
+              drawText(`상 ${grpTxt(c.제품시편SUS.상, NM.제품시편SUS)}`, colsX[5] + 1, y + 2, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
+              drawText(`하 ${grpTxt(c.제품시편SUS.하, NM.제품시편SUS)}`, colsX[5] + 1, y + 7, 9, 'normal', psSuA ? '#c62828' : '#1b5e20', 31);
+            }
             drawText(judge, colsX[6] + 1, y + 4, 9, 'bold', jok ? '#1b5e20' : '#c62828', 17);
             y += RH;
           });
