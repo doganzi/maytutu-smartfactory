@@ -6636,6 +6636,7 @@ Screens['wo-pdfs'] = async () => {
         <div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:12px">
           <div class="fs-13 fw-7 c-info mb-4">📄 ${pdfWos.length}건 PDF 저장됨</div>
           <div class="fs-11 c-txt-l">${isAdmin ? '관리자 — 전체 작업지시서' : '본인이 작업한 건만 표시'} · 최신순</div>
+          ${isAdmin && pdfWos.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px;font-size:12px" onclick="regenerateAllWOPdfs()">🔄 전체 PDF를 최신 양식으로 재생성 (${pdfWos.length}건)</button><div id="regen-progress" class="fs-11 c-txt-l" style="margin-top:6px"></div>` : ''}
         </div>
 
         ${filterStatuses.length > 1 ? `
@@ -11751,6 +11752,28 @@ async function generateAndSaveWOPdf(woId) {
     console.error(`[PDF] PDF 생성/저장 실패:`, e);
     throw e;
   }
+}
+
+/* 전체 작업지시서 PDF 일괄 재생성 (관리자) — 저장된 PDF(pdfUrl 있는 WO)를 모두 최신 양식으로 다시 생성·Drive 갱신 */
+async function regenerateAllWOPdfs() {
+  if (State.user?.role !== 'admin') { toast('관리자 전용입니다', 'err'); return; }
+  const wos = await SheetsAPI.getAll('작업지시서', false).catch(() => []);
+  const targets = wos.filter(w => w[19] && String(w[19]).trim() && w[12] !== '삭제');
+  if (!targets.length) { toast('재생성 대상(저장된 PDF)이 없습니다', 'warn'); return; }
+  confirm('전체 PDF 재생성', `저장된 작업지시서 PDF ${targets.length}건을 모두 최신 양식으로 다시 생성합니다.\n건당 수 초 걸리며 완료까지 화면을 닫지 마세요.\n\n진행하시겠습니까?`, async () => {
+    if (!acquireLock('regenAll')) return;
+    const prog = $id('regen-progress');
+    let done = 0, fail = 0;
+    for (const wo of targets) {
+      if (prog) prog.innerHTML = `<b>재생성 중...</b> ${done + fail + 1}/${targets.length} — ${wo[0]} (성공 ${done} · 실패 ${fail})`;
+      try { await generateAndSaveWOPdf(wo[0]); done++; }
+      catch (e) { fail++; console.warn('[재생성 실패]', wo[0], e); }
+    }
+    SheetsAPI.invalidateCache('작업지시서');
+    if (prog) prog.innerHTML = `✅ 완료 — 성공 ${done}건 · 실패 ${fail}건`;
+    toast(`전체 PDF 재생성 완료 — 성공 ${done} · 실패 ${fail}`, fail ? 'warn' : 'suc', 5000);
+    releaseLock('regenAll');
+  });
 }
 
 // 냉동 온도 정규화 — 냉동고 온도는 항상 영하: 양수 입력(예: "18")은 −로 자동 보정, 소수 1자리 고정.
