@@ -11207,7 +11207,7 @@ async function generateWOPdf(woId) {
           const mkRow = (label, d, spec) => ({ label, d: d || null, spec: !!spec });
           const skel = [];
           (starts.length ? starts : [null]).forEach((c, i) => skel.push(mkRow(i ? '' : '작업 시작 전', c, true)));
-          (works.length ? works : [null]).forEach((c) => skel.push(mkRow(prodName, c)));   // 작업명 = 품목명 행(전체 검출)
+          works.forEach((c) => skel.push(mkRow(prodName, c)));   // 작업명 = 품목명 행: 데이터 있을 때만(빈 작업명 행 방지 — 구 변환본엔 작업명 구분 없음)
           twos.forEach(c => skel.push(mkRow(prodName, c)));                                  // 2시간마다: 품목명 + 검출 기록
           (ends.length ? ends : [null]).forEach((c, i) => skel.push(mkRow(i ? '' : '작업 종료', c, true)));
           checks.filter(c => !['작업시작전', '작업명', '작업중2h', '작업종료'].includes(c.구분 || '')).forEach(c => skel.push(mkRow(c.구분 || '', c)));
