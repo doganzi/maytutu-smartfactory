@@ -1351,7 +1351,7 @@ const Router = {
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
-      'data-audit': 'more', 'wo-pdfs': 'more', 'db-browser': 'more',
+      'data-audit': 'more', 'ccp-fill': 'more', 'wo-pdfs': 'more', 'db-browser': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -4585,6 +4585,7 @@ Screens.more = () => {
     { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
     { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
     { icon: '🔍', label: '데이터 정합성 검증', desc: 'LOT·잔량·상태·고아 데이터 진단 (관리자)', target: 'data-audit', adminOnly: true },
+    { icon: '📝', label: 'CCP 미입력 보완', desc: '금속검출 빈칸(작업종료·2h) 전수조사·실측 입력 (관리자)', target: 'ccp-fill', adminOnly: true },
     { icon: '🗄️', label: 'DB 직접 조회·편집', desc: '모든 시트 탭 row 조회 / 셀 편집 / JSON 복사 (관리자)', target: 'db-browser', adminOnly: true },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
@@ -5641,12 +5642,6 @@ Screens['data-audit'] = async () => {
         <div class="fs-11 c-txt-l mb-8">구 7단계 금속검출 기록을 신 격자 양식으로 변환합니다. <b>원본 7단계는 <code>_legacy</code>에 보존</b>(되돌리기 가능)되고, 구형에 없던 위치값은 추론(정상)이라 <code>_migrated</code>로 표기됩니다. <b>스캔(dry-run)으로 대상을 먼저 확인</b>한 뒤 실행하세요.</div>
         <button class="btn btn-outline btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
         <div id="ccp-migrate-result"></div>
-      </div>
-      <div class="card">
-        <div class="fs-13 fw-7 mb-4">🌡 동결 종료온도 백필 <span class="badge badge-gray">CCP-1 · 1회성</span></div>
-        <div class="fs-11 c-txt-l mb-8">동결 사이클이 끝난 WO(출하가능·출하완료·승인완료) 중 <b>종료 냉동고 온도가 빈 기록만</b> −18.0~−22.0℃ 난수(소수 1자리)로 채웁니다. 기존 값은 절대 덮지 않으며 <code>_bf</code>로 표기됩니다. <b>스캔(dry-run)으로 먼저 확인</b>하세요.</div>
-        <button class="btn btn-outline btn-full" onclick="freezeBackfillScan()">대상 스캔 (dry-run)</button>
-        <div id="freeze-bf-result"></div>
       </div>
       <div id="audit-result"></div>
     </div>
@@ -11812,55 +11807,82 @@ async function saveFreezeEnd(woId, freezeHours) {
   finally { releaseLock('saveFreezeEnd'); }
 }
 
-/* ── 동결 종료온도 백필 (1회성·관리자·data-audit) ──
-   대상: 동결 사이클 종료 WO(출하가능/출하완료/승인완료)인데 store 기록의 종료온도가 빈 것만.
-   빈 값만 −18.0~−22.0℃ 난수(소수1)로 채움 + _bf 표기. 기존 값·제품온도·판정은 불변. */
-async function freezeBfTargets() {
-  const [wos, recs] = await Promise.all([
-    SheetsAPI.getAll('작업지시서', false),
-    SheetsAPI.getAll('공정기록', false)
-  ]);
-  const doneWo = new Set(wos.filter(w => ['출하가능', '출하완료', '승인완료'].includes(w[12])).map(w => w[0]));
-  const targets = [];
+// (동결 종료온도 '난수 백필' 기능 제거 — HACCP 실측만 기록 원칙. 빈 종료온도는 데이터로거 실측/수기 입력으로만 채운다)
+
+/* ── CCP 미입력 보완 (관리자) — 전수조사로 금속검출 빈칸을 찾아 실측 입력 ──
+   날조 금지: 정상은 '검출' 기본값, 이탈(불검출)은 작업 화면에서 정밀 입력. 진행 중 동결 종료(12h 미달)는 대상 아님. */
+Screens['ccp-fill'] = async () => {
+  renderHeader('CCP 미입력 보완', '금속검출 빈칸 실측 입력 · 관리자', { back: 'more' });
+  if (State.user?.role !== 'admin') { $id('content').innerHTML = '<div style="padding:16px"><div class="card bl-err"><div class="c-err fw-7">관리자 권한 필요</div></div></div>'; return; }
+  $id('content').innerHTML = '<div style="padding:16px"><div class="loading-inline"><div class="spinner-s"></div> 빈칸 스캔 중...</div></div>';
+  const [wos, recs] = await Promise.all([SheetsAPI.getAll('작업지시서', false), SheetsAPI.getAll('공정기록', false)]);
+  const woMap = {}; wos.forEach(w => woMap[w[0]] = w);
+  window.__ccpFill = {};
+  const cards = [];
   recs.forEach((r, i) => {
-    if ((r[3] || '') !== 'store' || !doneWo.has(r[0])) return;
+    if (r[3] !== 'inspect') return;
+    const wo = woMap[r[0]]; if (!wo || wo[12] === '삭제') return;
     let sd; try { sd = JSON.parse(r[5] || '{}'); } catch (e) { return; }
-    if (normFreezeTemp(sd.종료온도) != null) return;   // 이미 값 있음 → 보존
-    targets.push({ rowIdx: i + 2, woId: r[0], sd });
+    const checks = sd.checks || []; const g = checks.map(c => c.구분);
+    const miss = [];
+    if (!checks.length) { miss.push('작업시작전', '작업명', '작업종료'); }
+    else {
+      if (!g.includes('작업종료')) miss.push('작업종료');
+      const s = wo[9] ? +new Date(wo[9]) : 0, e = wo[10] ? +new Date(wo[10]) : 0;
+      if (s && e && (e - s) >= 7200000 && !g.includes('작업중2h')) miss.push('작업중2h');
+    }
+    if (!miss.length) return;
+    window.__ccpFill[r[0]] = { rowIdx: i + 2, sd, miss };
+    const prod = sd.제품명 || wo[4] || '물반죽';
+    const inputs = miss.map(gb => {
+      const label = gb === '작업중2h' ? '작업 중(2h)' : (gb === '작업명' ? `작업명(${prod})` : gb);
+      return `<div style="border-top:1px solid var(--gray-l);padding:8px 0">
+        <div class="fs-12 fw-6 mb-4">${label}</div>
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="time" id="cf-${r[0]}-${gb}-t" style="padding:5px 8px;border:1px solid var(--gray-l);border-radius:5px;font-size:13px">
+          <label class="fs-12" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cf-${r[0]}-${gb}-ok" checked> 시편 검출 정상</label>
+        </div>
+      </div>`;
+    }).join('');
+    cards.push(`<div class="card" style="margin-bottom:10px">
+      <div class="fs-13 fw-7">${r[0]} <span class="badge badge-warn" style="font-size:10px">${miss.join('·')} 누락</span></div>
+      <div class="fs-11 c-txt-l mb-4">${prod} · ${wo[12]}</div>
+      ${inputs}
+      <button class="btn btn-suc btn-full mt-8" onclick="ccpFillSave('${r[0]}')">저장 (실측 기록)</button>
+    </div>`);
   });
-  return targets;
-}
-async function freezeBackfillScan() {
-  showLoading();
+  $id('content').innerHTML = `<div style="padding:16px">
+    <div class="card bl-info mb-12"><div class="fs-12">금속검출 빈칸 <b>${cards.length}건</b>. 정상은 '검출'이 기본 — <b>시각만 넣고 저장</b>하세요. 이탈(불검출)이면 체크 해제 후 작업 화면에서 정밀 입력하세요.</div></div>
+    ${cards.length ? cards.join('') : '<div class="card bl-suc"><div class="c-suc fw-7">✅ 미입력 빈칸 없음 — 모든 금속검출 기록 완비</div></div>'}
+  </div>`;
+};
+async function ccpFillSave(woId) {
+  const d = window.__ccpFill?.[woId]; if (!d) { toast('데이터 없음 — 새로고침 후 다시', 'err'); return; }
+  if (!acquireLock('ccpFill')) return;
   try {
-    const t = await freezeBfTargets();
-    const el = $id('freeze-bf-result');
-    if (el) el.innerHTML = t.length === 0
-      ? `<div class="fs-12 c-suc" style="padding:8px 0">✅ 대상 없음 — 완료된 모든 WO에 종료온도가 있습니다</div>`
-      : `<div class="fs-12" style="padding:8px 0">대상 <b>${t.length}건</b>: ${t.map(x => x.woId).join(', ')}</div>
-         <button class="btn btn-warn btn-full" onclick="freezeBackfillRun()">백필 실행 (빈 값만 · −18.0~−22.0℃)</button>`;
-  } catch (e) { toast('스캔 실패: ' + e.message, 'err'); }
-  finally { hideLoading(); }
-}
-async function freezeBackfillRun() {
-  confirm('동결 종료온도 백필', '비어 있는 종료온도만 −18.0~−22.0℃ 난수로 채웁니다.\n기존 값은 변경되지 않습니다.\n\n진행하시겠습니까?', async () => {
-    if (!acquireLock('freezeBf')) return;
+    const a3 = () => ['검출', '검출', '검출'];
+    const newRows = [];
+    for (const gb of d.miss) {
+      const time = $id(`cf-${woId}-${gb}-t`)?.value || '';
+      if (!time) { toast(`${gb} 시각을 입력하세요`, 'err'); releaseLock('ccpFill'); return; }
+      const ok = $id(`cf-${woId}-${gb}-ok`)?.checked;
+      if (!ok) { toast(`${gb}: 이탈(불검출)은 작업 화면에서 정밀 입력하세요 — 보완입력은 정상 기록 전용`, 'warn', 5000); releaseLock('ccpFill'); return; }
+      const row = { 구분: gb, 시각: time, 시편Fe: a3(), 시편SUS: a3() };
+      if (gb !== '작업시작전' && gb !== '작업종료') { row.제품통과 = '불검출'; row.제품시편Fe = { 상: a3(), 하: a3() }; row.제품시편SUS = { 상: a3(), 하: a3() }; }
+      newRows.push(row);
+    }
     showLoading();
-    try {
-      const targets = await freezeBfTargets();   // 실행 직전 재스캔 (경합 안전)
-      let done = 0;
-      for (const t of targets) {
-        const v = -(18 + Math.random() * 4);
-        Object.assign(t.sd, { 종료온도: `${v.toFixed(1)}°C`, _bf: 'rand-v1', _fmt: t.sd._fmt || 'ccpFreeze-v1' });
-        await SheetsAPI.updateRowByIndex('공정기록', t.rowIdx, { 5: JSON.stringify(t.sd) });
-        done++;
-      }
-      SheetsAPI.invalidateCache('공정기록');
-      toast(`동결 종료온도 백필 완료 — ${done}건`, 'suc', 3000);
-      freezeBackfillScan();
-    } catch (e) { toast('백필 실패: ' + e.message, 'err'); }
-    finally { hideLoading(); releaseLock('freezeBf'); }
-  });
+    const sd = d.sd; sd.checks = (sd.checks || []).concat(newRows);
+    const order = { 작업시작전: 0, 작업명: 1, 작업중2h: 2, 작업종료: 3 };
+    sd.checks.sort((a, b) => (order[a.구분] ?? 9) - (order[b.구분] ?? 9));
+    if (!sd.제품명) sd.제품명 = '물반죽';
+    sd._ccpFill = 'manual-v1';
+    await SheetsAPI.updateRowByIndex('공정기록', d.rowIdx, { 5: JSON.stringify(sd) });
+    SheetsAPI.invalidateCache('공정기록');
+    toast(`${woId} 금속검출 보완 저장 — ${newRows.length}건 (실측 정상)`, 'suc', 3000);
+    Screens['ccp-fill']();
+  } catch (e) { toast('저장 실패: ' + e.message, 'err'); }
+  finally { hideLoading(); releaseLock('ccpFill'); }
 }
 
 async function approveWO(woId) {
