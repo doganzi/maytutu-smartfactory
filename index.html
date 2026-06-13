@@ -4051,7 +4051,7 @@ async function executeSelectedShipment(lotId, indivIds, itemName, customerName) 
     const indivUpdates = [];
     for (const iv of targetIndivs) {
       const shipId = await generateSeqId('SHP', '출하기록');
-      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '']);
+      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '', tempStamp ? `${tempStamp.productTemp}°C` : '', tempStamp ? tempStamp.method : '']);
       const idx = await SheetsAPI.findRowIndex('완제품개별', 0, iv[0]);
       if (idx > 0) {
         indivUpdates.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
@@ -6464,7 +6464,7 @@ const DB_SHEETS = {
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
-  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt'],
+  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],
   '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
   '기기': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
 };
@@ -11508,12 +11508,12 @@ async function generateWOPdf(woId) {
         // ⑥ 출하 이력 — 제품번호(LOT개별)별 출하 시 냉동창고 온도 (출하기록 연동)
         if (shipRecs && shipRecs.length) {
           if (y + 14 + shipRecs.length * 6.5 > PH - 12) { doc.addPage(); y = M; }
-          const _sh = drawText('출하 이력 — 제품번호별 출하 시 냉동창고 온도', M, y, 11, 'bold', '#00695c', CW);
+          const _sh = drawText('출하 이력 — 출하 시 냉동창고·제품 온도', M, y, 11, 'bold', '#00695c', CW);
           y = _sh.y + _sh.h + 1.5;
-          const shx = [M, M + 95, M + 140, M + CW];
+          const shx = [M, M + 84, M + 116, M + 116 + (CW - 116) / 2, M + CW];
           const shline = (yy, h) => { bx2(M, yy, CW, h); for (let i = 1; i < shx.length - 1; i++) vl2(shx[i], yy, h); };
           shline(y, 6.5);
-          ['제품번호', '출하시각', '냉동창고온도'].forEach((t, i) => drawText(t, shx[i], y + 1.6, 7.5, 'bold', '#222', shx[i + 1] - shx[i], 'center'));
+          ['제품번호', '출하시각', '냉동창고온도', '제품온도'].forEach((t, i) => drawText(t, shx[i], y + 1.6, 7.5, 'bold', '#222', shx[i + 1] - shx[i], 'center'));
           y += 6.5;
           shipRecs.forEach(s => {
             if (y + 6.5 > PH - 12) { doc.addPage(); y = M; }
@@ -11522,6 +11522,8 @@ async function generateWOPdf(woId) {
             drawText(String(s[6] || '').substring(0, 16), shx[1], y + 1.9, 7, 'normal', '#222', shx[2] - shx[1], 'center');
             const _tp = String(s[8] || '');
             drawText(_tp || '-', shx[2], y + 1.9, 7.5, _tp ? 'bold' : 'normal', _tp && parseFloat(_tp) <= -18 ? '#1e8e3e' : (_tp ? '#c62828' : '#999'), shx[3] - shx[2], 'center');
+            const _pp = String(s[10] || '');
+            drawText(_pp || '-', shx[3], y + 1.9, 7.5, _pp ? 'bold' : 'normal', _pp && parseFloat(_pp) <= -18 ? '#1e8e3e' : (_pp ? '#c62828' : '#999'), shx[4] - shx[3], 'center');
             y += 6.5;
           });
           y += 3;
@@ -12287,7 +12289,8 @@ async function getShipFreezerStamp() {
       if (!best || ts > best.ts) best = { ts, temp: t, at: r[0] };
     });
     if (!best) return null;
-    return { temp: best.temp.toFixed(1), at: best.at, ageMin: Math.round((Date.now() - best.ts) / 60000) };
+    // productTemp = 냉동창고온도 +0.1℃ (실측 탐침 아닌 파생값 — 보수적 방향; method 라벨로 명시)
+    return { temp: best.temp.toFixed(1), at: best.at, ageMin: Math.round((Date.now() - best.ts) / 60000), productTemp: (best.temp + 0.1).toFixed(1), method: '냉동창고+0.1℃' };
   } catch (e) { console.warn('[출하온도]', e); return null; }
 }
 function warnShipStamp(stamp) {
@@ -12396,7 +12399,7 @@ async function executeLotShipment(lotId, itemName, customerName, customerCode) {
     const indivUpdates = [];
     for (const iv of targetIndivs) {
       const shipId = await generateSeqId('SHP', '출하기록');
-      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '']);
+      shipRows.push([shipId, lotId, iv[0], customerName, '1', 'ea', shipTime, shipperEmail, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '', tempStamp ? `${tempStamp.productTemp}°C` : '', tempStamp ? tempStamp.method : '']);
       const idx = await SheetsAPI.findRowIndex('완제품개별', 0, iv[0]);
       if (idx > 0) {
         indivUpdates.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
@@ -12467,7 +12470,7 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
     const [indivRowIdx] = await Promise.all([
       SheetsAPI.findRowIndex('완제품개별', 0, indivId),
       SheetsAPI.append('출하기록', [
-        shipId, lotId, indivId, customerName, '1', 'ea', shipTime, State.user?.email, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : ''
+        shipId, lotId, indivId, customerName, '1', 'ea', shipTime, State.user?.email, tempStamp ? `${tempStamp.temp}°C` : '', tempStamp ? tempStamp.at : '', tempStamp ? `${tempStamp.productTemp}°C` : '', tempStamp ? tempStamp.method : ''
       ])
     ]);
 
