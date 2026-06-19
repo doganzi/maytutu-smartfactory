@@ -533,12 +533,25 @@ async function generateLotId(prefix, itemCode, expDate, tab, idCol = 0, mfgDate 
     } else {
       console.log(`[LOT채번] ${lotId} (mfgDate=${mfgDate||'today'}, maxSeq=${max})`);
     }
+    if (!/[A-Za-z]/.test(lotId) || !lotId.includes('-')) console.error('[LOT채번] ⚠️ 비정상 lotId 생성:', lotId);   // 재발 방지: 형식 손상 조기 경고(비차단)
     return lotId;
   } catch (e) {
     const lotId = `${prefix}-${itemNum}-${mfgYM}-${expYM}-001`;
     console.warn(`[LOT채번] fallback: ${lotId}`, e.message);
     return lotId;
   }
+}
+
+// 무결성 점검 (재발 방지) — 완제품LOT lotId(0열) 형식 손상(예: ".0.000"·점들·숫자만) 조기 발견. 비차단(경고만).
+async function _checkFgLotIdIntegrity() {
+  try {
+    const rows = await SheetsAPI.getAll('완제품LOT');
+    const bad = rows.filter(r => { const id = String(r[0] || ''); return r[1] && id && (!/[A-Za-z]/.test(id) || !id.includes('-')); });
+    if (bad.length) {
+      console.error('[무결성] 완제품LOT lotId 손상 ' + bad.length + '건:', bad.map(r => r[0]).slice(0, 12));
+      if (typeof toast === 'function') toast('⚠️ 완제품LOT lotId 형식 손상 ' + bad.length + '건 감지 — 관리자 확인 필요', 'warn', 6000);
+    }
+  } catch (e) { console.warn('[무결성] lotId 점검 실패', e.message); }
 }
 
 // QR 데이터 반환 (로컬 qrcode.js 사용으로 URL 불필요 — ID 텍스트만 저장)
@@ -12611,6 +12624,7 @@ async function initApp() {
     }
 
     hideLoading();
+    _checkFgLotIdIntegrity();   // 재발 방지: 시작 시 완제품LOT lotId 손상 비차단 점검
 
     // Check if Sheet ID is set
     if (!CONFIG.SHEET_ID) {
