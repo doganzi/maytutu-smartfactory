@@ -10614,6 +10614,11 @@ Screens['approval-detail'] = async (params = {}) => {
     renderHeader('출하 승인', wo[0], { back: 'production' });
 
     let freezeSd = {}; try { const _sr = records.find(r => r[3] === 'store'); if (_sr) freezeSd = JSON.parse(_sr[5] || '{}'); } catch (e) {}
+    // 출하시점 냉동고 온도 — 센서 자동기록(동결온도로그) 최근값. 제품온도는 동일(12h+ 동결 평형). 수기 입력 대체.
+    const shipStamp = await getShipFreezerStamp();
+    const sensorEnd = shipStamp ? normFreezeTemp(shipStamp.temp) : null;
+    const ccpEndTemp = sensorEnd != null ? sensorEnd : normFreezeTemp(freezeSd.종료온도);
+    const ccpJudge = ccpEndTemp != null ? ccpFreezeJudge(ccpEndTemp, freezeHours) : (freezeSd.판정 || '');
 
     $id('content').innerHTML = `
       <div style="padding:16px">
@@ -10643,9 +10648,16 @@ Screens['approval-detail'] = async (params = {}) => {
           <div class="fs-13 fw-7 mb-4" style="color:#00695c">❄ 동결온도 CCP-1 — 종료 기록 (동결공정 모니터링일지)</div>
           <div class="fs-11 c-txt-l mb-4">한계기준: 제품온도 ≤ −18℃ AND 냉동 12시간 이상 → 적합</div>
           <div class="fs-11 c-txt-l mb-8">투입(냉동 시작): ${freezeSd.freezeStart || wo[11] || '-'}${freezeSd.freezeTemp ? ` · 투입 냉동고온도 ${fmtFreezeTemp(freezeSd.freezeTemp)}` : ''}</div>
-          <div class="input-group"><label>종료 냉동고 온도 (℃) <span class="c-err">*필수</span></label><input type="number" id="freeze-end-temp" step="0.1" value="${(freezeSd.종료온도||'').replace('°C','')}" placeholder="예: -19 (양수 입력 시 자동 영하)"></div>
-          <div class="input-group"><label>제품 온도 (℃) <span class="c-err">*필수</span></label><input type="number" id="freeze-prod-temp" step="0.1" value="${(freezeSd.제품온도||'').replace('°C','')}" placeholder="예: -18.5 (기준 ≤ −18℃)" oninput="updateFreezeJudge(${freezeHours})"></div>
-          <div class="fs-13 fw-7 mt-4">판정: <span id="freeze-judge" class="fw-8" style="color:${freezeSd.판정==='부적합'?'var(--err)':freezeSd.판정==='적합'?'var(--suc)':'var(--txt-l)'}">${freezeSd.판정 || '제품온도 입력 시 자동'}</span></div>
+          ${sensorEnd != null ? `
+          <div class="card" style="background:#f1f8f4;border:1px solid #b7dfc6;padding:10px;margin-bottom:8px">
+            <div class="row between"><span class="fs-12 c-txt-l">종료 냉동고 온도 <span class="badge badge-info" style="font-size:9px">센서 자동기록${shipStamp && shipStamp.ageMin != null ? ` · ${shipStamp.ageMin}분 전` : ''}</span></span><span class="fs-15 fw-8" style="color:#00695c">${sensorEnd.toFixed(1)}°C</span></div>
+            <div class="row between mt-4"><span class="fs-12 c-txt-l">제품 온도</span><span class="fs-14 fw-7" style="color:#00695c">${sensorEnd.toFixed(1)}°C <span class="fs-11 c-txt-l fw-4">(냉동고 온도와 동일)</span></span></div>
+            <div class="fs-11 c-txt-l mt-4">제품 온도 = 냉동고 온도와 동일 — 12시간+ 동결로 심부온도 평형. 출하 시점 온도는 작업기록서·동결온도로그(센서 10분 자동기록)로 추적·기재됩니다(수기 입력 불필요).</div>
+          </div>
+          <div class="fs-13 fw-7">판정: <span class="fw-8" style="color:${ccpJudge==='부적합'?'var(--err)':ccpJudge==='적합'?'var(--suc)':'var(--txt-l)'}">${ccpJudge || '-'}</span></div>` : `
+          <div class="card bl-warn" style="background:#fff8e1;padding:9px;margin-bottom:8px"><div class="fs-11 c-warn">⚠ 센서 온도 기록 없음(동결온도로그). 종료 냉동고 온도를 수기 입력하세요. 제품 온도는 동일로 기록됩니다.</div></div>
+          <div class="input-group"><label>종료 냉동고 온도 (℃) <span class="c-err">*필수</span></label><input type="number" id="freeze-end-temp" step="0.1" value="${(freezeSd.종료온도||'').replace('°C','')}" placeholder="예: -19 (양수 입력 시 자동 영하)" oninput="updateFreezeJudge(${freezeHours})"></div>
+          <div class="fs-13 fw-7 mt-4">판정: <span id="freeze-judge" class="fw-8" style="color:${freezeSd.판정==='부적합'?'var(--err)':freezeSd.판정==='적합'?'var(--suc)':'var(--txt-l)'}">${freezeSd.판정 || '온도 입력 시 자동'}</span></div>`}
           <div class="input-group mt-8"><label>이탈내용 (부적합 시)</label><input type="text" id="freeze-dev" value="${freezeSd.이탈내용||''}" placeholder="부적합 시 기록"></div>
           <div class="input-group"><label>개선조치 및 결과 (부적합 시)</label><input type="text" id="freeze-action" value="${freezeSd.개선조치||''}" placeholder="정상 냉동고 이동·제품온도 재측정·선별/폐기 등"></div>
           <button class="btn btn-outline btn-pri" style="width:100%;margin-top:8px" onclick="saveFreezeEnd('${wo[0]}', ${freezeHours})">💾 동결 종료기록 저장</button>
@@ -11845,16 +11857,19 @@ function ccpFreezeJudge(prodTemp, freezeHours) {
 }
 function updateFreezeJudge(freezeHours) {
   const el = $id('freeze-judge'); if (!el) return;
-  const j = ccpFreezeJudge($id('freeze-prod-temp')?.value, freezeHours);
-  el.textContent = j || '제품온도 입력 시 자동';
+  const j = ccpFreezeJudge($id('freeze-end-temp')?.value, freezeHours);   // 제품온도 = 냉동고 온도와 동일 → 종료 냉동고 온도로 판정
+  el.textContent = j || '온도 입력 시 자동';
   el.style.color = j === '부적합' ? 'var(--err)' : j === '적합' ? 'var(--suc)' : 'var(--txt-l)';
 }
 // 동결 종료기록 저장 → 해당 WO store 단계 stepData 에 병합(행인덱스 갱신). 출하승인과 분리된 안전 저장.
 async function saveFreezeEnd(woId, freezeHours) {
-  const endTempN = normFreezeTemp($id('freeze-end-temp')?.value);
-  const prodTempN = normFreezeTemp($id('freeze-prod-temp')?.value);
-  if (endTempN == null) { toast('종료 냉동고 온도(℃)는 필수입니다', 'err'); return; }
-  if (prodTempN == null) { toast('제품 온도(℃)는 필수입니다', 'err'); return; }
+  // 종료 냉동고 온도 = 센서 자동기록(동결온도로그) 출하시점 최근값. 제품 온도 = 동일(12h+ 동결 평형). 센서 없으면 수기 폴백.
+  const stamp = await getShipFreezerStamp();
+  let endTempN = stamp ? normFreezeTemp(stamp.temp) : null;
+  const sensorAuto = endTempN != null;
+  if (endTempN == null) endTempN = normFreezeTemp($id('freeze-end-temp')?.value);
+  if (endTempN == null) { toast('종료 냉동고 온도를 확인할 수 없습니다 (센서·수기 모두 없음)', 'err', 4000); return; }
+  const prodTempN = endTempN;   // 제품 온도 = 냉동고 온도와 동일
   const judge = ccpFreezeJudge(prodTempN, freezeHours);
   if (judge === '부적합' && !$id('freeze-action')?.value) { toast('부적합 — 개선조치를 입력하세요', 'err', 4000); return; }
   if (!acquireLock('saveFreezeEnd')) return;
@@ -11868,13 +11883,14 @@ async function saveFreezeEnd(woId, freezeHours) {
       종료시각: formatDateTime(),
       종료온도: `${endTempN.toFixed(1)}°C`,
       제품온도: `${prodTempN.toFixed(1)}°C`,
+      제품온도근거: `냉동고 온도와 동일(12h+ 동결 평형 · 출하시점 ${sensorAuto ? '센서 자동기록' : '수기'} 참조)`,
       판정: judge,
       이탈내용: $id('freeze-dev')?.value || '',
       개선조치: $id('freeze-action')?.value || '',
-      _fmt: 'ccpFreeze-v1'
+      _fmt: 'ccpFreeze-v1', _sensorAuto: sensorAuto
     });
     await SheetsAPI.updateRowByIndex('공정기록', gi + 2, { 5: JSON.stringify(sd) });
-    toast(`동결 종료기록 저장 — 판정 ${judge}`, judge === '적합' ? 'suc' : 'warn', 3000);
+    toast(`동결 종료기록 저장 — 판정 ${judge}${sensorAuto ? ' (센서 자동)' : ''}`, judge === '적합' ? 'suc' : 'warn', 3000);
     Screens['approval-detail']({ woId });
   } catch (e) { toast('저장 실패: ' + e.message, 'err'); hideLoading(); }
   finally { releaseLock('saveFreezeEnd'); }
@@ -12289,8 +12305,8 @@ async function getShipFreezerStamp() {
       if (!best || ts > best.ts) best = { ts, temp: t, at: r[0] };
     });
     if (!best) return null;
-    // productTemp = 냉동창고온도 +0.1℃ (실측 탐침 아닌 파생값 — 보수적 방향; method 라벨로 명시)
-    return { temp: best.temp.toFixed(1), at: best.at, ageMin: Math.round((Date.now() - best.ts) / 60000), productTemp: (best.temp + 0.1).toFixed(1), method: '냉동창고+0.1℃' };
+    // productTemp = 냉동창고 온도와 동일 (12h+ 동결로 심부온도 평형 — 별도 탐침 측정 없이 센서 온도 참조; 작업기록서 출하시점 추적과 일치)
+    return { temp: best.temp.toFixed(1), at: best.at, ageMin: Math.round((Date.now() - best.ts) / 60000), productTemp: best.temp.toFixed(1), method: '냉동창고와 동일' };
   } catch (e) { console.warn('[출하온도]', e); return null; }
 }
 function warnShipStamp(stamp) {
