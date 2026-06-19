@@ -3678,6 +3678,8 @@ async function deletePO(poId) {
 // ─── LOT DETAIL ───
 Screens['lot-detail'] = async (params = {}) => {
   const { itemCode, itemName, type } = params;
+  const _keepCache = params._keepCache;
+  State._lotDetailParams = { itemCode, itemName, type };
   renderHeader('LOT 상세', `${itemCode || ''} ${itemName || ''}`, { back: 'inventory' });
   // 다중 선택 출하 상태 — 화면 진입 시마다 초기화 (다른 LOT 잔여 선택 방지)
   State._selectedShipIds = new Map();
@@ -3690,8 +3692,7 @@ Screens['lot-detail'] = async (params = {}) => {
   let lots = [], indivs = [], rmSku = '';
   try {
     // 카드와 개별 목록 표시값 일치 보장 — 진입 시 캐시 무효화로 fresh 데이터 강제
-    SheetsAPI.invalidateCache(lotTab);
-    SheetsAPI.invalidateCache(indivTab);
+    if (!_keepCache) { SheetsAPI.invalidateCache(lotTab); SheetsAPI.invalidateCache(indivTab); }
     lots = (await SheetsAPI.getAll(lotTab, false).catch(() => [])).filter(l => l[1] === itemCode);
     indivs = await SheetsAPI.getAll(indivTab, false).catch(() => []);
     // showLotIndividuals 가 재사용할 수 있도록 State 에 저장 (재fetch 없이 동일 데이터 사용)
@@ -3728,6 +3729,17 @@ Screens['lot-detail'] = async (params = {}) => {
   // 완제품: 출하완료 LOT 제외
   const displayLots = isFG ? lots.filter(l => !['출하완료','폐기','소진','삭제','채번예약'].includes(l[9]))
                                    : lots.filter(l => l[9] !== '입고취소');
+  // 정렬 — 기본 '최근순'(LOT ID = 제조일YYMMDD 인코딩 → 내림차순). State._lotSortKey 로 사용자 선택 유지.
+  const _expOf = l => isFG ? (l[6]||'') : (l[7]||'');
+  const _remainOf = l => isFG ? indivs.filter(iv => iv[1] === l[0] && ['냉동보관중','출하가능'].includes(iv[3])).length : (parseFloat(l[8])||0);
+  const _lotSortKey = State._lotSortKey || 'recent';
+  const _lotSorters = {
+    recent: (a,b) => String(b[0]).localeCompare(String(a[0])),
+    old:    (a,b) => String(a[0]).localeCompare(String(b[0])),
+    exp:    (a,b) => String(_expOf(a)).localeCompare(String(_expOf(b))) || String(a[0]).localeCompare(String(b[0])),
+    remain: (a,b) => _remainOf(b) - _remainOf(a) || String(b[0]).localeCompare(String(a[0])),
+  };
+  displayLots.sort(_lotSorters[_lotSortKey] || _lotSorters.recent);
 
   const lotBadgeClass = needsOrder ? 'warn' : 'suc';
   const lotBadgeText = needsOrder ? '발주필요' : '정상';
@@ -3745,7 +3757,12 @@ Screens['lot-detail'] = async (params = {}) => {
         </div>
       </div>
 
-      <div class="fs-13 fw-7 mb-8">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></div>
+      <div class="row between" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;gap:6px">
+        <span class="fs-13 fw-7">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></span>
+        <div class="row" style="gap:4px;flex-wrap:wrap">
+          ${[['recent','최근순'],['old','오래된순'],['exp','소비기한'],['remain','잔량순']].map(([k,lb]) => `<button class="btn btn-sm ${_lotSortKey===k?'btn-pri':'btn-outline'}" style="padding:3px 9px;font-size:11px;min-height:auto" onclick="setLotSort('${k}')">${lb}</button>`).join('')}
+        </div>
+      </div>
       ${displayLots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : displayLots.map(l => {
         const status = isFG ? (l[9] || '냉동보관중') : (l[9] || '미사용');
         const lotIndivs = indivs.filter(iv => iv[1] === l[0]);
@@ -3831,6 +3848,12 @@ Screens['lot-detail'] = async (params = {}) => {
     </div>
   `;
 };
+
+// LOT 상세 정렬 변경 — 캐시 유지하며 재렌더(서버 재fetch 없이 즉시 반영)
+function setLotSort(k) {
+  State._lotSortKey = k;
+  Screens['lot-detail']({ ...(State._lotDetailParams || {}), _keepCache: true });
+}
 
 // ── LOT 개별 항목 토글 표시 ──
 async function showLotIndividuals(lotId, itemName, type) {
