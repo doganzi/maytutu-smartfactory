@@ -4634,21 +4634,20 @@ async function onQRScanSuccess(decodedText) {
 // ─── MORE MENU ───
 Screens.more = () => {
   renderHeader('더보기');
+  // 정렬: 일별 품질/HACCP → 생산 → 계획/절차 → 마스터 → 관리 → 설정 (사용빈도순, 2026-06-19)
+  // 제거: 데이터 정합성 검증·CCP 미입력 보완·DB 직접 조회·편집 (메뉴 항목만 — 화면 코드는 보존, 재추가 가능)
   const items = [
-    { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
-    { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
-    { icon: '🔍', label: '데이터 정합성 검증', desc: 'LOT·잔량·상태·고아 데이터 진단 (관리자)', target: 'data-audit', adminOnly: true },
-    { icon: '📝', label: 'CCP 미입력 보완', desc: '금속검출 빈칸(작업종료·2h) 전수조사·실측 입력 (관리자)', target: 'ccp-fill', adminOnly: true },
-    { icon: '🗄️', label: 'DB 직접 조회·편집', desc: '모든 시트 탭 row 조회 / 셀 편집 / JSON 복사 (관리자)', target: 'db-browser', adminOnly: true },
-    { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '🌡️', label: '동결온도 모니터링', desc: '냉장/냉동 실시간 온도 로그 · HACCP 기록 PDF', target: 'temp-log' },
-    { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
-    { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
-    { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
-    { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
     { icon: '📄', label: '작업지시서 PDF', desc: '저장된 HACCP 생산기록 PDF 모음', target: 'wo-pdfs' },
+    { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
+    { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
+    { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
+    { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
+    { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
+    { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },
+    { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
     { icon: '⚙️', label: '설정', desc: '계정, 앱 설정, 로그아웃', target: 'settings' },
   ];
