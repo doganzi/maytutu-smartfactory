@@ -139,7 +139,7 @@ a { text-decoration:none; color:inherit; }
 .info-box.warn { background:#fff3e0; }
 .info-box.teal { background:#e0f2f1; }
 .info-box.neutral { background:var(--bg); }
-.photo-upload { margin-top:10px; padding:12px; border:1px dashed var(--gray-l); border-radius:8px; background:var(--bg); text-align:center; cursor:pointer; }
+.photo-upload { display:block; margin-top:10px; padding:12px; border:1px dashed var(--gray-l); border-radius:8px; background:var(--bg); text-align:center; cursor:pointer; }
 .photo-upload.has-photo { border-color:var(--suc); background:#e8f5e9; }
 .photo-upload input[type=file] { display:none; }
 .photo-upload .photo-label { font-size:12px; font-weight:600; color:var(--gray-d); }
@@ -8400,8 +8400,8 @@ function renderStepContent(step, stepType) {
     html += `
       <div class="fs-14 fw-7" style="color:#111;margin-bottom:6px;margin-top:20px">Step ${inputStepNum++}. 저울 계량값 사진 첨부 <span class="c-err">*필수</span></div>
       <div class="row mb-8" style="gap:8px">
-        <button class="btn btn-sm btn-outline btn-pri flex-1" onclick="document.getElementById('photo-camera-${stepNo}').click()">📷 카메라 촬영</button>
-        <button class="btn btn-sm btn-outline btn-gray flex-1" onclick="document.getElementById('photo-gallery-${stepNo}').click()">🖼️ 갤러리 선택</button>
+        <label class="btn btn-sm btn-outline btn-pri flex-1" for="photo-camera-${stepNo}" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer">📷 카메라 촬영</label>
+        <label class="btn btn-sm btn-outline btn-gray flex-1" for="photo-gallery-${stepNo}" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer">🖼️ 갤러리 선택</label>
       </div>
       <input type="file" accept="image/*" capture="environment" id="photo-camera-${stepNo}" style="display:none"
              onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
@@ -8457,12 +8457,12 @@ function renderStepContent(step, stepType) {
     }
 
     html += `
-      <div class="photo-upload mt-8" onclick="this.querySelector('input').click()">
+      <label class="photo-upload mt-8">
         <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
         <div class="photo-label">📷 믹싱 후 상태 사진 <span class="c-err">*필수</span></div>
         <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
-      </div>
+      </label>
     `;
   }
 
@@ -8500,11 +8500,11 @@ function renderStepContent(step, stepType) {
               <input type="number" id="sample-wt-${stepNo}-${n}" placeholder="kg" step="0.01" style="padding:6px 8px;border-radius:4px;border:1px solid var(--gray-l);font-size:12px;width:100%" oninput="validateStepInputs(${stepNo})">
             </div>
           </div>
-          <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
+          <label class="photo-upload" style="margin-top:4px">
             <input type="file" accept="image/*" onchange="previewStepPhoto(this, '${stepNo}-s${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 샘플 #${n} 사진 *필수</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-s${n}"></div>
-          </div>
+          </label>
         </div>
       `;
     }
@@ -8528,11 +8528,11 @@ function renderStepContent(step, stepType) {
       html += `
         <div class="card" style="padding:10px;border-left:3px solid #7c3aed">
           <div class="fs-13 fw-6 mb-8">샘플 #${n}</div>
-          <div class="photo-upload" onclick="this.querySelector('input').click()" style="margin-top:4px">
+          <label class="photo-upload" style="margin-top:4px">
             <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 저울 위 제품 사진 *필수</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-seal${n}"></div>
-          </div>
+          </label>
           <div class="input-group mt-8">
             <label style="font-size:12px">무게 (g) <span class="c-err">*필수</span></label>
             <div class="input-suffix">
@@ -8580,11 +8580,11 @@ function renderStepContent(step, stepType) {
       <div class="info-box" style="margin-top:8px"><div class="fs-13 fw-6">판정종합: <span id="ccp-verdict-${stepNo}" class="fw-8"></span></div></div>
       <div class="card bl-teal" style="padding:10px;margin-top:8px">
         <div class="fs-12 fw-6 mb-8">검출기 화면 사진 (선택)</div>
-        <div class="photo-upload" onclick="this.querySelector('input').click()">
+        <label class="photo-upload">
           <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, '${stepNo}-ccp7');validateStepInputs(${stepNo})">
           <div class="photo-label">📷 검출기 기계 화면 사진</div>
           <div class="photo-preview" id="photo-preview-${stepNo}-ccp7"></div>
-        </div>
+        </label>
       </div>
     `;
   }
