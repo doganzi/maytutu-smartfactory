@@ -8407,6 +8407,7 @@ function renderStepContent(step, stepType) {
              onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
       <input type="file" accept="image/*" multiple id="photo-gallery-${stepNo}" style="display:none"
              onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
+      <div class="fs-11 c-txt-l" style="margin-top:2px">💡 붙여넣기(Ctrl+V)·드래그도 가능 (갤러리 선택 후 Ctrl+V)</div>
       <div class="photo-preview" id="photo-preview-${stepNo}" style="min-height:20px"></div>
     `;
 
@@ -8460,7 +8461,7 @@ function renderStepContent(step, stepType) {
       <label class="photo-upload mt-8">
         <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, ${stepNo});validateStepInputs(${stepNo})">
         <div class="photo-label">📷 믹싱 후 상태 사진 <span class="c-err">*필수</span></div>
-        <div class="photo-hint">카메라 촬영 또는 갤러리에서 선택</div>
+        <div class="photo-hint">카메라 촬영 · 갤러리 선택 · 붙여넣기(Ctrl+V) · 드래그</div>
         <div class="photo-preview" id="photo-preview-${stepNo}"></div>
       </label>
     `;
@@ -8503,6 +8504,7 @@ function renderStepContent(step, stepType) {
           <label class="photo-upload" style="margin-top:4px">
             <input type="file" accept="image/*" onchange="previewStepPhoto(this, '${stepNo}-s${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 샘플 #${n} 사진 *필수</div>
+            <div class="fs-11 c-txt-l" style="text-align:center">붙여넣기·드래그 가능</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-s${n}"></div>
           </label>
         </div>
@@ -8531,6 +8533,7 @@ function renderStepContent(step, stepType) {
           <label class="photo-upload" style="margin-top:4px">
             <input type="file" accept="image/*" capture="environment" onchange="previewStepPhoto(this, '${stepNo}-seal${n}');validateStepInputs(${stepNo})">
             <div class="photo-label" style="font-size:11px">📷 저울 위 제품 사진 *필수</div>
+            <div class="fs-11 c-txt-l" style="text-align:center">붙여넣기·드래그 가능</div>
             <div class="photo-preview" id="photo-preview-${stepNo}-seal${n}"></div>
           </label>
           <div class="input-group mt-8">
@@ -8583,6 +8586,7 @@ function renderStepContent(step, stepType) {
         <label class="photo-upload">
           <input type="file" accept="image/*" multiple onchange="previewStepPhoto(this, '${stepNo}-ccp7');validateStepInputs(${stepNo})">
           <div class="photo-label">📷 검출기 기계 화면 사진</div>
+          <div class="photo-hint">카메라 · 갤러리 · 붙여넣기(Ctrl+V) · 드래그</div>
           <div class="photo-preview" id="photo-preview-${stepNo}-ccp7"></div>
         </label>
       </div>
@@ -8646,6 +8650,9 @@ function renderStepContent(step, stepType) {
 
   html += `</div>`; // Close card
   el.innerHTML = html;
+
+  // 사진 첨부 붙여넣기(Ctrl+V)·드래그앤드롭 배선 (6개 공정 사진입력 공통, 카메라 경로 무영향)
+  enablePhotoPasteAll(el);
 
   // ── 기존 공정기록에서 저장된 데이터 복원 (임시저장/완료 모두) ──
   restoreSavedStepData(stepNo, stepType, step);
@@ -9426,6 +9433,134 @@ function previewStepPhoto(input, stepNo) {
   });
   // Change upload appearance
   input.closest('.photo-upload')?.classList.add('has-photo');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 사진 첨부 붙여넣기(Ctrl+V)·드래그앤드롭 + HEIC 안전변환 (ADDITIVE·GUARDED)
+//   · 기존 file input 의 onchange 경로(previewStepPhoto→_pendingPhotos)를 그대로 재사용.
+//     붙여넣기/드롭한 파일을 input 에 DataTransfer 로 주입 후 native 'change' 를 발생시켜
+//     파일 선택과 100% 동일하게 동작. 카메라 촬영 경로는 손대지 않음.
+//   · HEIC(아이폰 기본 사진)·기타 비-JPEG/PNG 이미지는 canvas→JPEG 로 정규화하여
+//     프리뷰·업로드가 실패하지 않도록 함(카메라 촬영 File 은 변환 대상 아님).
+// ─────────────────────────────────────────────────────────────────────────────
+let _sfActivePhotoInput = null;   // 현재 붙여넣기 대상 file input
+
+// 이미지 File 을 프리뷰·업로드 안전한 형식으로 정규화. JPEG/PNG 는 그대로,
+// HEIC/HEIF·기타(webp 등)만 canvas 로 JPEG 변환. 실패 시 원본 File 반환(무해).
+async function _sfNormalizeImageFile(file) {
+  try {
+    if (!file || !file.type || file.type.indexOf('image/') !== 0) return file;
+    const t = file.type.toLowerCase();
+    // 브라우저가 직접 렌더 가능한 포맷은 변환 불필요
+    if (t === 'image/jpeg' || t === 'image/jpg' || t === 'image/png') return file;
+    // HEIC 는 대부분 브라우저에서 <img> 디코딩 불가 → createImageBitmap 시도 후 실패 시 원본 유지
+    let bmp = null;
+    try { bmp = await createImageBitmap(file); } catch (e) { bmp = null; }
+    if (!bmp) {
+      // 디코딩 불가(예: 데스크톱 브라우저의 HEIC) → 변환 포기, 원본 반환.
+      // Drive 업로드는 원본 mimeType 으로 진행되므로 저장 자체는 성공.
+      return file;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width; canvas.height = bmp.height;
+    canvas.getContext('2d').drawImage(bmp, 0, 0);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
+    if (!blob) return file;
+    const base = (file.name || 'pasted').replace(/\.[^.]+$/, '');
+    return new File([blob], base + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
+  } catch (e) {
+    console.warn('[사진첨부] 이미지 정규화 실패, 원본 사용:', e && e.message);
+    return file;
+  }
+}
+
+// 정규화한 File 목록을 input 에 주입하고 기존 onchange 경로를 그대로 발동.
+async function _sfFeedFilesToInput(input, rawFiles) {
+  try {
+    if (!input || !rawFiles || !rawFiles.length) return;
+    const dt = new DataTransfer();
+    // multiple 아니면 첫 파일만
+    const list = input.multiple ? Array.from(rawFiles) : [rawFiles[0]];
+    for (const f of list) {
+      const norm = await _sfNormalizeImageFile(f);
+      dt.items.add(norm);
+    }
+    input.files = dt.files;
+    // 파일 선택과 동일: input 의 인라인 onchange(previewStepPhoto + validateStepInputs) 실행
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  } catch (e) {
+    console.warn('[사진첨부] 파일 주입 실패:', e && e.message);
+  }
+}
+
+// 개별 file input 에 드래그앤드롭 + 활성타깃 등록 배선 (install-once 가드)
+function enablePhotoPaste(input) {
+  try {
+    if (!input || input.dataset.sfPasteWired === '1') return;
+    input.dataset.sfPasteWired = '1';
+
+    const markActive = () => { _sfActivePhotoInput = input; };
+    input.addEventListener('focus', markActive);
+    input.addEventListener('pointerdown', markActive);
+    // 파일 선택 후에도 이 input 이 붙여넣기 대상이 되도록
+    input.addEventListener('change', markActive);
+
+    // 드롭 영역 = 보이는 컨테이너(label.photo-upload) 또는 부모, 없으면 input 자신
+    const zone = input.closest('.photo-upload') || input.parentElement || input;
+    if (zone && zone.dataset.sfDropWired !== '1') {
+      zone.dataset.sfDropWired = '1';
+      const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+      zone.addEventListener('dragenter', stop);
+      zone.addEventListener('dragover', (e) => { stop(e); _sfActivePhotoInput = input; });
+      zone.addEventListener('drop', (e) => {
+        stop(e);
+        try {
+          const files = e.dataTransfer && e.dataTransfer.files
+            ? Array.from(e.dataTransfer.files).filter(f => f.type && f.type.indexOf('image/') === 0)
+            : [];
+          if (files.length) { _sfActivePhotoInput = input; _sfFeedFilesToInput(input, files); }
+        } catch (err) { console.warn('[사진첨부] 드롭 처리 실패:', err && err.message); }
+      });
+    }
+  } catch (e) {
+    console.warn('[사진첨부] enablePhotoPaste 실패(무시):', e && e.message);
+  }
+}
+
+// 컨테이너 내 모든 이미지 file input 을 일괄 배선 + 전역 paste 리스너 1회 설치
+function enablePhotoPasteAll(root) {
+  try {
+    const scope = root || document;
+    const inputs = scope.querySelectorAll('input[type="file"][accept*="image"]');
+    inputs.forEach(enablePhotoPaste);
+
+    // 전역 paste 리스너 (install-once)
+    if (!window._sfPasteInstalled) {
+      window._sfPasteInstalled = true;
+      document.addEventListener('paste', (e) => {
+        try {
+          const target = _sfActivePhotoInput;
+          if (!target || !document.body.contains(target)) return;
+          const items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : [];
+          const files = [];
+          for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+              const f = it.getAsFile();
+              if (f) files.push(f);
+            }
+          }
+          if (files.length) {
+            e.preventDefault();
+            _sfFeedFilesToInput(target, files);
+          }
+        } catch (err) { console.warn('[사진첨부] paste 처리 실패:', err && err.message); }
+      });
+    }
+  } catch (e) {
+    console.warn('[사진첨부] enablePhotoPasteAll 실패(무시):', e && e.message);
+  }
 }
 
 async function previewQRLabels(stepNo) {
