@@ -7371,9 +7371,9 @@ Screens['items-fg'] = async () => {
 
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회${isAdmin ? ' · 관리자: 우측 ✏️ 로 스펙 수정' : ''}</div>
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회${isAdmin ? ' · 관리자: 하단 + 로 추가 · 우측 ✏️ 로 수정' : ''}</div>
       ${items.length === 0 ?
-        `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">등록된 완제품 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
+        `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">등록된 완제품 없음</div><div class="es-desc">${isAdmin ? '하단 + 버튼으로 신규 등록' : 'Google Sheets에서 직접 등록하세요'}</div></div>` :
         items.map(item => {
           const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || 'kg';
           const packUnit = item[4] || '', shelfLife = item[5] || '', storage = item[6] || '';
@@ -7400,28 +7400,65 @@ Screens['items-fg'] = async () => {
         }).join('')
       }
       <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
-        <div class="fs-12 c-txt-l">품목 추가는 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 · 스펙 수정은 위 ✏️ 버튼${isAdmin ? '' : ' (관리자)'}</div>
+        <div class="fs-12 c-txt-l">${isAdmin ? '완제품 추가는 하단 <b>+</b> 버튼 · 스펙 수정은 각 카드 <b>✏️</b>' : `추가·수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span> 또는 관리자`}</div>
       </div>
+      ${isAdmin ? `<div class="fab" onclick="openFgSpecEditor()">+</div>` : ''}
     </div>
   `;
 };
 
-/* 완제품 스펙 편집 모달 (관리자 전용) — 규격·봉단위·박스당봉수·유통기한·보관 수정.
+/* 다음 완제품 코드 추천 — 기존 FG### 중 최대 번호 +1 (3자리 zero-pad).
+   비활성 포함 전체 목록을 넘겨 충돌 방지. */
+function nextFgCode(allItems) {
+  let max = 0;
+  (allItems || []).forEach(it => {
+    const m = /^FG0*(\d+)$/i.exec(String(it[0] || '').trim());
+    if (m) max = Math.max(max, parseInt(m[1]));
+  });
+  return 'FG' + String(max + 1).padStart(3, '0');
+}
+
+/* 완제품 등록/스펙 편집 모달 (관리자 전용).
+   code 미지정 → 신규 등록(품목코드·제품명 입력), 지정 → 기존 스펙 수정.
    박스당 봉수는 재고 화면 가용주차 산정에 반영. 유통기한은 참고 표기용
    (실제 소비기한은 생산일+6개월 자동 산정). */
-function openFgSpecEditor(code) {
-  if (State.user?.role !== 'admin') { toast('관리자만 스펙을 수정할 수 있습니다', 'err'); return; }
-  const items = window._fgItemsCache || [];
-  const item = items.find(x => x[0] === code);
-  if (!item) { toast('품목을 찾을 수 없습니다', 'err'); return; }
+async function openFgSpecEditor(code) {
+  if (State.user?.role !== 'admin') { toast('관리자만 완제품을 관리할 수 있습니다', 'err'); return; }
+  const isNew = !code;
   const esc = s => String(s || '').replace(/"/g, '&quot;');
+  let item = ['', '', '', 'kg', '', '', '', '', ''];
+  let suggestedCode = '';
+  if (isNew) {
+    // 코드 자동추천 + 유일성 판정을 위해 비활성 포함 전체 조회
+    showLoading();
+    let allItems = [];
+    try { allItems = await SheetsAPI.getAll('완제품품목').catch(() => []); } catch(e) {}
+    hideLoading();
+    suggestedCode = nextFgCode(allItems);
+  } else {
+    item = (window._fgItemsCache || []).find(x => x[0] === code);
+    if (!item) { toast('품목을 찾을 수 없습니다', 'err'); return; }
+  }
   const packsPerBox = parseInt(item[8]) || 0;
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
   overlay.innerHTML = `
     <div class="dialog" style="max-width:380px">
-      <div class="fs-16 fw-7 mb-8">🎁 완제품 스펙 수정</div>
-      <div class="fs-12 c-txt-l mb-8">${item[1] || ''} <b>${item[0]}</b></div>
+      <div class="fs-16 fw-7 mb-8">🎁 ${isNew ? '신규 완제품 등록' : '완제품 스펙 수정'}</div>
+      <div class="grid-2" style="gap:8px;margin-bottom:10px">
+        <div class="input-group">
+          <label>품목코드 ${isNew ? '*' : ''}</label>
+          <input type="text" id="fg-code" value="${isNew ? esc(suggestedCode) : esc(item[0])}" ${isNew ? 'placeholder="예: FG003"' : 'readonly style="background:var(--bg)"'} style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+        <div class="input-group">
+          <label>단위</label>
+          <input type="text" id="fg-unit" value="${esc(item[3]) || 'kg'}" placeholder="kg" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+      </div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label>제품명 *</label>
+        <input type="text" id="fg-name" value="${esc(item[1])}" placeholder="예: 앙호두" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
       <div class="input-group" style="margin-bottom:10px">
         <label>규격</label>
         <input type="text" id="fg-spec" value="${esc(item[2])}" placeholder="예: 호두과자 (냉동생지)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
@@ -7453,7 +7490,7 @@ function openFgSpecEditor(code) {
       <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 유통기한은 참고 표기용 — 실제 소비기한은 생산일+6개월 자동 산정</div>
       <div class="d-actions">
         <button class="btn btn-sm btn-outline btn-gray" id="fg-cancel">취소</button>
-        <button class="btn btn-sm btn-pri" id="fg-save">저장</button>
+        <button class="btn btn-sm btn-pri" id="fg-save">${isNew ? '등록' : '저장'}</button>
       </div>
     </div>
   `;
@@ -7472,29 +7509,50 @@ function openFgSpecEditor(code) {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
   $id('fg-packunit')?.addEventListener('input', updatePreview);
   $id('fg-packsperbox')?.addEventListener('input', updatePreview);
-  overlay.querySelector('#fg-save').onclick = () => saveFgSpec(code, close);
+  overlay.querySelector('#fg-save').onclick = () => saveFgSpec(isNew, code, close);
   updatePreview();
-  setTimeout(() => $id('fg-packsperbox')?.focus(), 50);
+  setTimeout(() => $id(isNew ? 'fg-name' : 'fg-packsperbox')?.focus(), 50);
 }
 
-async function saveFgSpec(code, closeFn) {
+async function saveFgSpec(isNew, origCode, closeFn) {
   if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
+  const name = $id('fg-name')?.value.trim() || '';
+  const unit = $id('fg-unit')?.value.trim() || 'kg';
   const spec = $id('fg-spec')?.value.trim() || '';
   const packUnit = $id('fg-packunit')?.value.trim() || '';
   const ppbRaw = $id('fg-packsperbox')?.value;
   const shelfLife = $id('fg-shelflife')?.value.trim() || '';
   const storage = $id('fg-storage')?.value.trim() || '';
   const ppb = parseInt(ppbRaw);
+  if (!name) { toast('제품명을 입력하세요', 'err'); return; }
   if (ppbRaw !== '' && (isNaN(ppb) || ppb < 1)) { toast('박스당 봉수는 1 이상의 정수', 'err'); return; }
+  const ppbStr = (ppbRaw === '' ? '' : String(ppb));
+
   if (!acquireLock('saveFgSpec')) return;
   try {
     showLoading();
-    // col: 2=spec, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox
-    await SheetsAPI.updateRow('완제품품목', 0, code, {
-      2: spec, 4: packUnit, 5: shelfLife, 6: storage, 8: (ppbRaw === '' ? '' : String(ppb))
-    });
-    SheetsAPI.invalidateCache('완제품품목');
-    toast(`${code} 스펙 저장 완료`, 'suc');
+    if (isNew) {
+      const code = ($id('fg-code')?.value.trim() || '').toUpperCase();
+      if (!code) { toast('품목코드를 입력하세요', 'err'); return; }
+      if (!/^[A-Z0-9-]+$/.test(code)) { toast('품목코드는 영문·숫자·하이픈만', 'err'); return; }
+      // 유일성: 비활성 포함 전체 재조회로 충돌 방지
+      SheetsAPI.invalidateCache('완제품품목');
+      const all = await SheetsAPI.getAll('완제품품목', false).catch(() => []);
+      if (all.some(it => String(it[0]).trim().toUpperCase() === code)) {
+        toast(`이미 존재하는 코드입니다: ${code}`, 'err', 5000); return;
+      }
+      // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox
+      await SheetsAPI.append('완제품품목', [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr]);
+      SheetsAPI.invalidateCache('완제품품목');
+      toast(`${code} ${name} 등록 완료`, 'suc');
+    } else {
+      // col: 1=name, 2=spec, 3=unit, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox
+      await SheetsAPI.updateRow('완제품품목', 0, origCode, {
+        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr
+      });
+      SheetsAPI.invalidateCache('완제품품목');
+      toast(`${origCode} 스펙 저장 완료`, 'suc');
+    }
     closeFn && closeFn();
     await Screens['items-fg']();
   } catch (e) {
