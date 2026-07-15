@@ -6507,6 +6507,7 @@ const DB_SHEETS = {
   '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],
   '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
   '기기': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
+  '재분류이력': ['id','lotId','srcCode','dstCode','bagCount','prodDate','expDate','by','at','note'],
 };
 
 Screens['db-browser'] = async (params = {}) => {
@@ -7417,6 +7418,7 @@ Screens['items-fg'] = async () => {
   $id('content').innerHTML = `
     <div style="padding:16px">
       <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회${isAdmin ? ' · 관리자: 하단 + 로 추가 · 우측 ✏️ 로 수정' : ''}</div>
+      ${isAdmin && items.length >= 2 ? `<button class="btn btn-outline btn-pri btn-full mb-8" onclick="openFgReclassifyModal()">🔀 완제품 코드 재분류 (5kg 4팩→3팩 등)</button>` : ''}
       ${items.length === 0 ?
         `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">등록된 완제품 없음</div><div class="es-desc">${isAdmin ? '하단 + 버튼으로 신규 등록' : 'Google Sheets에서 직접 등록하세요'}</div></div>` :
         items.map(item => {
@@ -7464,6 +7466,221 @@ Screens['items-fg'] = async () => {
     </div>
   `;
 };
+
+// ─── 완제품 코드 재분류 (관리자 전용 · 인플레이스 코드전환) ───
+/* 5kg 4팩→3팩 등 완제품 포장 SKU 전환 시, 기존 재고 일부를 다른 완제품 코드로
+   장부상 재배정. 봉 QR·LOT ID·개별ID는 그대로 두고 완제품LOT/개별의 itemCode만
+   변경(인플레이스) → 작업자 물리 액션 0. 잔류는 LOT 경계로 스냅(봉 분할·재라벨 없음).
+   FEFO: 소비기한 임박분을 대상 코드로 이관, 신선분을 원코드 버퍼로 잔류.
+   이력은 재분류이력 시트에 append-only 기록(HACCP 추적 보존). */
+const RECLASS_HEADER = ['id','lotId','srcCode','dstCode','bagCount','prodDate','expDate','by','at','note'];
+const RECLASS_EXCLUDE = ['폐기','소진','출하완료','삭제','채번예약'];
+const RECLASS_ACTIVE = ['냉동보관중','출하가능'];
+
+// 재분류이력 시트 자가 준비 (없으면 생성, 헤더 없으면 헤더 적재)
+async function _ensureReclassifySheet() {
+  try {
+    const head = await SheetsAPI.getRange('재분류이력!A1:J1', false);
+    if (head && head.length > 0 && head[0] && head[0].length) return;
+    await SheetsAPI.append('재분류이력', RECLASS_HEADER);
+  } catch (e) {
+    try { await SheetsAPI.createSheet('재분류이력', RECLASS_HEADER); }
+    catch (e2) { console.warn('[재분류] 이력 시트 준비 실패:', e2.message); }
+  }
+}
+
+// 원코드 활성 LOT + 활성 봉수 집계
+function _reclassSrcLots(srcCode) {
+  const { lots = [], indivs = [] } = window._fgReclassData || {};
+  return lots
+    .filter(l => l[1] === srcCode && !RECLASS_EXCLUDE.includes(l[9]))
+    .map(l => ({
+      lotId: l[0], prod: l[5] || '', exp: l[6] || '', status: l[9] || '',
+      bags: indivs.filter(iv => iv[1] === l[0] && RECLASS_ACTIVE.includes(iv[3])).length,
+    }))
+    .filter(l => l.bags > 0);
+}
+
+// 잔류/이관 계획 — 신선분(소비기한 늦은 순) 잔류, 임박분 이관. LOT 경계 스냅.
+function _reclassPlan(srcCode, retentionBoxes) {
+  const ppb = (window._fgReclassData?.ppbMap || {})[srcCode] || 4;
+  const target = Math.max(0, Math.round(retentionBoxes)) * ppb;   // 잔류 목표 봉수
+  const src = _reclassSrcLots(srcCode).sort((a, b) => (b.exp || '').localeCompare(a.exp || '')); // 소비기한 늦은(신선) 순
+  const retain = [], move = [];
+  let acc = 0;
+  for (const l of src) {
+    if (acc < target) { retain.push(l); acc += l.bags; }
+    else { move.push(l); }
+  }
+  const sum = arr => arr.reduce((s, l) => s + l.bags, 0);
+  const range = arr => {
+    const exps = arr.map(l => (l.exp || '').substring(0, 10)).filter(Boolean).sort();
+    return exps.length ? (exps[0] === exps[exps.length - 1] ? exps[0] : `${exps[0]} ~ ${exps[exps.length - 1]}`) : '-';
+  };
+  return {
+    ppb, target,
+    total: sum(src), totalLots: src.length,
+    retain, retainActual: sum(retain), retainRange: range(retain),
+    move, moveBags: sum(move), moveRange: range(move),
+  };
+}
+
+// 재분류 모달 열기 (관리자 전용)
+async function openFgReclassifyModal() {
+  if (State.user?.role !== 'admin') { toast('관리자만 완제품 코드 재분류를 할 수 있습니다', 'err'); return; }
+  showLoading();
+  let items = [], lots = [], indivs = [];
+  try {
+    [items, lots, indivs] = await Promise.all([
+      SheetsAPI.getAll('완제품품목').catch(() => []),
+      SheetsAPI.getAll('완제품LOT').catch(() => []),
+      SheetsAPI.getAll('완제품개별').catch(() => []),
+    ]);
+  } catch (e) {}
+  hideLoading();
+  const active = items.filter(i => i[0] && i[7] !== '비활성');
+  if (active.length < 2) { toast('완제품 코드가 2개 이상이어야 재분류할 수 있습니다. 먼저 신규(3팩) 코드를 등록하세요.', 'warn', 5000); return; }
+  const ppbMap = {}; active.forEach(it => { const n = parseInt(it[8]); if (n > 0) ppbMap[it[0]] = n; });
+  window._fgReclassData = { lots, indivs, ppbMap };
+  window._fgReclassPlan = null;
+  // 활성 봉수 많은 코드를 원코드 기본값으로
+  const bagsByCode = {};
+  lots.filter(l => !RECLASS_EXCLUDE.includes(l[9])).forEach(l => {
+    const b = indivs.filter(iv => iv[1] === l[0] && RECLASS_ACTIVE.includes(iv[3])).length;
+    bagsByCode[l[1]] = (bagsByCode[l[1]] || 0) + b;
+  });
+  const codes = active.map(it => it[0]);
+  const srcDefault = [...codes].sort((a, b) => (bagsByCode[b] || 0) - (bagsByCode[a] || 0))[0];
+  const dstDefault = codes.filter(c => c !== srcDefault)
+    .sort((a, b) => ((ppbMap[a] === 3 ? 0 : 1) - (ppbMap[b] === 3 ? 0 : 1)))[0] || codes.find(c => c !== srcDefault);
+  const opt = sel => active.map(it =>
+    `<option value="${it[0]}"${it[0] === sel ? ' selected' : ''}>${it[0]} · ${it[1] || ''} (박스당 ${ppbMap[it[0]] || 4}봉)</option>`
+  ).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.id = 'fg-reclass-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:440px">
+      <div class="fs-16 fw-7 mb-8">🔀 완제품 코드 재분류</div>
+      <div class="fs-11 c-txt-l mb-8">봉 QR·LOT는 그대로, 장부상 코드만 이동합니다(인플레이스). 신선분을 원코드 버퍼로 남기고 소비기한 임박분을 대상 코드로 이관합니다. 잔류는 LOT 경계로 반올림됩니다.</div>
+      <div class="input-group mb-8">
+        <label>원 코드 (재고를 빼낼 쪽 · 예: 4팩)</label>
+        <select id="rcl-src" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">${opt(srcDefault)}</select>
+      </div>
+      <div class="input-group mb-8">
+        <label>대상 코드 (재고를 옮길 쪽 · 예: 3팩)</label>
+        <select id="rcl-dst" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">${opt(dstDefault)}</select>
+      </div>
+      <div class="input-group mb-8">
+        <label>원 코드에 남길 재고 (박스)</label>
+        <input type="number" id="rcl-keep" value="50" min="0" step="1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        <div class="fs-11 c-txt-l mt-4">LOT 경계로 반올림 → 실제 잔류는 미리보기에서 확인</div>
+      </div>
+      <button class="btn btn-outline btn-pri btn-full" onclick="_fgReclassPreview()">🔎 미리보기</button>
+      <div id="rcl-preview" class="mt-8"></div>
+      <div class="row" style="gap:8px;margin-top:12px">
+        <button class="btn btn-gray btn-full" onclick="document.getElementById('fg-reclass-overlay').remove()">취소</button>
+        <button class="btn btn-suc btn-full" id="rcl-exec" disabled onclick="_fgReclassConfirm()">재분류 실행</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// 미리보기 계산 + 렌더 + 실행버튼 활성화
+function _fgReclassPreview() {
+  const src = $id('rcl-src')?.value, dst = $id('rcl-dst')?.value;
+  const keep = parseInt($id('rcl-keep')?.value) || 0;
+  const box = $id('rcl-preview'), execBtn = $id('rcl-exec');
+  if (execBtn) execBtn.disabled = true;
+  window._fgReclassPlan = null;
+  if (!box) return;
+  if (!src || !dst) { box.innerHTML = '<div class="c-err fs-12">코드를 선택하세요</div>'; return; }
+  if (src === dst) { box.innerHTML = '<div class="c-err fs-12">원 코드와 대상 코드가 같습니다</div>'; return; }
+  const p = _reclassPlan(src, keep);
+  if (p.total === 0) { box.innerHTML = `<div class="card bl-warn"><div class="c-warn fs-12">원 코드(${src})에 활성 재고가 없습니다</div></div>`; return; }
+  if (p.move.length === 0) {
+    box.innerHTML = `<div class="card bl-warn"><div class="c-warn fs-12">총 재고 ${p.total}봉(≈${(p.total / p.ppb).toFixed(1)}박스)이 잔류 기준 이하 → 이관할 재고가 없습니다</div></div>`;
+    return;
+  }
+  const dstPpb = (window._fgReclassData?.ppbMap || {})[dst] || 4;
+  window._fgReclassPlan = { src, dst, moveLotIds: p.move.map(l => l.lotId) };
+  box.innerHTML = `
+    <div class="card bl-suc" style="padding:10px">
+      <div class="fs-13 fw-7 mb-4">📋 재분류 계획</div>
+      <div class="fs-12" style="line-height:1.7">
+        <div>• <b>${src}</b> 잔류: <b>${p.retain.length} LOT · ${p.retainActual}봉 ≈ ${(p.retainActual / p.ppb).toFixed(1)}박스</b> <span class="c-txt-l">(소비기한 ${p.retainRange})</span></div>
+        <div>• <b>${dst}</b> 이관: <b class="c-pri">${p.move.length} LOT · ${p.moveBags}봉 ≈ ${(p.moveBags / dstPpb).toFixed(1)}박스</b> <span class="c-txt-l">(소비기한 ${p.moveRange})</span></div>
+      </div>
+      <div class="fs-11 c-txt-l mt-4">이관 LOT: ${p.move.map(l => l.lotId).join(', ')}</div>
+      <div class="fs-11 c-txt-l mt-4">※ 소비기한 임박분이 ${dst}로 이관됩니다(FEFO). 봉 라벨·LOT ID 변경 없음.</div>
+    </div>`;
+  if (execBtn) execBtn.disabled = false;
+}
+
+// 실행 확인
+function _fgReclassConfirm() {
+  const plan = window._fgReclassPlan;
+  if (!plan) { toast('먼저 미리보기를 실행하세요', 'warn'); return; }
+  confirm('완제품 코드 재분류',
+    `${plan.src} → ${plan.dst}\n이관 LOT ${plan.moveLotIds.length}개를 대상 코드로 재배정합니다.\n(봉 라벨·LOT ID 변경 없음 · 인플레이스)`,
+    () => executeFgReclassify(plan.src, plan.dst, plan.moveLotIds));
+}
+
+// 실행 — 완제품LOT.itemCode(B) + 완제품개별.itemCode(C) 인플레이스 변경 + 이력 append
+async function executeFgReclassify(srcCode, dstCode, moveLotIds) {
+  if (!acquireLock('fgReclassify')) return;
+  try {
+    showLoading();
+    await _ensureReclassifySheet();
+    SheetsAPI.invalidateCache('완제품LOT');
+    SheetsAPI.invalidateCache('완제품개별');
+    const lots = await SheetsAPI.getAll('완제품LOT', false);
+    const indivs = await SheetsAPI.getAll('완제품개별', false);
+    const lotUpdates = [], indivUpdates = [], histRows = [];
+    const at = formatDateTime(), by = State.user?.email || '';
+    let bagsTotal = 0;
+    for (const lotId of moveLotIds) {
+      const li = lots.findIndex(l => l[0] === lotId);
+      if (li < 0) continue;
+      const l = lots[li];
+      if (l[1] !== srcCode || RECLASS_EXCLUDE.includes(l[9])) continue;   // 상태·코드 변동 방어 (동시성)
+      lotUpdates.push({ range: `완제품LOT!B${li + 2}`, values: [[dstCode]] });   // getAll은 헤더 제외 → 시트행 = idx+2
+      let bags = 0;
+      indivs.forEach((iv, idx) => {
+        if (iv[1] === lotId && RECLASS_ACTIVE.includes(iv[3]) && iv[2] === srcCode) {
+          indivUpdates.push({ range: `완제품개별!C${idx + 2}`, values: [[dstCode]] });
+          bags++;
+        }
+      });
+      histRows.push(['', lotId, srcCode, dstCode, String(bags), l[5] || '', l[6] || '', by, at, '인플레이스 코드전환']);
+      bagsTotal += bags;
+    }
+    if (lotUpdates.length === 0) { toast('이관 대상 LOT이 없습니다 (상태가 바뀌었을 수 있음)', 'warn', 4000); return; }
+    const all = [...lotUpdates, ...indivUpdates];
+    for (let i = 0; i < all.length; i += 200) await SheetsAPI.batchUpdate(all.slice(i, i + 200));
+    // 이력 ID 연번 채번 후 일괄 append (일괄 채번이라 시트 재조회 없이 오프셋 부여)
+    try {
+      const baseId = await generateSeqId('RCL', '재분류이력');
+      const m = /^(.*-)(\d+)$/.exec(baseId);
+      const pre = m ? m[1] : `RCL-${formatDate().replace(/-/g, '')}-`;
+      const n = m ? parseInt(m[2]) : 1;
+      histRows.forEach((h, k) => h[0] = pre + String(n + k).padStart(3, '0'));
+      await SheetsAPI.append('재분류이력', histRows);
+    } catch (e) { console.warn('[재분류] 이력 기록 실패(재분류 자체는 완료됨):', e.message); }
+    SheetsAPI.invalidateCache('완제품LOT');
+    SheetsAPI.invalidateCache('완제품개별');
+    document.getElementById('fg-reclass-overlay')?.remove();
+    toast(`재분류 완료! ${srcCode} → ${dstCode} · ${lotUpdates.length} LOT · ${bagsTotal}봉`, 'suc', 5000);
+    try { Screens['items-fg']?.(); } catch (e) {}
+  } catch (e) {
+    console.error('[재분류] 실패:', e);
+    toast('재분류 실패: ' + (e.message || e), 'err', 5000);
+  } finally {
+    hideLoading();
+    releaseLock('fgReclassify');
+  }
+}
 
 /* 다음 완제품 코드 추천 — 기존 FG### 중 최대 번호 +1 (3자리 zero-pad).
    비활성 포함 전체 목록을 넘겨 충돌 방지. */
