@@ -7450,6 +7450,14 @@ async function openFgSpecEditor(code) {
     if (!item) { toast('품목을 찾을 수 없습니다', 'err'); return; }
   }
   const packsPerBox = parseInt(item[8]) || 0;
+  // 보관 조건 드롭다운 — 앱 표준 어휘(원재료 수령과 동일)로 통일. 기존 비표준 값은 보존.
+  const STORAGE_OPTS = ['냉동 -18℃ 이하', '냉장 0~5℃', '상온 15~25℃'];
+  const curStorage = item[6] || '';
+  const storageOptions = [
+    curStorage === '' ? '<option value="" selected>— 선택 —</option>' : '',
+    (curStorage && !STORAGE_OPTS.includes(curStorage)) ? `<option value="${esc(curStorage)}" selected>${esc(curStorage)}</option>` : '',
+    ...STORAGE_OPTS.map(o => `<option value="${o}"${o === curStorage ? ' selected' : ''}>${o}</option>`),
+  ].join('');
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
   overlay.innerHTML = `
@@ -7494,7 +7502,7 @@ async function openFgSpecEditor(code) {
         </div>
         <div class="input-group">
           <label>보관</label>
-          <input type="text" id="fg-storage" value="${esc(item[6])}" placeholder="예: 냉동 -18°C" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          <select id="fg-storage" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px;background:#fff">${storageOptions}</select>
         </div>
       </div>
       <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 유통기한은 참고 표기용 — 실제 소비기한은 생산일+6개월 자동 산정</div>
