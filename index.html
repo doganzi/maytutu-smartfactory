@@ -7388,10 +7388,6 @@ Screens['items-fg'] = async () => {
           } else {
             pkgLine = `${packsPerBox > 0 ? `? × ${packsPerBox}봉` : '—'}${isAdmin ? ' <span class="c-warn">· 봉당 중량 미설정</span>' : ''}`;
           }
-          // 유통기한: 숫자만이면 '일' 접미 (예: 270 → 270일)
-          const shelfTxt = shelfLife
-            ? (/^\d+$/.test(String(shelfLife).trim()) ? `${shelfLife}일` : shelfLife)
-            : '-';
           const totalStock = lots.filter(l => l[1] === code && l[7] !== '출하' && l[7] !== '폐기')
             .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
           return `
@@ -7405,7 +7401,7 @@ Screens['items-fg'] = async () => {
               </div>
               <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
-              <div class="fs-12 c-txt-l">유통기한: ${shelfTxt} · 보관: ${storage || '-'}</div>
+              <div class="fs-12 c-txt-l">소비기한: 생산일+6개월 · 보관: ${storage || '-'}</div>
             </div>`;
         }).join('')
       }
@@ -7430,8 +7426,8 @@ function nextFgCode(allItems) {
 
 /* 완제품 등록/스펙 편집 모달 (관리자 전용).
    code 미지정 → 신규 등록(품목코드·제품명 입력), 지정 → 기존 스펙 수정.
-   박스당 봉수는 재고 화면 가용주차 산정에 반영. 유통기한은 참고 표기용
-   (실제 소비기한은 생산일+6개월 자동 산정). */
+   박스당 봉수는 재고 화면 가용주차 산정에 반영. 소비기한은 생산일+6개월
+   자동 산정(전 제품 공통, index.html의 완제품 LOT 채번부) — 편집기는 읽기전용 표기. */
 async function openFgSpecEditor(code) {
   if (State.user?.role !== 'admin') { toast('관리자만 완제품을 관리할 수 있습니다', 'err'); return; }
   const isNew = !code;
@@ -7497,15 +7493,15 @@ async function openFgSpecEditor(code) {
       </div>
       <div class="grid-2" style="gap:8px;margin-bottom:10px">
         <div class="input-group">
-          <label>유통기한</label>
-          <input type="text" id="fg-shelflife" value="${esc(item[5])}" placeholder="예: 6개월" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          <label>소비기한</label>
+          <input type="text" id="fg-shelflife" value="6개월" readonly title="생산일+6개월 자동 산정" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px;background:var(--bg);color:var(--txt-l)">
         </div>
         <div class="input-group">
           <label>보관</label>
           <select id="fg-storage" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px;background:#fff">${storageOptions}</select>
         </div>
       </div>
-      <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 유통기한은 참고 표기용 — 실제 소비기한은 생산일+6개월 자동 산정</div>
+      <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 소비기한은 <b>생산일+6개월</b>로 자동 산정됩니다(전 제품 공통) — 개별 입력 불필요</div>
       <div class="d-actions">
         <button class="btn btn-sm btn-outline btn-gray" id="fg-cancel">취소</button>
         <button class="btn btn-sm btn-pri" id="fg-save">${isNew ? '등록' : '저장'}</button>
