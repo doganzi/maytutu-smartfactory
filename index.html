@@ -6500,7 +6500,7 @@ const DB_SHEETS = {
   'SOP공정단계': ['sopId','stepNo','stepName','stepType','rmCode','std','checks'],
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
   '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status'],
-  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox'],
+  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage'],
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
@@ -7352,6 +7352,51 @@ async function deactivateRmItem(code, name, lotCount) {
   });
 }
 
+// ─── 완제품 라벨 이미지 헬퍼 (Drive URL → 썸네일, 편집기 첨부/삭제) ───
+// Drive view URL 에서 fileId 추출 → 썸네일 endpoint. 미추출 시 원본 URL 반환.
+function sfDriveFileId(url) {
+  const m = String(url || '').match(/\/d\/([^/]+)/);
+  return m ? m[1] : null;
+}
+function sfDriveThumb(url, sz) {
+  const id = sfDriveFileId(url);
+  return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${sz || 128}` : (url || '');
+}
+// 썸네일 로드 실패 시 텍스트 링크로 대체 (인라인 따옴표 이스케이프 회피)
+function sfLabelBroken(img, url) {
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.textContent = '🏷️ 라벨 열기';
+  a.className = 'fs-11'; a.style.color = 'var(--pri)';
+  a.onclick = (e) => e.stopPropagation();
+  img.replaceWith(a);
+}
+// 편집기 라벨 첨부 상태 (모달 오픈 시 초기화). _fgLabelFile=신규 첨부 File, _fgLabelRemoved=기존 삭제
+window._fgLabelFile = null;
+window._fgLabelRemoved = false;
+// 라벨 파일 선택/붙여넣기/드롭 시 — HEIC 정규화 후 미리보기
+async function previewFgLabel(input) {
+  const f = input && input.files && input.files[0];
+  if (!f) return;
+  const norm = await _sfNormalizeImageFile(f);
+  window._fgLabelFile = norm;
+  window._fgLabelRemoved = false;
+  const box = $id('fg-label-preview');
+  if (box) {
+    box.innerHTML = `<img src="${URL.createObjectURL(norm)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--suc)">
+      <button type="button" class="btn btn-sm btn-outline btn-gray" style="padding:2px 8px;font-size:11px" onclick="removeFgLabel()">삭제</button>`;
+  }
+  input.closest('.photo-upload')?.classList.add('has-photo');
+}
+// 라벨 삭제 (신규 첨부 취소 또는 기존 이미지 제거 표시)
+function removeFgLabel() {
+  window._fgLabelFile = null;
+  window._fgLabelRemoved = true;
+  const box = $id('fg-label-preview');
+  if (box) box.innerHTML = '<span class="fs-11 c-txt-l">라벨 없음 (저장 시 제거됨)</span>';
+  document.querySelector('#fg-label-upload')?.classList.remove('has-photo');
+  const input = $id('fg-label-file'); if (input) input.value = '';
+}
+
 // ─── FINISHED GOODS ITEMS (완제품 품목) ───
 Screens['items-fg'] = async () => {
   renderHeader('완제품 품목', '완제품 마스터 데이터', { back: 'more' });
@@ -7378,6 +7423,7 @@ Screens['items-fg'] = async () => {
           const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || 'kg';
           const packUnit = item[4] || '', shelfLife = item[5] || '', storage = item[6] || '';
           const packsPerBox = parseInt(item[8]) || 0;
+          const labelImg = item[9] || '';   // col9 = 사용중인 라벨 이미지(Drive URL)
           // 포장 배선: 봉당 중량(kg, col4) × 박스당 봉수(col8) → 박스당 총 kg 파생
           const perBagKg = parseFloat(packUnit) || 0;
           let pkgLine;
@@ -7402,6 +7448,12 @@ Screens['items-fg'] = async () => {
               <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
               <div class="fs-12 c-txt-l">소비기한: 생산일+6개월 · 보관: ${storage || '-'}</div>
+              ${labelImg
+                ? `<div class="row" style="gap:8px;align-items:center;margin-top:6px">
+                     <span class="fs-11 c-txt-l">🏷️ 라벨</span>
+                     <img src="${sfDriveThumb(labelImg, 128)}" title="사용중인 라벨 (터치하여 원본 보기)" onclick="event.stopPropagation();window.open('${labelImg}','_blank')" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-l);cursor:pointer" onerror="sfLabelBroken(this,'${labelImg}')">
+                   </div>`
+                : (isAdmin ? `<div class="fs-11 c-txt-l" style="margin-top:6px">🏷️ 라벨 미등록 <span style="color:var(--pri)">· ✏️에서 첨부</span></div>` : '')}
             </div>`;
         }).join('')
       }
@@ -7449,6 +7501,7 @@ async function openFgSpecEditor(code) {
   // 보관 조건 드롭다운 — 앱 표준 어휘(원재료 수령과 동일)로 통일. 기존 비표준 값은 보존.
   const STORAGE_OPTS = ['냉동 -18℃ 이하', '냉장 0~5℃', '상온 15~25℃'];
   const curStorage = item[6] || '';
+  const curLabel = item[9] || '';   // 기존 라벨 이미지(Drive URL)
   const storageOptions = [
     curStorage === '' ? '<option value="" selected>— 선택 —</option>' : '',
     (curStorage && !STORAGE_OPTS.includes(curStorage)) ? `<option value="${esc(curStorage)}" selected>${esc(curStorage)}</option>` : '',
@@ -7502,6 +7555,17 @@ async function openFgSpecEditor(code) {
         </div>
       </div>
       <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 소비기한은 <b>생산일+6개월</b>로 자동 산정됩니다(전 제품 공통) — 개별 입력 불필요</div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>라벨 이미지 (사용중)</label>
+        <label class="photo-upload${curLabel ? ' has-photo' : ''}" id="fg-label-upload">
+          <input type="file" id="fg-label-file" accept="image/*" onchange="previewFgLabel(this)">
+          <div class="photo-label">📷 라벨 사진 첨부</div>
+          <div class="photo-hint">촬영·갤러리·붙여넣기(Ctrl+V)·드래그 · HEIC 자동변환</div>
+          <div class="photo-preview" id="fg-label-preview">${curLabel
+            ? `<img src="${sfDriveThumb(curLabel, 160)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--suc)"><button type="button" class="btn btn-sm btn-outline btn-gray" style="padding:2px 8px;font-size:11px" onclick="event.preventDefault();event.stopPropagation();removeFgLabel()">삭제</button>`
+            : ''}</div>
+        </label>
+      </div>
       <div class="d-actions">
         <button class="btn btn-sm btn-outline btn-gray" id="fg-cancel">취소</button>
         <button class="btn btn-sm btn-pri" id="fg-save">${isNew ? '등록' : '저장'}</button>
@@ -7509,6 +7573,8 @@ async function openFgSpecEditor(code) {
     </div>
   `;
   document.body.appendChild(overlay);
+  window._fgLabelFile = null; window._fgLabelRemoved = false;   // 라벨 첨부 상태 초기화
+  enablePhotoPasteAll(overlay);   // 라벨 file input 에 붙여넣기(Ctrl+V)·드래그 배선
   const close = () => overlay.remove();
   const updatePreview = () => {
     const perKg = parseFloat($id('fg-packunit')?.value) || 0;
@@ -7549,6 +7615,13 @@ async function saveFgSpec(isNew, origCode, closeFn) {
   if (!acquireLock('saveFgSpec')) return;
   try {
     showLoading();
+    // 라벨 이미지 기준값 — 신규 업로드는 각 분기의 검증 통과 후 수행(중복코드 실패 시 orphan 방지)
+    let labelUrl = '';
+    if (!isNew) {
+      const origItem = (window._fgItemsCache || []).find(x => x[0] === origCode);
+      labelUrl = origItem ? (origItem[9] || '') : '';
+    }
+    if (window._fgLabelRemoved) labelUrl = '';
     if (isNew) {
       const code = ($id('fg-code')?.value.trim() || '').toUpperCase();
       if (!code) { toast('품목코드를 입력하세요', 'err'); return; }
@@ -7559,14 +7632,16 @@ async function saveFgSpec(isNew, origCode, closeFn) {
       if (all.some(it => String(it[0]).trim().toUpperCase() === code)) {
         toast(`이미 존재하는 코드입니다: ${code}`, 'err', 5000); return;
       }
-      // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox
-      await SheetsAPI.append('완제품품목', [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr]);
+      if (window._fgLabelFile) labelUrl = await DriveAPI.uploadPhoto(window._fgLabelFile);
+      // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox,labelImage
+      await SheetsAPI.append('완제품품목', [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr, labelUrl]);
       SheetsAPI.invalidateCache('완제품품목');
       toast(`${code} ${name} 등록 완료`, 'suc');
     } else {
-      // col: 1=name, 2=spec, 3=unit, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox
+      if (window._fgLabelFile) labelUrl = await DriveAPI.uploadPhoto(window._fgLabelFile);
+      // col: 1=name, 2=spec, 3=unit, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox, 9=labelImage
       await SheetsAPI.updateRow('완제품품목', 0, origCode, {
-        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr
+        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr, 9: labelUrl
       });
       SheetsAPI.invalidateCache('완제품품목');
       toast(`${origCode} 스펙 저장 완료`, 'suc');
