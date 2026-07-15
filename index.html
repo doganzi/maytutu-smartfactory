@@ -2807,6 +2807,11 @@ async function renderInventoryContent(activeTab) {
     let fgIndivs = [];
     try { fgIndivs = await SheetsAPI.getAll('완제품개별').catch(() => []); } catch(e) {}
     const activeStatuses = ['냉동보관중','출하가능'];
+    // 완제품 스펙(박스당 봉수) 마스터 조회 — 가용주차 산정에 제품별 포장 규격 반영
+    let fgSpecRows = [];
+    try { fgSpecRows = await SheetsAPI.getAll('완제품품목').catch(() => []); } catch(e) {}
+    const fgPacksPerBoxMap = {};
+    fgSpecRows.forEach(it => { const n = parseInt(it[8]); if (n > 0) fgPacksPerBoxMap[it[0]] = n; });
 
     const fgLots = (State.finishedGoodsLots || []).filter(l => !['폐기','소진','출하완료','삭제','채번예약'].includes(l[9]));
     // Group by itemCode
@@ -2829,8 +2834,8 @@ async function renderInventoryContent(activeTab) {
         // 품목 헤더
         const freezingCount = g.lots.filter(l => (l[9]||'') === '냉동보관중').length;
         const readyCount = g.lots.filter(l => (l[9]||'') === '출하가능').length;
-        // 가용 주차 산정 — 1박스=4개, 주당 75박스 소비 기준
-        const PACKS_PER_BOX = 4;
+        // 가용 주차 산정 — 박스당 봉수 = 완제품품목 마스터값(미설정 시 4), 주당 75박스 소비 기준
+        const PACKS_PER_BOX = fgPacksPerBoxMap[code] || 4;
         const BOXES_PER_WEEK = 75;
         const boxes = g.totalActiveIndivs / PACKS_PER_BOX;
         const weeks = boxes / BOXES_PER_WEEK;
@@ -2841,7 +2846,7 @@ async function renderInventoryContent(activeTab) {
               <div>
                 <div class="fs-14 fw-7">${g.name} <span class="fs-11 c-txt-l">${code}</span></div>
                 <div class="fs-12 c-txt-l mt-4">총 ${g.lots.length} LOT · ${g.totalActiveIndivs}개 · 냉동 -18°C</div>
-                <div class="fs-12 mt-2">≈ ${boxes.toFixed(1)}박스 · 가용 <span class="${weekColor} fw-7">${weeks.toFixed(1)}주</span> <span class="fs-10 c-txt-l">(1박스 4개 · 주 ${BOXES_PER_WEEK}박스 기준)</span></div>
+                <div class="fs-12 mt-2">≈ ${boxes.toFixed(1)}박스 · 가용 <span class="${weekColor} fw-7">${weeks.toFixed(1)}주</span> <span class="fs-10 c-txt-l">(1박스 ${PACKS_PER_BOX}개 · 주 ${BOXES_PER_WEEK}박스 기준)</span></div>
               </div>
               <div style="text-align:right">
                 ${freezingCount > 0 ? `<span class="badge badge-warn" style="display:block;margin-bottom:2px">냉동중 ${freezingCount}</span>` : ''}
@@ -6495,7 +6500,7 @@ const DB_SHEETS = {
   'SOP공정단계': ['sopId','stepNo','stepName','stepType','rmCode','std','checks'],
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
   '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status'],
-  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status'],
+  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox'],
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
@@ -7361,33 +7366,144 @@ Screens['items-fg'] = async () => {
   } catch(e) {}
   hideLoading();
 
+  const isAdmin = State.user?.role === 'admin';
+  window._fgItemsCache = items;
+
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회</div>
+      <div class="fs-12 c-txt-l mb-8">총 ${items.length}개 완제품 · DB 연동 조회${isAdmin ? ' · 관리자: 우측 ✏️ 로 스펙 수정' : ''}</div>
       ${items.length === 0 ?
         `<div class="empty-state"><div class="es-icon">🎁</div><div class="es-title">등록된 완제품 없음</div><div class="es-desc">Google Sheets에서 직접 등록하세요</div></div>` :
         items.map(item => {
           const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || 'kg';
           const packUnit = item[4] || '', shelfLife = item[5] || '', storage = item[6] || '';
+          const packsPerBox = parseInt(item[8]) || 0;
+          // 포장 표기: 봉단위 × 박스당봉수 (총 kg/박스 파생)
+          const perBagKg = parseFloat(packUnit);
+          const boxLabel = packsPerBox > 0
+            ? `${packUnit || '-'} × ${packsPerBox}pack${(perBagKg > 0) ? ` (${(perBagKg * packsPerBox).toLocaleString()}kg/박스)` : ''}`
+            : `${packUnit || '-'}${isAdmin ? ' · 박스당 봉수 미설정' : ''}`;
           const totalStock = lots.filter(l => l[1] === code && l[7] !== '출하' && l[7] !== '폐기')
             .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
           return `
             <div class="card">
               <div class="row between mb-4">
-                <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
-                <span class="badge badge-pri">${totalStock > 0 ? totalStock + (unit||'') : '재고없음'}</span>
+                <div class="fs-14 fw-6" style="flex:1;min-width:0">${name} <span class="fs-11 c-txt-l">${code}</span></div>
+                <div class="row" style="gap:6px;align-items:center;flex-shrink:0">
+                  <span class="badge badge-pri">${totalStock > 0 ? totalStock + (unit||'') : '재고없음'}</span>
+                  ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
+                </div>
               </div>
-              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 포장: ${packUnit || '-'} · 단위: ${unit}</div>
+              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 포장: ${boxLabel} · 단위: ${unit}</div>
               <div class="fs-12 c-txt-l">유통기한: ${shelfLife || '-'} · 보관: ${storage || '-'}</div>
             </div>`;
         }).join('')
       }
       <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray)">
-        <div class="fs-12 c-txt-l">품목 추가/수정은 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 관리됩니다</div>
+        <div class="fs-12 c-txt-l">품목 추가는 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 · 스펙 수정은 위 ✏️ 버튼${isAdmin ? '' : ' (관리자)'}</div>
       </div>
     </div>
   `;
 };
+
+/* 완제품 스펙 편집 모달 (관리자 전용) — 규격·봉단위·박스당봉수·유통기한·보관 수정.
+   박스당 봉수는 재고 화면 가용주차 산정에 반영. 유통기한은 참고 표기용
+   (실제 소비기한은 생산일+6개월 자동 산정). */
+function openFgSpecEditor(code) {
+  if (State.user?.role !== 'admin') { toast('관리자만 스펙을 수정할 수 있습니다', 'err'); return; }
+  const items = window._fgItemsCache || [];
+  const item = items.find(x => x[0] === code);
+  if (!item) { toast('품목을 찾을 수 없습니다', 'err'); return; }
+  const esc = s => String(s || '').replace(/"/g, '&quot;');
+  const packsPerBox = parseInt(item[8]) || 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px">
+      <div class="fs-16 fw-7 mb-8">🎁 완제품 스펙 수정</div>
+      <div class="fs-12 c-txt-l mb-8">${item[1] || ''} <b>${item[0]}</b></div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label>규격</label>
+        <input type="text" id="fg-spec" value="${esc(item[2])}" placeholder="예: 호두과자 (냉동생지)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="grid-2" style="gap:8px;margin-bottom:10px">
+        <div class="input-group">
+          <label>봉 단위</label>
+          <input type="text" id="fg-packunit" value="${esc(item[4])}" placeholder="예: 5kg" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+        <div class="input-group">
+          <label>박스당 봉수</label>
+          <input type="number" id="fg-packsperbox" value="${packsPerBox || ''}" min="1" step="1" placeholder="예: 3" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+      </div>
+      <div class="card bl-info" style="background:#e3f2fd;padding:8px;margin-bottom:10px">
+        <div class="fs-11 c-info" id="fg-box-preview">포장 표기: —</div>
+        <div class="fs-11 c-txt-l">박스당 봉수는 재고 화면 <b>가용 주차 산정</b>에 반영됩니다 (미설정 시 4)</div>
+      </div>
+      <div class="grid-2" style="gap:8px;margin-bottom:10px">
+        <div class="input-group">
+          <label>유통기한</label>
+          <input type="text" id="fg-shelflife" value="${esc(item[5])}" placeholder="예: 6개월" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+        <div class="input-group">
+          <label>보관</label>
+          <input type="text" id="fg-storage" value="${esc(item[6])}" placeholder="예: 냉동 -18°C" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>
+      </div>
+      <div class="fs-11 c-txt-l" style="margin-bottom:12px">※ 유통기한은 참고 표기용 — 실제 소비기한은 생산일+6개월 자동 산정</div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="fg-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="fg-save">저장</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  const updatePreview = () => {
+    const pu = $id('fg-packunit')?.value.trim() || '-';
+    const ppb = parseInt($id('fg-packsperbox')?.value) || 0;
+    const perKg = parseFloat(pu);
+    const prev = ppb > 0
+      ? `포장 표기: ${pu} × ${ppb}pack${perKg > 0 ? ` (${(perKg * ppb).toLocaleString()}kg/박스)` : ''}`
+      : `포장 표기: ${pu} (박스당 봉수 미설정)`;
+    const el = $id('fg-box-preview'); if (el) el.textContent = prev;
+  };
+  overlay.querySelector('#fg-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  $id('fg-packunit')?.addEventListener('input', updatePreview);
+  $id('fg-packsperbox')?.addEventListener('input', updatePreview);
+  overlay.querySelector('#fg-save').onclick = () => saveFgSpec(code, close);
+  updatePreview();
+  setTimeout(() => $id('fg-packsperbox')?.focus(), 50);
+}
+
+async function saveFgSpec(code, closeFn) {
+  if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
+  const spec = $id('fg-spec')?.value.trim() || '';
+  const packUnit = $id('fg-packunit')?.value.trim() || '';
+  const ppbRaw = $id('fg-packsperbox')?.value;
+  const shelfLife = $id('fg-shelflife')?.value.trim() || '';
+  const storage = $id('fg-storage')?.value.trim() || '';
+  const ppb = parseInt(ppbRaw);
+  if (ppbRaw !== '' && (isNaN(ppb) || ppb < 1)) { toast('박스당 봉수는 1 이상의 정수', 'err'); return; }
+  if (!acquireLock('saveFgSpec')) return;
+  try {
+    showLoading();
+    // col: 2=spec, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox
+    await SheetsAPI.updateRow('완제품품목', 0, code, {
+      2: spec, 4: packUnit, 5: shelfLife, 6: storage, 8: (ppbRaw === '' ? '' : String(ppb))
+    });
+    SheetsAPI.invalidateCache('완제품품목');
+    toast(`${code} 스펙 저장 완료`, 'suc');
+    closeFn && closeFn();
+    await Screens['items-fg']();
+  } catch (e) {
+    toast('저장 실패: ' + e.message, 'err', 5000);
+  } finally {
+    hideLoading();
+    releaseLock('saveFgSpec');
+  }
+}
 
 // ─── CONSUMABLE ITEMS (소모품 품목) ───
 Screens['items-sp'] = async () => {
