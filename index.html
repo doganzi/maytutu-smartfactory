@@ -7378,11 +7378,20 @@ Screens['items-fg'] = async () => {
           const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || 'kg';
           const packUnit = item[4] || '', shelfLife = item[5] || '', storage = item[6] || '';
           const packsPerBox = parseInt(item[8]) || 0;
-          // 포장 표기: 봉단위 × 박스당봉수 (총 kg/박스 파생)
-          const perBagKg = parseFloat(packUnit);
-          const boxLabel = packsPerBox > 0
-            ? `${packUnit || '-'} × ${packsPerBox}pack${(perBagKg > 0) ? ` (${(perBagKg * packsPerBox).toLocaleString()}kg/박스)` : ''}`
-            : `${packUnit || '-'}${isAdmin ? ' · 박스당 봉수 미설정' : ''}`;
+          // 포장 배선: 봉당 중량(kg, col4) × 박스당 봉수(col8) → 박스당 총 kg 파생
+          const perBagKg = parseFloat(packUnit) || 0;
+          let pkgLine;
+          if (perBagKg > 0 && packsPerBox > 0) {
+            pkgLine = `${perBagKg.toLocaleString()}kg/봉 × ${packsPerBox}봉 = <b>${(perBagKg * packsPerBox).toLocaleString()}kg/박스</b>`;
+          } else if (perBagKg > 0) {
+            pkgLine = `${perBagKg.toLocaleString()}kg/봉${isAdmin ? ' <span class="c-warn">· 박스당 봉수 미설정</span>' : ''}`;
+          } else {
+            pkgLine = `${packsPerBox > 0 ? `? × ${packsPerBox}봉` : '—'}${isAdmin ? ' <span class="c-warn">· 봉당 중량 미설정</span>' : ''}`;
+          }
+          // 유통기한: 숫자만이면 '일' 접미 (예: 270 → 270일)
+          const shelfTxt = shelfLife
+            ? (/^\d+$/.test(String(shelfLife).trim()) ? `${shelfLife}일` : shelfLife)
+            : '-';
           const totalStock = lots.filter(l => l[1] === code && l[7] !== '출하' && l[7] !== '폐기')
             .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
           return `
@@ -7390,12 +7399,13 @@ Screens['items-fg'] = async () => {
               <div class="row between mb-4">
                 <div class="fs-14 fw-6" style="flex:1;min-width:0">${name} <span class="fs-11 c-txt-l">${code}</span></div>
                 <div class="row" style="gap:6px;align-items:center;flex-shrink:0">
-                  <span class="badge badge-pri">${totalStock > 0 ? totalStock + (unit||'') : '재고없음'}</span>
+                  <span class="badge badge-pri">${totalStock > 0 ? totalStock.toLocaleString() + (unit||'') : '재고없음'}</span>
                   ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
                 </div>
               </div>
-              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 포장: ${boxLabel} · 단위: ${unit}</div>
-              <div class="fs-12 c-txt-l">유통기한: ${shelfLife || '-'} · 보관: ${storage || '-'}</div>
+              <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
+              <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
+              <div class="fs-12 c-txt-l">유통기한: ${shelfTxt} · 보관: ${storage || '-'}</div>
             </div>`;
         }).join('')
       }
@@ -7465,8 +7475,8 @@ async function openFgSpecEditor(code) {
       </div>
       <div class="grid-2" style="gap:8px;margin-bottom:10px">
         <div class="input-group">
-          <label>봉 단위</label>
-          <input type="text" id="fg-packunit" value="${esc(item[4])}" placeholder="예: 5kg" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          <label>봉당 중량(kg)</label>
+          <input type="number" id="fg-packunit" value="${parseFloat(item[4]) || ''}" min="0" step="0.1" inputmode="decimal" placeholder="예: 5" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
         </div>
         <div class="input-group">
           <label>박스당 봉수</label>
@@ -7474,8 +7484,8 @@ async function openFgSpecEditor(code) {
         </div>
       </div>
       <div class="card bl-info" style="background:#e3f2fd;padding:8px;margin-bottom:10px">
-        <div class="fs-11 c-info" id="fg-box-preview">포장 표기: —</div>
-        <div class="fs-11 c-txt-l">박스당 봉수는 재고 화면 <b>가용 주차 산정</b>에 반영됩니다 (미설정 시 4)</div>
+        <div class="fs-11 c-info" id="fg-box-preview">포장: —</div>
+        <div class="fs-11 c-txt-l">봉당 중량 × 박스당 봉수 = <b>박스당 kg</b>. 박스당 봉수는 재고 <b>가용 주차 산정</b>에도 반영됩니다 (미설정 시 4)</div>
       </div>
       <div class="grid-2" style="gap:8px;margin-bottom:10px">
         <div class="input-group">
@@ -7497,12 +7507,13 @@ async function openFgSpecEditor(code) {
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   const updatePreview = () => {
-    const pu = $id('fg-packunit')?.value.trim() || '-';
+    const perKg = parseFloat($id('fg-packunit')?.value) || 0;
     const ppb = parseInt($id('fg-packsperbox')?.value) || 0;
-    const perKg = parseFloat(pu);
-    const prev = ppb > 0
-      ? `포장 표기: ${pu} × ${ppb}pack${perKg > 0 ? ` (${(perKg * ppb).toLocaleString()}kg/박스)` : ''}`
-      : `포장 표기: ${pu} (박스당 봉수 미설정)`;
+    let prev;
+    if (perKg > 0 && ppb > 0) prev = `포장: ${perKg.toLocaleString()}kg/봉 × ${ppb}봉 = ${(perKg * ppb).toLocaleString()}kg/박스`;
+    else if (perKg > 0) prev = `포장: ${perKg.toLocaleString()}kg/봉 · 박스당 봉수 미설정`;
+    else if (ppb > 0) prev = `포장: 봉당 중량 미설정 · ${ppb}봉/박스`;
+    else prev = '포장: —';
     const el = $id('fg-box-preview'); if (el) el.textContent = prev;
   };
   overlay.querySelector('#fg-cancel').onclick = close;
@@ -7519,12 +7530,15 @@ async function saveFgSpec(isNew, origCode, closeFn) {
   const name = $id('fg-name')?.value.trim() || '';
   const unit = $id('fg-unit')?.value.trim() || 'kg';
   const spec = $id('fg-spec')?.value.trim() || '';
-  const packUnit = $id('fg-packunit')?.value.trim() || '';
+  const bagRaw = ($id('fg-packunit')?.value ?? '').trim();
+  const bagKg = parseFloat(bagRaw);
+  const packUnit = bagRaw === '' ? '' : String(bagKg);   // col4 = 봉당 중량(kg) 숫자 정규화
   const ppbRaw = $id('fg-packsperbox')?.value;
   const shelfLife = $id('fg-shelflife')?.value.trim() || '';
   const storage = $id('fg-storage')?.value.trim() || '';
   const ppb = parseInt(ppbRaw);
   if (!name) { toast('제품명을 입력하세요', 'err'); return; }
+  if (bagRaw !== '' && (isNaN(bagKg) || bagKg <= 0)) { toast('봉당 중량(kg)은 0보다 큰 숫자', 'err'); return; }
   if (ppbRaw !== '' && (isNaN(ppb) || ppb < 1)) { toast('박스당 봉수는 1 이상의 정수', 'err'); return; }
   const ppbStr = (ppbRaw === '' ? '' : String(ppb));
 
