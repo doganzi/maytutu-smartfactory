@@ -174,6 +174,19 @@ a { text-decoration:none; color:inherit; }
 .lot-card-header .lot-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .flex-1 { flex:1; }
 .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+/* 홈 요약 카드 — 여백 축소·수치 강조 */
+.stat-card { text-align:center; padding:14px 10px; display:flex; flex-direction:column; align-items:center; gap:3px; }
+.stat-card .stat-icon { font-size:22px; line-height:1; }
+.stat-card .stat-num { font-size:22px; font-weight:800; line-height:1.1; }
+.stat-card .stat-label { font-size:11px; color:var(--txt-l); font-weight:600; }
+/* 빠른 작업 그리드 — 홈 하단 여백 활용·핵심 기능 1탭 진입 */
+.qa-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.qa-tile { display:flex; flex-direction:column; align-items:center; gap:6px; padding:12px 4px; background:var(--white); border:1px solid var(--gray-l); border-radius:10px; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:background 0.15s,transform 0.1s; }
+.qa-tile:active { background:#f2f3f7; transform:scale(0.96); }
+.qa-tile .qa-ic { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:21px; background:#eef0f8; }
+.qa-tile .qa-lb { font-size:11px; font-weight:600; color:var(--txt); line-height:1.15; text-align:center; }
+.sec-title { font-size:14px; font-weight:700; color:var(--txt); }
+@media (max-width:320px) { .qa-grid { grid-template-columns:repeat(3,1fr); } }
 .mt-4 { margin-top:4px; } .mt-8 { margin-top:8px; } .mt-12 { margin-top:12px; } .mt-16 { margin-top:16px; }
 .mb-4 { margin-bottom:4px; } .mb-8 { margin-bottom:8px; } .mb-12 { margin-bottom:12px; }
 .fs-11 { font-size:11px; } .fs-12 { font-size:12px; } .fs-13 { font-size:13px; } .fs-14 { font-size:14px; } .fs-16 { font-size:16px; } .fs-20 { font-size:20px; }
@@ -1889,29 +1902,54 @@ Screens.dashboard = async () => {
     console.warn('Dashboard data load error:', e);
   }
 
+  // ── 빠른 작업 (역할별) — 홈 하단 여백 활용·핵심 기능 1탭 진입 ──
+  const quickActions = isAdmin ? [
+    { ic: '🏭', lb: '생산요청', screen: 'production', tab: '생산요청' },
+    { ic: '🧊', lb: '출하승인', screen: 'production', tab: '승인대기' },
+    { ic: '📦', lb: '재고', screen: 'inventory' },
+    { ic: '📷', lb: 'QR스캔', screen: 'qr-scan' },
+    { ic: '✅', lb: 'HACCP', screen: 'haccp' },
+    { ic: '🌡️', lb: '온도', screen: 'temp-log' },
+    { ic: '🏷️', lb: '라벨', screen: 'label-print' },
+    { ic: '☰', lb: '더보기', screen: 'more' },
+  ] : [
+    { ic: '▶️', lb: '새 작업', screen: 'production', tab: '새 작업' },
+    { ic: '📋', lb: '작업현황', screen: 'production', tab: '작업 현황' },
+    { ic: '📦', lb: '재고', screen: 'inventory' },
+    { ic: '📷', lb: 'QR스캔', screen: 'qr-scan' },
+    { ic: '✅', lb: 'HACCP', screen: 'haccp' },
+    { ic: '🌡️', lb: '온도', screen: 'temp-log' },
+    { ic: '🏷️', lb: '라벨', screen: 'label-print' },
+    { ic: '☰', lb: '더보기', screen: 'more' },
+  ];
+  const qaHtml = quickActions.map(q => {
+    const nav = q.tab ? `State._prodActiveTab='${q.tab}';Router.go('${q.screen}')` : `Router.go('${q.screen}')`;
+    return `<div class="qa-tile" onclick="${nav}"><div class="qa-ic">${q.ic}</div><div class="qa-lb">${q.lb}</div></div>`;
+  }).join('');
+
   $id('content').innerHTML = `
     <div style="padding:16px">
       <!-- Summary Cards -->
       <div class="grid-2 mb-12">
-        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${inProgress === 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(${isAdmin ? 3 : 2})');if(t)t.click();},200)">
-          <div style="font-size:20px">${inProgress === 0 ? '⚠️' : '🏭'}</div>
-          <div class="fs-20 fw-8 ${inProgress === 0 ? 'c-warn' : 'c-suc'}" style="margin:4px 0">${inProgress}건</div>
-          <div class="fs-11 c-txt-l">${inProgress === 0 ? '생산 없음' : '생산 진행'}</div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${inProgress === 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(${isAdmin ? 3 : 2})');if(t)t.click();},200)">
+          <div class="stat-icon">${inProgress === 0 ? '⚠️' : '🏭'}</div>
+          <div class="stat-num ${inProgress === 0 ? 'c-warn' : 'c-suc'}">${inProgress}건</div>
+          <div class="stat-label">${inProgress === 0 ? '생산 없음' : '생산 진행'}</div>
         </div>
-        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${pendingApproval > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(2)');if(t)t.click();},200)">
-          <div style="font-size:20px">${pendingApproval > 0 ? '📋' : '✅'}</div>
-          <div class="fs-20 fw-8 ${pendingApproval > 0 ? 'c-warn' : 'c-suc'}" style="margin:4px 0">${pendingApproval}건</div>
-          <div class="fs-11 c-txt-l">${isAdmin ? '승인 대기' : '내 작업'}</div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${pendingApproval > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(2)');if(t)t.click();},200)">
+          <div class="stat-icon">${pendingApproval > 0 ? '📋' : '✅'}</div>
+          <div class="stat-num ${pendingApproval > 0 ? 'c-warn' : 'c-suc'}">${pendingApproval}건</div>
+          <div class="stat-label">${isAdmin ? '승인 대기' : '내 작업'}</div>
         </div>
-        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${lowStock > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('inventory')">
-          <div style="font-size:20px">${lowStock > 0 ? '📦' : '✅'}</div>
-          <div class="fs-20 fw-8 ${lowStock > 0 ? 'c-warn' : 'c-suc'}" style="margin:4px 0">${lowStock}건</div>
-          <div class="fs-11 c-txt-l">${lowStock > 0 ? '발주 필요' : '재고 정상'}</div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${lowStock > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('inventory')">
+          <div class="stat-icon">${lowStock > 0 ? '📦' : '✅'}</div>
+          <div class="stat-num ${lowStock > 0 ? 'c-warn' : 'c-suc'}">${lowStock}건</div>
+          <div class="stat-label">${lowStock > 0 ? '발주 필요' : '재고 정상'}</div>
         </div>
-        <div class="card clickable" style="text-align:center;padding:12px;border-left:3px solid ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'var(--err)' : 'var(--warn)') : 'var(--suc)'}" onclick="Router.go('equip')">
-          <div style="font-size:20px">${calAlerts.length > 0 ? '🔧' : '✅'}</div>
-          <div class="fs-20 fw-8 ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}" style="margin:4px 0">${calAlerts.length}건</div>
-          <div class="fs-11 c-txt-l">${calAlerts.length > 0 ? '검교정 알림' : '검교정 정상'}</div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'var(--err)' : 'var(--warn)') : 'var(--suc)'}" onclick="Router.go('equip')">
+          <div class="stat-icon">${calAlerts.length > 0 ? '🔧' : '✅'}</div>
+          <div class="stat-num ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${calAlerts.length}건</div>
+          <div class="stat-label">${calAlerts.length > 0 ? '검교정 알림' : '검교정 정상'}</div>
         </div>
       </div>
 
@@ -1980,6 +2018,10 @@ Screens.dashboard = async () => {
           </div>
         `).join('')}
       ` : ''}
+
+      <!-- 빠른 작업 -->
+      <div class="sec-title mb-8 mt-8">⚡ 빠른 작업</div>
+      <div class="qa-grid">${qaHtml}</div>
     </div>
   `;
 
