@@ -99,7 +99,8 @@ var TUYA = (function () {
     return hit;
   }
 
-  return { prop: p_, deviceStatus: deviceStatus_, deviceIds: deviceIds_, nameOf: nameOf_ };
+  return { prop: p_, deviceStatus: deviceStatus_, deviceIds: deviceIds_, nameOf: nameOf_,
+           request: request_, token: getToken_ };
 })();
 
 
@@ -157,6 +158,140 @@ function logTemperatures() {
   });
 
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   이력 백필 — Tuya 서버에 남은 과거 온도 이력으로 '결측' 행을 채운다.
+   배경: 2026-07-11 IoT Core 구독 만료로 API가 막혀 온도칸이 빈 행이 쌓임.
+        구독 복구 후, Tuya 가 서버에 보관 중인 실측 이력을 회수해 되메운다.
+   원칙: ① 채우는 값은 Tuya 서버의 실측값(날조·보간 금지)
+        ② ±MATCH_MIN 분 이내 매칭만 채움, 없으면 결측 그대로 둔다
+        ③ 상태칸에 BACKFILL 출처를 남겨 실시간 수집분과 감사 시 구분 가능
+   사용: backfillDryRun() 먼저 → 회수 가능 구간 확인 → backfillApply()
+   ═══════════════════════════════════════════════════════════════════ */
+var BACKFILL_MATCH_MIN = 5;      // 결측 시각 ±5분 이내 이력만 매칭
+var BACKFILL_PAGE = 100;         // Tuya logs 페이지 크기
+
+function backfillDryRun() { backfillFromTuya_(true); }
+function backfillApply()  { backfillFromTuya_(false); }
+
+/** 시트 시각(KST 문자열/Date) → epoch ms */
+function bfParseKst_(v) {
+  if (v instanceof Date) return v.getTime();
+  var m = String(v).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return NaN;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 9, +m[5], +(m[6] || 0));   // KST → UTC
+}
+function bfFmt_(ms) { return Utilities.formatDate(new Date(ms), 'Asia/Seoul', 'yyyy-MM-dd HH:mm'); }
+
+/** 기기 이력 조회(페이징) → [{t, raw}] 오름차순 */
+function bfFetchLogs_(id, startMs, endMs, code) {
+  var out = [], rowKey = '', guard = 0;
+  while (guard++ < 200) {
+    var path = '/v1.0/devices/' + id + '/logs?type=7&start_time=' + startMs + '&end_time=' + endMs +
+               '&size=' + BACKFILL_PAGE + (rowKey ? '&start_row_key=' + encodeURIComponent(rowKey) : '');
+    var r = TUYA.request('GET', path, TUYA.token(), null);
+    var logs = (r && r.logs) || [];
+    for (var i = 0; i < logs.length; i++) {
+      if (logs[i].code !== code) continue;
+      var t = Number(logs[i].event_time);
+      if (isFinite(t)) out.push({ t: t, raw: logs[i].value });
+    }
+    if (!r || !r.has_next) break;
+    rowKey = r.next_row_key || '';
+    if (!rowKey) break;
+  }
+  out.sort(function (a, b) { return a.t - b.t; });
+  return out;
+}
+
+/** 정렬된 이력에서 목표시각에 가장 가까운 값(허용오차 내) 찾기 */
+function bfNearest_(logs, targetMs, tolMs) {
+  var lo = 0, hi = logs.length - 1, best = null, bestD = Infinity;
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1, d = logs[mid].t - targetMs;
+    if (Math.abs(d) < bestD) { bestD = Math.abs(d); best = logs[mid]; }
+    if (d < 0) lo = mid + 1; else hi = mid - 1;
+  }
+  return (best && bestD <= tolMs) ? { hit: best, diff: bestD } : null;
+}
+
+function backfillFromTuya_(dryRun) {
+  var sh = getLogSheet_();
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) { Logger.log('데이터 없음'); return; }
+
+  var code = TUYA.prop('TEMP_CODE', 'temp_current');
+  var scale = Number(TUYA.prop('TEMP_SCALE', '10')) || 1;
+  var tol = BACKFILL_MATCH_MIN * 60 * 1000;
+
+  // 결측 행 수집 (온도칸 비어있는 행)
+  var miss = [];
+  for (var i = 1; i < data.length; i++) {
+    var temp = data[i][3];
+    if (temp === '' || temp === null || temp === undefined) {
+      var ms = bfParseKst_(data[i][0]);
+      if (isFinite(ms)) miss.push({ idx: i, ms: ms, id: String(data[i][1] || '') });
+    }
+  }
+  Logger.log('결측 행: ' + miss.length + '건');
+  if (!miss.length) return;
+
+  // 기기별 구간
+  var byDev = {};
+  miss.forEach(function (m) {
+    if (!byDev[m.id]) byDev[m.id] = { min: m.ms, max: m.ms, rows: [] };
+    byDev[m.id].min = Math.min(byDev[m.id].min, m.ms);
+    byDev[m.id].max = Math.max(byDev[m.id].max, m.ms);
+    byDev[m.id].rows.push(m);
+  });
+
+  var stampNow = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+  var filled = 0, unfilled = 0, perDev = [];
+
+  Object.keys(byDev).forEach(function (id) {
+    var d = byDev[id], nm = TUYA.nameOf(id) || id;
+    var logs;
+    try {
+      logs = bfFetchLogs_(id, d.min - tol, d.max + tol, code);
+    } catch (e) {
+      Logger.log('● ' + nm + ' 이력조회 실패: ' + e.message); perDev.push(nm + ': 조회실패'); return;
+    }
+    if (!logs.length) { Logger.log('● ' + nm + ' 회수 가능 이력 0건 (보관기간 만료 추정)'); perDev.push(nm + ': 0건'); return; }
+
+    var f = 0, u = 0, firstHit = null, lastHit = null;
+    d.rows.forEach(function (m) {
+      var n = bfNearest_(logs, m.ms, tol);
+      if (!n) { u++; return; }
+      f++;
+      if (!firstHit) firstHit = m.ms;
+      lastHit = m.ms;
+      if (!dryRun) {
+        var val = Number(n.hit.raw) / scale;
+        data[m.idx][3] = val;
+        data[m.idx][4] = 'BACKFILL(Tuya이력 ' + stampNow + ' 회수, 원기록 ERROR:구독만료)';
+        data[m.idx][5] = n.hit.raw;
+      }
+    });
+    filled += f; unfilled += u;
+    Logger.log('● ' + nm + ' — 이력 ' + logs.length + '건 / 채움 ' + f + ' / 미매칭 ' + u +
+               (firstHit ? ' / 복구구간 ' + bfFmt_(firstHit) + ' ~ ' + bfFmt_(lastHit) : ''));
+    Logger.log('    이력 실제 보유구간: ' + bfFmt_(logs[0].t) + ' ~ ' + bfFmt_(logs[logs.length - 1].t));
+    perDev.push(nm + ': ' + f + '/' + (f + u));
+  });
+
+  Logger.log('──────────────────────────────');
+  Logger.log((dryRun ? '[드라이런] ' : '[적용] ') + '채움 ' + filled + '건 / 미매칭 ' + unfilled + '건  (' + perDev.join(' · ') + ')');
+
+  if (dryRun) { Logger.log('※ 시트 미변경. 실제 반영하려면 backfillApply() 실행.'); return; }
+  if (!filled) { Logger.log('채울 값이 없어 시트를 변경하지 않았습니다.'); return; }
+
+  // D:F(온도/상태/원시값) 한 번에 기록
+  var out = [];
+  for (var r = 1; r < data.length; r++) out.push([data[r][3], data[r][4], data[r][5]]);
+  sh.getRange(2, 4, out.length, 3).setValues(out);
+  Logger.log('완료: 시트 반영됨 (' + filled + '건). 앱 동결온도 모니터링에서 확인하세요.');
 }
 
 
