@@ -184,7 +184,13 @@ function backfillDryRun() { backfillFromTuya_(true); }
 function backfillApply()  { backfillFromTuya_(false); }
 
 var BF_START = 0;
-function bfOutOfTime_() { return BF_START && (Date.now() - BF_START) > BACKFILL_MAX_RUN_MS; }
+var BF_DEADLINE = 0;   // 현재 기기에 배정된 마감시각(절대 ms). 0이면 전체 예산만 본다.
+//   기기별 예산을 두지 않으면 결측이 많은 첫 기기가 실행시간을 독식해
+//   두 번째 기기는 조회를 한 번도 못 하고 '회수 0건'으로 오판된다(2026-07-18 관측).
+function bfOutOfTime_() {
+  if (BF_DEADLINE && Date.now() > BF_DEADLINE) return true;
+  return BF_START && (Date.now() - BF_START) > BACKFILL_MAX_RUN_MS;
+}
 
 /** 시트 시각(KST 문자열/Date) → epoch ms */
 function bfParseKst_(v) {
@@ -316,8 +322,14 @@ function backfillFromTuya_(dryRun) {
 
   // 결측이 많이 남은 기기부터 처리 — 제한된 실행시간을 가장 필요한 곳에 먼저 쓴다
   var devOrder = Object.keys(byDev).sort(function (a, b) { return byDev[b].rows.length - byDev[a].rows.length; });
-  devOrder.forEach(function (id) {
+  devOrder.forEach(function (id, devIdx) {
     var d = byDev[id], nm = TUYA.nameOf(id) || id;
+    // 남은 시간을 남은 기기 수로 나눠 배정(한 기기가 독식하지 못하게)
+    var leftMs = BACKFILL_MAX_RUN_MS - (Date.now() - BF_START);
+    var leftDev = devOrder.length - devIdx;
+    BF_DEADLINE = leftMs > 0 ? Date.now() + Math.floor(leftMs / leftDev) : 1;
+    if (leftMs <= 0) { Logger.log('● ' + nm + ' — 실행시간 소진, 미처리(재실행 시 이어서)'); perDev.push(nm + ': 미처리'); return; }
+    Logger.log('● ' + nm + ' — 배정시간 ' + Math.round((BF_DEADLINE - Date.now()) / 1000) + '초');
     // 결측이 실제로 남아있는 '일자'만 조회한다.
     //   (재실행 때 이미 채운 기기의 전 구간을 다시 받느라 시간·속도제한을 낭비하던 문제)
     var DAY = 24 * 3600 * 1000, dayset = {};
@@ -331,7 +343,16 @@ function backfillFromTuya_(dryRun) {
     } catch (e) {
       Logger.log('● ' + nm + ' 이력조회 실패: ' + e.message); perDev.push(nm + ': 조회실패'); return;
     }
-    if (!logs.length) { Logger.log('● ' + nm + ' 회수 가능 이력 0건 (보관기간 만료 추정)'); perDev.push(nm + ': 0건'); return; }
+    if (!logs.length) {
+      // 시간이 없어 조회를 못 한 것과, 조회했는데 이력이 없는 것을 구분한다.
+      //   (구분 안 하면 '보관기간 만료'로 오판 → 실제로는 재실행하면 회수 가능)
+      var cut = bfOutOfTime_();
+      Logger.log('● ' + nm + (cut
+        ? ' 시간부족으로 조회 못함 — 재실행하면 회수 가능'
+        : ' 회수 가능 이력 0건 (보관기간 만료 추정)'));
+      perDev.push(nm + (cut ? ': 시간부족' : ': 0건'));
+      return;
+    }
 
     var f = 0, u = 0, firstHit = null, lastHit = null;
     d.rows.forEach(function (m) {
