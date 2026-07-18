@@ -224,15 +224,15 @@ function bfRequestWithRetry_(path, label) {
 /** 기기 이력 조회 → [{t, raw}] 오름차순.
  *  · 조회구간을 일 단위로 쪼갠다(Tuya 이력 API 구간길이 제한 회피)
  *  · 보관기간을 넘는 과거는 애초에 조회하지 않는다(BACKFILL_MAX_DAYS) */
-function bfFetchLogs_(id, startMs, endMs, code) {
-  var out = [], chunk = 24 * 3600 * 1000;
-  var floor = Date.now() - BACKFILL_MAX_DAYS * 24 * 3600 * 1000;
-  var from = Math.max(startMs, floor);
-  if (from >= endMs) return out;
+function bfFetchLogs_(id, dayKeys, code, tol) {
+  var out = [], DAY = 24 * 3600 * 1000;
+  var floorMs = Date.now() - BACKFILL_MAX_DAYS * DAY;
 
-  for (var s = from; s < endMs; s += chunk) {
+  for (var di = 0; di < dayKeys.length; di++) {
     if (bfOutOfTime_()) { Logger.log('    ⏱ 실행시간 한계 — 이후 구간 중단(재실행하면 이어서 회수 가능)'); break; }
-    var e = Math.min(s + chunk, endMs);
+    var s = dayKeys[di] * DAY - tol, e = (dayKeys[di] + 1) * DAY + tol;
+    if (e < floorMs) continue;                       // 보관기간 밖 → 조회 생략
+    if (s < floorMs) s = floorMs;
     var rowKey = '', guard = 0;
     while (guard++ < 100) {
       if (bfOutOfTime_()) break;
@@ -302,11 +302,20 @@ function backfillFromTuya_(dryRun) {
   var stampNow = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
   var filled = 0, unfilled = 0, perDev = [], changedIdx = [];
 
-  Object.keys(byDev).forEach(function (id) {
+  // 결측이 많이 남은 기기부터 처리 — 제한된 실행시간을 가장 필요한 곳에 먼저 쓴다
+  var devOrder = Object.keys(byDev).sort(function (a, b) { return byDev[b].rows.length - byDev[a].rows.length; });
+  devOrder.forEach(function (id) {
     var d = byDev[id], nm = TUYA.nameOf(id) || id;
+    // 결측이 실제로 남아있는 '일자'만 조회한다.
+    //   (재실행 때 이미 채운 기기의 전 구간을 다시 받느라 시간·속도제한을 낭비하던 문제)
+    var DAY = 24 * 3600 * 1000, dayset = {};
+    d.rows.forEach(function (m) { dayset[Math.floor(m.ms / DAY)] = true; });
+    var dayKeys = Object.keys(dayset).map(Number).sort(function (a, b) { return a - b; });
+    Logger.log('● ' + nm + ' — 결측 ' + d.rows.length + '건 / 조회대상 ' + dayKeys.length + '일');
+
     var logs;
     try {
-      logs = bfFetchLogs_(id, d.min - tol, d.max + tol, code);
+      logs = bfFetchLogs_(id, dayKeys, code, tol);
     } catch (e) {
       Logger.log('● ' + nm + ' 이력조회 실패: ' + e.message); perDev.push(nm + ': 조회실패'); return;
     }
@@ -345,32 +354,34 @@ function backfillFromTuya_(dryRun) {
   // 바뀐 행만 '연속 블록' 단위로 기록.
   //   전체(1만행×3열)를 한 번에 setValues 하면 Spreadsheets 서비스가 타임아웃난다.
   //   결측은 대개 연속 구간이라 블록 수가 적다.
+  // 결측 행은 기기별로 번갈아 기록되므로 '연속'이 아니다(블록 900개+ → 쓰기 타임아웃).
+  //   → 변경 구간 전체(min~max)를 큰 덩어리로 통째 기록한다.
+  //     사이에 낀 미변경 행은 시트에서 읽은 원래 값 그대로라 안전하다.
   changedIdx.sort(function (a, b) { return a - b; });
-  var blocks = [], cur = null;
-  changedIdx.forEach(function (i) {
-    if (cur && i === cur.end + 1) { cur.end = i; }
-    else { cur = { start: i, end: i }; blocks.push(cur); }
-  });
-  Logger.log('기록 블록 ' + blocks.length + '개 (' + changedIdx.length + '행)');
+  var lo = changedIdx[0], hi = changedIdx[changedIdx.length - 1];
+  var CH = 2000;                                   // 한 번에 쓰는 최대 행수
+  Logger.log('기록 범위: 시트행 ' + (lo + 1) + '~' + (hi + 1) + ' (' + (hi - lo + 1) + '행, 실제 변경 ' + changedIdx.length + '행)');
 
   var wrote = 0, failed = 0;
-  blocks.forEach(function (b, bi) {
+  for (var s0 = lo; s0 <= hi; s0 += CH) {
+    var e0 = Math.min(s0 + CH - 1, hi);
     var vals = [];
-    for (var i = b.start; i <= b.end; i++) vals.push([data[i][3], data[i][4], data[i][5]]);
+    for (var i = s0; i <= e0; i++) vals.push([data[i][3], data[i][4], data[i][5]]);
     var okWrite = false;
     for (var a = 0; a < 3 && !okWrite; a++) {
       try {
-        sh.getRange(b.start + 1, 4, vals.length, 3).setValues(vals);   // +1: data[0]=헤더 → 시트행
-        SpreadsheetApp.flush();
+        sh.getRange(s0 + 1, 4, vals.length, 3).setValues(vals);   // +1: data[0]=헤더 → 시트행
         okWrite = true; wrote += vals.length;
       } catch (e) {
-        Logger.log('    블록 ' + (bi + 1) + ' 쓰기 실패(' + (a + 1) + '): ' + e.message);
+        Logger.log('    쓰기 실패(' + (a + 1) + '): ' + e.message);
         Utilities.sleep(3000);
       }
     }
     if (!okWrite) failed += vals.length;
-  });
-  Logger.log('완료: 시트 반영 ' + wrote + '행' + (failed ? ' / 실패 ' + failed + '행(재실행하면 재시도)' : '') +
+  }
+  SpreadsheetApp.flush();
+  Logger.log('완료: 시트 반영 ' + wrote + '행 기록(실제 채움 ' + filled + '건)' +
+             (failed ? ' / 실패 ' + failed + '행(재실행하면 재시도)' : '') +
              '. 앱 동결온도 모니터링에서 확인하세요.');
 }
 
