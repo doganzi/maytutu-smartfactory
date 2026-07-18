@@ -175,7 +175,7 @@ var BACKFILL_PAGE = 100;         // Tuya logs 페이지 크기
 var BACKFILL_MAX_DAYS = 8;       // 이 기간보다 과거는 조회하지 않음(무료등급 보관 ≈7일)
 var BACKFILL_SLEEP_MS = 1500;    // 요청 간 지연 — code=40000309(too frequent) 회피
 var BACKFILL_RETRY = [5000, 12000, 25000];   // rate limit 시 백오프 재시도 간격
-var BACKFILL_MAX_RUN_MS = 5 * 60 * 1000;     // Apps Script 6분 제한 대비 조기 종료선
+var BACKFILL_MAX_RUN_MS = 4 * 60 * 1000;     // Apps Script 6분 제한 대비 조기 종료선
 
 function backfillDryRun() { backfillFromTuya_(true); }
 function backfillApply()  { backfillFromTuya_(false); }
@@ -300,7 +300,7 @@ function backfillFromTuya_(dryRun) {
   });
 
   var stampNow = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
-  var filled = 0, unfilled = 0, perDev = [];
+  var filled = 0, unfilled = 0, perDev = [], changedIdx = [];
 
   Object.keys(byDev).forEach(function (id) {
     var d = byDev[id], nm = TUYA.nameOf(id) || id;
@@ -324,6 +324,7 @@ function backfillFromTuya_(dryRun) {
         data[m.idx][3] = val;
         data[m.idx][4] = 'BACKFILL(Tuya이력 ' + stampNow + ' 회수, 원기록 ERROR:구독만료)';
         data[m.idx][5] = n.hit.raw;
+        changedIdx.push(m.idx);
       }
     });
     filled += f; unfilled += u;
@@ -341,11 +342,36 @@ function backfillFromTuya_(dryRun) {
   if (unfilled) Logger.log('※ 미매칭 ' + unfilled + '건 — 속도제한/실행시간으로 못 받은 구간이 있으면 ' +
                            'backfillApply() 를 다시 실행하세요. 이미 채운 행은 건너뛰므로 이어서 회수됩니다.');
 
-  // D:F(온도/상태/원시값) 한 번에 기록
-  var out = [];
-  for (var r = 1; r < data.length; r++) out.push([data[r][3], data[r][4], data[r][5]]);
-  sh.getRange(2, 4, out.length, 3).setValues(out);
-  Logger.log('완료: 시트 반영됨 (' + filled + '건). 앱 동결온도 모니터링에서 확인하세요.');
+  // 바뀐 행만 '연속 블록' 단위로 기록.
+  //   전체(1만행×3열)를 한 번에 setValues 하면 Spreadsheets 서비스가 타임아웃난다.
+  //   결측은 대개 연속 구간이라 블록 수가 적다.
+  changedIdx.sort(function (a, b) { return a - b; });
+  var blocks = [], cur = null;
+  changedIdx.forEach(function (i) {
+    if (cur && i === cur.end + 1) { cur.end = i; }
+    else { cur = { start: i, end: i }; blocks.push(cur); }
+  });
+  Logger.log('기록 블록 ' + blocks.length + '개 (' + changedIdx.length + '행)');
+
+  var wrote = 0, failed = 0;
+  blocks.forEach(function (b, bi) {
+    var vals = [];
+    for (var i = b.start; i <= b.end; i++) vals.push([data[i][3], data[i][4], data[i][5]]);
+    var okWrite = false;
+    for (var a = 0; a < 3 && !okWrite; a++) {
+      try {
+        sh.getRange(b.start + 1, 4, vals.length, 3).setValues(vals);   // +1: data[0]=헤더 → 시트행
+        SpreadsheetApp.flush();
+        okWrite = true; wrote += vals.length;
+      } catch (e) {
+        Logger.log('    블록 ' + (bi + 1) + ' 쓰기 실패(' + (a + 1) + '): ' + e.message);
+        Utilities.sleep(3000);
+      }
+    }
+    if (!okWrite) failed += vals.length;
+  });
+  Logger.log('완료: 시트 반영 ' + wrote + '행' + (failed ? ' / 실패 ' + failed + '행(재실행하면 재시도)' : '') +
+             '. 앱 동결온도 모니터링에서 확인하세요.');
 }
 
 
