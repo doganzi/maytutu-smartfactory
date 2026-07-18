@@ -173,9 +173,15 @@ function logTemperatures() {
 var BACKFILL_MATCH_MIN = 5;      // 결측 시각 ±5분 이내 이력만 매칭
 var BACKFILL_PAGE = 100;         // Tuya logs 페이지 크기
 var BACKFILL_MAX_DAYS = 8;       // 이 기간보다 과거는 조회하지 않음(무료등급 보관 ≈7일)
+var BACKFILL_SLEEP_MS = 1500;    // 요청 간 지연 — code=40000309(too frequent) 회피
+var BACKFILL_RETRY = [5000, 12000, 25000];   // rate limit 시 백오프 재시도 간격
+var BACKFILL_MAX_RUN_MS = 5 * 60 * 1000;     // Apps Script 6분 제한 대비 조기 종료선
 
 function backfillDryRun() { backfillFromTuya_(true); }
 function backfillApply()  { backfillFromTuya_(false); }
+
+var BF_START = 0;
+function bfOutOfTime_() { return BF_START && (Date.now() - BF_START) > BACKFILL_MAX_RUN_MS; }
 
 /** 시트 시각(KST 문자열/Date) → epoch ms */
 function bfParseKst_(v) {
@@ -194,6 +200,27 @@ function bfLogPath_(id, params) {
   return '/v1.0/devices/' + id + '/logs' + (qs ? '?' + qs : '');
 }
 
+/* Tuya 이력 API 는 호출빈도 제한이 있다(code=40000309 too frequent).
+   요청마다 지연을 두고, 제한에 걸리면 백오프 재시도한다. 소진되면 null 반환. */
+function bfRequestWithRetry_(path, label) {
+  for (var a = 0; a <= BACKFILL_RETRY.length; a++) {
+    try {
+      var r = TUYA.request('GET', path, TUYA.token(), null);
+      Utilities.sleep(BACKFILL_SLEEP_MS);            // 성공해도 다음 호출 전 간격 확보
+      return r;
+    } catch (err) {
+      var tooFast = String(err.message).indexOf('40000309') >= 0;
+      if (!tooFast || a === BACKFILL_RETRY.length) {
+        Logger.log('    [' + label + '] 조회실패: ' + err.message);
+        return null;
+      }
+      Logger.log('    [' + label + '] 속도제한 — ' + (BACKFILL_RETRY[a] / 1000) + '초 후 재시도(' + (a + 1) + ')');
+      Utilities.sleep(BACKFILL_RETRY[a]);
+    }
+  }
+  return null;
+}
+
 /** 기기 이력 조회 → [{t, raw}] 오름차순.
  *  · 조회구간을 일 단위로 쪼갠다(Tuya 이력 API 구간길이 제한 회피)
  *  · 보관기간을 넘는 과거는 애초에 조회하지 않는다(BACKFILL_MAX_DAYS) */
@@ -204,16 +231,17 @@ function bfFetchLogs_(id, startMs, endMs, code) {
   if (from >= endMs) return out;
 
   for (var s = from; s < endMs; s += chunk) {
+    if (bfOutOfTime_()) { Logger.log('    ⏱ 실행시간 한계 — 이후 구간 중단(재실행하면 이어서 회수 가능)'); break; }
     var e = Math.min(s + chunk, endMs);
     var rowKey = '', guard = 0;
     while (guard++ < 100) {
+      if (bfOutOfTime_()) break;
       var path = bfLogPath_(id, {
         type: 7, start_time: s, end_time: e, size: BACKFILL_PAGE,
         start_row_key: rowKey || null
       });
-      var r;
-      try { r = TUYA.request('GET', path, TUYA.token(), null); }
-      catch (err) { Logger.log('    [구간 ' + bfFmt_(s) + '] 조회실패: ' + err.message); break; }
+      var r = bfRequestWithRetry_(path, bfFmt_(s));
+      if (!r) break;                                  // 재시도 소진 → 이 구간 포기하고 다음 구간
       var logs = (r && r.logs) || [];
       for (var i = 0; i < logs.length; i++) {
         if (logs[i].code !== code) continue;
@@ -241,6 +269,7 @@ function bfNearest_(logs, targetMs, tolMs) {
 }
 
 function backfillFromTuya_(dryRun) {
+  BF_START = Date.now();
   var sh = getLogSheet_();
   var data = sh.getDataRange().getValues();
   if (data.length < 2) { Logger.log('데이터 없음'); return; }
@@ -309,6 +338,8 @@ function backfillFromTuya_(dryRun) {
 
   if (dryRun) { Logger.log('※ 시트 미변경. 실제 반영하려면 backfillApply() 실행.'); return; }
   if (!filled) { Logger.log('채울 값이 없어 시트를 변경하지 않았습니다.'); return; }
+  if (unfilled) Logger.log('※ 미매칭 ' + unfilled + '건 — 속도제한/실행시간으로 못 받은 구간이 있으면 ' +
+                           'backfillApply() 를 다시 실행하세요. 이미 채운 행은 건너뛰므로 이어서 회수됩니다.');
 
   // D:F(온도/상태/원시값) 한 번에 기록
   var out = [];
