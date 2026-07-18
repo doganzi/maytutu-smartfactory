@@ -172,6 +172,7 @@ function logTemperatures() {
    ═══════════════════════════════════════════════════════════════════ */
 var BACKFILL_MATCH_MIN = 5;      // 결측 시각 ±5분 이내 이력만 매칭
 var BACKFILL_PAGE = 100;         // Tuya logs 페이지 크기
+var BACKFILL_MAX_DAYS = 8;       // 이 기간보다 과거는 조회하지 않음(무료등급 보관 ≈7일)
 
 function backfillDryRun() { backfillFromTuya_(true); }
 function backfillApply()  { backfillFromTuya_(false); }
@@ -185,22 +186,44 @@ function bfParseKst_(v) {
 }
 function bfFmt_(ms) { return Utilities.formatDate(new Date(ms), 'Asia/Seoul', 'yyyy-MM-dd HH:mm'); }
 
-/** 기기 이력 조회(페이징) → [{t, raw}] 오름차순 */
+/* Tuya v2 서명 규칙: 쿼리 파라미터를 키 기준 오름차순 정렬해야 sign 이 유효하다.
+   (정렬 안 하면 code=1004 sign invalid) */
+function bfLogPath_(id, params) {
+  var keys = Object.keys(params).filter(function (k) { return params[k] !== '' && params[k] != null; }).sort();
+  var qs = keys.map(function (k) { return k + '=' + params[k]; }).join('&');
+  return '/v1.0/devices/' + id + '/logs' + (qs ? '?' + qs : '');
+}
+
+/** 기기 이력 조회 → [{t, raw}] 오름차순.
+ *  · 조회구간을 일 단위로 쪼갠다(Tuya 이력 API 구간길이 제한 회피)
+ *  · 보관기간을 넘는 과거는 애초에 조회하지 않는다(BACKFILL_MAX_DAYS) */
 function bfFetchLogs_(id, startMs, endMs, code) {
-  var out = [], rowKey = '', guard = 0;
-  while (guard++ < 200) {
-    var path = '/v1.0/devices/' + id + '/logs?type=7&start_time=' + startMs + '&end_time=' + endMs +
-               '&size=' + BACKFILL_PAGE + (rowKey ? '&start_row_key=' + encodeURIComponent(rowKey) : '');
-    var r = TUYA.request('GET', path, TUYA.token(), null);
-    var logs = (r && r.logs) || [];
-    for (var i = 0; i < logs.length; i++) {
-      if (logs[i].code !== code) continue;
-      var t = Number(logs[i].event_time);
-      if (isFinite(t)) out.push({ t: t, raw: logs[i].value });
+  var out = [], chunk = 24 * 3600 * 1000;
+  var floor = Date.now() - BACKFILL_MAX_DAYS * 24 * 3600 * 1000;
+  var from = Math.max(startMs, floor);
+  if (from >= endMs) return out;
+
+  for (var s = from; s < endMs; s += chunk) {
+    var e = Math.min(s + chunk, endMs);
+    var rowKey = '', guard = 0;
+    while (guard++ < 100) {
+      var path = bfLogPath_(id, {
+        type: 7, start_time: s, end_time: e, size: BACKFILL_PAGE,
+        start_row_key: rowKey || null
+      });
+      var r;
+      try { r = TUYA.request('GET', path, TUYA.token(), null); }
+      catch (err) { Logger.log('    [구간 ' + bfFmt_(s) + '] 조회실패: ' + err.message); break; }
+      var logs = (r && r.logs) || [];
+      for (var i = 0; i < logs.length; i++) {
+        if (logs[i].code !== code) continue;
+        var t = Number(logs[i].event_time);
+        if (isFinite(t)) out.push({ t: t, raw: logs[i].value });
+      }
+      if (!r || !r.has_next) break;
+      rowKey = r.next_row_key || '';
+      if (!rowKey) break;
     }
-    if (!r || !r.has_next) break;
-    rowKey = r.next_row_key || '';
-    if (!rowKey) break;
   }
   out.sort(function (a, b) { return a.t - b.t; });
   return out;
