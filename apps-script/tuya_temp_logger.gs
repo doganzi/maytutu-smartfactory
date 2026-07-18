@@ -175,7 +175,10 @@ var BACKFILL_PAGE = 100;         // Tuya logs 페이지 크기
 var BACKFILL_MAX_DAYS = 8;       // 이 기간보다 과거는 조회하지 않음(무료등급 보관 ≈7일)
 var BACKFILL_SLEEP_MS = 1500;    // 요청 간 지연 — code=40000309(too frequent) 회피
 var BACKFILL_RETRY = [5000, 12000, 25000];   // rate limit 시 백오프 재시도 간격
-var BACKFILL_MAX_RUN_MS = 4 * 60 * 1000;     // Apps Script 6분 제한 대비 조기 종료선
+var BACKFILL_MAX_RUN_MS = 18 * 60 * 1000;    // 조기 종료선(Workspace 계정 30분 제한 기준, 쓰기 여유 확보)
+var BACKFILL_SCAN_ROWS = 4000;               // 시트 끝에서 이만큼만 읽는다.
+//   전체(1만행) getDataRange 는 8분까지 걸려 시간예산을 다 먹었다.
+//   회수 가능한 건 보관기간(≈7일=약 2,300행) 뿐이라 최근 구간만 보면 충분하다.
 
 function backfillDryRun() { backfillFromTuya_(true); }
 function backfillApply()  { backfillFromTuya_(false); }
@@ -271,24 +274,33 @@ function bfNearest_(logs, targetMs, tolMs) {
 function backfillFromTuya_(dryRun) {
   BF_START = Date.now();
   var sh = getLogSheet_();
-  var data = sh.getDataRange().getValues();
-  if (data.length < 2) { Logger.log('데이터 없음'); return; }
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) { Logger.log('데이터 없음'); return; }
+  // 최근 구간만 읽는다(전체 읽기는 8분 소요 → 시간예산 고갈).
+  var firstRow = Math.max(2, lastRow - BACKFILL_SCAN_ROWS + 1);
+  var data = sh.getRange(firstRow, 1, lastRow - firstRow + 1, 6).getValues();   // data[0] → 시트행 firstRow
+  Logger.log('스캔: 시트행 ' + firstRow + '~' + lastRow + ' (' + data.length + '행, ' +
+             Math.round((Date.now() - BF_START) / 1000) + '초 소요)');
 
   var code = TUYA.prop('TEMP_CODE', 'temp_current');
   var scale = Number(TUYA.prop('TEMP_SCALE', '10')) || 1;
   var tol = BACKFILL_MATCH_MIN * 60 * 1000;
 
   // 결측 행 수집 (온도칸 비어있는 행)
-  var miss = [];
-  for (var i = 1; i < data.length; i++) {
+  //   보관기간(BACKFILL_MAX_DAYS) 밖의 오래된 결측은 어차피 회수 불가 → 대상에서 제외
+  var floorMs = Date.now() - BACKFILL_MAX_DAYS * 24 * 3600 * 1000;
+  var miss = [], oldSkip = 0;
+  for (var i = 0; i < data.length; i++) {
     var temp = data[i][3];
     if (temp === '' || temp === null || temp === undefined) {
       var ms = bfParseKst_(data[i][0]);
-      if (isFinite(ms)) miss.push({ idx: i, ms: ms, id: String(data[i][1] || '') });
+      if (!isFinite(ms)) continue;
+      if (ms < floorMs) { oldSkip++; continue; }
+      miss.push({ idx: i, ms: ms, id: String(data[i][1] || '') });
     }
   }
-  Logger.log('결측 행: ' + miss.length + '건');
-  if (!miss.length) return;
+  Logger.log('결측(회수대상): ' + miss.length + '건' + (oldSkip ? ' / 보관기간 밖 제외 ' + oldSkip + '건' : ''));
+  if (!miss.length) { Logger.log('회수 대상 없음 — 남은 결측은 보관기간(≈' + BACKFILL_MAX_DAYS + '일) 밖입니다.'); return; }
 
   // 기기별 구간
   var byDev = {};
@@ -360,7 +372,8 @@ function backfillFromTuya_(dryRun) {
   changedIdx.sort(function (a, b) { return a - b; });
   var lo = changedIdx[0], hi = changedIdx[changedIdx.length - 1];
   var CH = 2000;                                   // 한 번에 쓰는 최대 행수
-  Logger.log('기록 범위: 시트행 ' + (lo + 1) + '~' + (hi + 1) + ' (' + (hi - lo + 1) + '행, 실제 변경 ' + changedIdx.length + '행)');
+  Logger.log('기록 범위: 시트행 ' + (firstRow + lo) + '~' + (firstRow + hi) +
+             ' (' + (hi - lo + 1) + '행, 실제 변경 ' + changedIdx.length + '행)');
 
   var wrote = 0, failed = 0;
   for (var s0 = lo; s0 <= hi; s0 += CH) {
@@ -370,7 +383,7 @@ function backfillFromTuya_(dryRun) {
     var okWrite = false;
     for (var a = 0; a < 3 && !okWrite; a++) {
       try {
-        sh.getRange(s0 + 1, 4, vals.length, 3).setValues(vals);   // +1: data[0]=헤더 → 시트행
+        sh.getRange(firstRow + s0, 4, vals.length, 3).setValues(vals);   // data[i] → 시트행 firstRow+i
         okWrite = true; wrote += vals.length;
       } catch (e) {
         Logger.log('    쓰기 실패(' + (a + 1) + '): ' + e.message);
