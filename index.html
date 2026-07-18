@@ -7967,6 +7967,20 @@ function isTempDeviation(temp, lim) {
   const t = tempNum(temp); if (isNaN(t)) return false;
   return (lim.min != null && t < lim.min) || (lim.max != null && t > lim.max);
 }
+/* 온도 1건 판정 — 결측(센서 무응답/연동중단)을 '적합'으로 위장하지 않는다.
+   ※ 2026-07 Tuya 구독만료로 7일간 결측이 전부 '적합'으로 표시돼 탐지 실패한 사고 재발방지 */
+function tempRowState(temp, lim) {
+  if (isNaN(tempNum(temp))) return '결측';
+  return isTempDeviation(temp, lim) ? '이탈' : '적합';
+}
+const TEMP_STATE_UI = { '적합': { b: 'suc', c: 'var(--suc)' }, '이탈': { b: 'err', c: 'var(--err)' }, '결측': { b: 'warn', c: 'var(--warn,#e65100)' } };
+/* 기기별 '최근 연속 결측' 개수 — 연동 중단 조기 감지용 */
+function tempMissingStreak(rows, name) {
+  const list = rows.filter(r => tempLogName(r) === name).sort((a, b) => parseLogTs(b[0]) - parseLogTs(a[0]));
+  let n = 0;
+  for (const r of list) { if (isNaN(tempNum(r[3]))) n++; else break; }
+  return n;
+}
 function tempPeriodStart(days) {   // 기간(일)→시작 epoch(ms). 0=전체
   if (!days) return 0;
   const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (days - 1));
@@ -8020,30 +8034,46 @@ Screens['temp-log'] = async () => {
   // 기간 통계 (기기별 min/max/avg/이탈수)
   const devNames = [...new Set(inRange.map(x => tempLogName(x.r)))];
   const statRows = devNames.map(n => {
-    const vals = inRange.filter(x => tempLogName(x.r) === n).map(x => tempNum(x.r[3])).filter(v => !isNaN(v));
-    if (!vals.length) return '';
-    const lim = tempLimitFor(n), mn = Math.min(...vals), mx = Math.max(...vals), av = vals.reduce((a,b)=>a+b,0)/vals.length;
-    const dc = inRange.filter(x => tempLogName(x.r) === n && isTempDeviation(x.r[3], lim)).length;
+    const all = inRange.filter(x => tempLogName(x.r) === n);           // 전량 결측이어도 행을 남긴다(중단 은폐 방지)
+    const vals = all.map(x => tempNum(x.r[3])).filter(v => !isNaN(v));
+    const lim = tempLimitFor(n);
+    const dc = all.filter(x => tempRowState(x.r[3], lim) === '이탈').length;
+    const mc = all.filter(x => tempRowState(x.r[3], lim) === '결측').length;
+    const has = vals.length > 0;
+    const mn = has ? Math.min(...vals).toFixed(1) : '-';
+    const mx = has ? Math.max(...vals).toFixed(1) : '-';
+    const av = has ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : '-';
     return `<tr><td style="padding:6px 8px;font-weight:600">${n}</td>
-      <td style="padding:6px 8px;text-align:right">${mn.toFixed(1)}</td>
-      <td style="padding:6px 8px;text-align:right">${mx.toFixed(1)}</td>
-      <td style="padding:6px 8px;text-align:right">${av.toFixed(1)}</td>
-      <td style="padding:6px 8px;text-align:right;font-weight:600;color:${dc?'var(--err)':'inherit'}">${dc}</td></tr>`;
+      <td style="padding:6px 8px;text-align:right">${mn}</td>
+      <td style="padding:6px 8px;text-align:right">${mx}</td>
+      <td style="padding:6px 8px;text-align:right">${av}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600;color:${dc?'var(--err)':'inherit'}">${dc}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600;color:${mc?'var(--warn,#e65100)':'inherit'}">${mc}</td></tr>`;
   }).join('');
+
+  // 연동 중단 경보 — 최근 연속 결측이 3회(30분) 이상이면 상단에 크게 알린다
+  const stalled = Object.keys(latest).map(n => ({ n, k: tempMissingStreak(rows, n) })).filter(x => x.k >= 3);
+  const stallBanner = stalled.length ? `<div class="card" style="border-left:4px solid var(--err);background:#fdecec;padding:12px 14px;margin-bottom:10px">
+      <div class="fs-13 fw-8 c-err">⚠ 온도 자동수집 중단 의심</div>
+      <div class="fs-12 c-txt-l mt-4">${stalled.map(x => `${x.n}: 최근 <b>${x.k}회 연속 결측</b>(약 ${x.k >= 6 ? Math.round(x.k/6) + '시간' : x.k*10 + '분'})`).join(' · ')}</div>
+      <div class="fs-11 c-txt-l mt-4">센서·게이트웨이 또는 <b>Tuya 구독 만료</b>를 확인하세요. 확인 전까지 CCP 온도 근거가 없습니다.</div>
+    </div>` : '';
 
   const MAXROW = 200;
   const logHtml = inRange.slice(0, MAXROW).map(({r}) => {
-    const lim = tempLimitFor(tempLogName(r)), dev = isTempDeviation(r[3], lim);
-    const tv = isNaN(tempNum(r[3])) ? '-' : tempNum(r[3]).toFixed(1);
-    return `<tr style="${dev?'background:rgba(198,40,40,0.07)':''}">
+    const lim = tempLimitFor(tempLogName(r)), st = tempRowState(r[3], lim), ui = TEMP_STATE_UI[st];
+    const tv = st === '결측' ? '-' : tempNum(r[3]).toFixed(1);
+    const bg = st === '이탈' ? 'background:rgba(198,40,40,0.07)' : st === '결측' ? 'background:rgba(230,81,0,0.06)' : '';
+    return `<tr style="${bg}">
       <td style="padding:5px 8px;white-space:nowrap">${(r[0]||'').substring(5,16)}</td>
       <td style="padding:5px 8px">${tempLogName(r)}</td>
-      <td style="padding:5px 8px;text-align:right;font-weight:600;color:${dev?'var(--err)':'inherit'}">${tv}</td>
-      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${dev?'err':'suc'}" style="font-size:10px">${dev?'이탈':'적합'}</span></td></tr>`;
+      <td style="padding:5px 8px;text-align:right;font-weight:600;color:${st==='적합'?'inherit':ui.c}">${tv}</td>
+      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${ui.b}" style="font-size:10px">${st}</span></td></tr>`;
   }).join('');
 
   $id('content').innerHTML = `
     <div style="padding:16px">
+      ${stallBanner}
       ${cards}
       <div style="display:flex;gap:6px;margin:12px 0 8px">
         ${periods.map(p => `<div onclick="State.tempPeriod=${p.d};Router.go('temp-log')" style="flex:1;text-align:center;padding:7px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:${sel===p.d?'var(--pri)':'var(--white)'};color:${sel===p.d?'#fff':'var(--txt)'};border:1px solid var(--gray-l)">${p.l}</div>`).join('')}
@@ -8052,7 +8082,7 @@ Screens['temp-log'] = async () => {
       ${statRows ? `<div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
         <div class="fs-13 fw-7" style="padding:10px 12px;border-bottom:1px solid var(--gray-l)">기간 통계 · ${periods.find(p=>p.d===sel)?.l}</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">최저</th><th style="padding:6px 8px;text-align:right">최고</th><th style="padding:6px 8px;text-align:right">평균</th><th style="padding:6px 8px;text-align:right">이탈</th></tr></thead>
+          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">최저</th><th style="padding:6px 8px;text-align:right">최고</th><th style="padding:6px 8px;text-align:right">평균</th><th style="padding:6px 8px;text-align:right">이탈</th><th style="padding:6px 8px;text-align:right">결측</th></tr></thead>
           <tbody>${statRows}</tbody></table></div>` : ''}
       <div class="fs-13 fw-7" style="margin:4px 0 6px">온도 로그 <span class="fs-11 c-txt-l">(${inRange.length>MAXROW?`최근 ${MAXROW}/${inRange.length}건`:`${inRange.length}건`})</span></div>
       <div class="card" style="padding:0;overflow:hidden">
@@ -8134,7 +8164,7 @@ async function generateTempLogPdf(days) {
   T('최저℃', SX.mn, y, 8.5, 'bold', '#333', 26, 'right');
   T('최고℃', SX.mx, y, 8.5, 'bold', '#333', 26, 'right');
   T('평균℃', SX.av, y, 8.5, 'bold', '#333', 26, 'right');
-  T('이탈', SX.dev, y, 8.5, 'bold', '#333', 18, 'right');
+  T('이탈/결측', SX.dev, y, 8.5, 'bold', '#333', 18, 'right');
   T('기준', SX.lim, y, 8.5, 'bold', '#333');
   y += 5; hline(y); y += 4;
   const devNames = [...new Set(data.map(tempLogName))];
@@ -8142,15 +8172,16 @@ async function generateTempLogPdf(days) {
     if (y + 6 > PH - M) { doc.addPage(); y = M; }
     const vals = data.filter(r => tempLogName(r) === n).map(r => tempNum(r[3])).filter(v => !isNaN(v));
     const lim = tempLimitFor(n);
-    const dc = data.filter(r => tempLogName(r) === n && isTempDeviation(r[3], lim)).length;
+    const dc = data.filter(r => tempLogName(r) === n && tempRowState(r[3], lim) === '이탈').length;
+    const mc = data.filter(r => tempLogName(r) === n && tempRowState(r[3], lim) === '결측').length;
     T(n, SX.name, y, 8.5, 'normal', '#111');
     if (vals.length) {
       const mn = Math.min(...vals), mx = Math.max(...vals), av = vals.reduce((a,b)=>a+b,0)/vals.length;
       T(mn.toFixed(1), SX.mn, y, 8.5, 'normal', '#111', 26, 'right');
       T(mx.toFixed(1), SX.mx, y, 8.5, 'normal', '#111', 26, 'right');
       T(av.toFixed(1), SX.av, y, 8.5, 'normal', '#111', 26, 'right');
-      T(String(dc), SX.dev, y, 8.5, 'bold', dc ? '#c62828' : '#111', 18, 'right');
-    } else { T('기록 없음', SX.mn, y, 8, 'normal', '#999'); }
+      T(String(dc) + (mc ? '/' + mc : ''), SX.dev, y, 8.5, 'bold', dc ? '#c62828' : mc ? '#e65100' : '#111', 18, 'right');
+    } else { T(`전량 결측 ${mc}건 (온도 근거 없음)`, SX.mn, y, 8, 'bold', '#e65100'); }
     T(lim.label, SX.lim, y, 8, 'normal', '#555');
     y += 6;
   });
@@ -8170,13 +8201,16 @@ async function generateTempLogPdf(days) {
   if (!data.length) { T('해당 기간 기록 없음', M, y, 9, 'normal', '#999', CW, 'center'); y += 6; }
   data.forEach(r => {
     if (y + 6 > PH - M) { doc.addPage(); y = M; logHead(); }
-    const lim = tempLimitFor(tempLogName(r)), dev = isTempDeviation(r[3], lim);
-    const tv = isNaN(tempNum(r[3])) ? '-' : tempNum(r[3]).toFixed(1);
+    const lim = tempLimitFor(tempLogName(r)), st = tempRowState(r[3], lim);
+    const dev = st === '이탈', miss = st === '결측';
+    const tv = miss ? '-' : tempNum(r[3]).toFixed(1);
+    const col = dev ? '#c62828' : miss ? '#e65100' : '#222';
     if (dev) { doc.setFillColor(252, 232, 232); doc.rect(M, y - 0.5, CW, 5.4, 'F'); }
+    else if (miss) { doc.setFillColor(253, 240, 227); doc.rect(M, y - 0.5, CW, 5.4, 'F'); }
     T((r[0]||'').substring(0,19), LX.ts, y, 8, 'normal', '#222');
     T(tempLogName(r), LX.dev, y, 8, 'normal', '#222');
-    T(tv, LX.temp, y, 8, dev ? 'bold' : 'normal', dev ? '#c62828' : '#222', 24, 'right');
-    T(dev ? '이탈' : '적합', LX.jud, y, 8, dev ? 'bold' : 'normal', dev ? '#c62828' : '#1e8e3e');
+    T(tv, LX.temp, y, 8, st === '적합' ? 'normal' : 'bold', col, 24, 'right');
+    T(st, LX.jud, y, 8, st === '적합' ? 'normal' : 'bold', st === '적합' ? '#1e8e3e' : col);
     y += 5.4;
   });
   y += 6;
@@ -12448,7 +12482,13 @@ async function approveWO(woId) {
       try {
         const _stamp = await getShipFreezerStamp();
         const _endTempN = _stamp ? normFreezeTemp(_stamp.temp) : null;
-        const _judge = _endTempN != null ? ccpFreezeJudge(_endTempN, freezeHours) : '적합';   // 센서 없으면 12h 게이트로 적합
+        // 센서 온도가 없으면 '적합'으로 위장하지 않는다 — 온도 근거 없는 CCP 적합 판정 금지.
+        //   (업무 중단을 막기 위해 승인 자체는 허용하되, 기록은 '온도미확인'으로 사실대로 남기고 경고한다.
+        //    비상계획: 수기 실측 → 이탈내용/개선조치란에 측정값·사유 기재)
+        const _judge = _endTempN != null ? ccpFreezeJudge(_endTempN, freezeHours) : '온도미확인';
+        if (_judge === '온도미확인') {
+          toast('⚠ CCP-1 온도 근거 없음 — 냉동고 센서값 미수집. 비상계획에 따라 수기 실측값을 기록하세요.', 'err', 6000);
+        }
         if (_judge === '부적합') {
           toast(`동결온도 CCP 부적합 — 냉동고 온도 ${_endTempN.toFixed(1)}℃ (한계 −18℃). 냉동 상태 점검 후 재시도하세요.`, 'err', 5000);
           hideLoading(); return;
@@ -12466,7 +12506,8 @@ async function approveWO(woId) {
             판정: _judge,
             이탈내용: $id('freeze-dev')?.value || _sd.이탈내용 || '',
             개선조치: $id('freeze-action')?.value || _sd.개선조치 || '',
-            _fmt: 'ccpFreeze-v1', _sensorAuto: _endTempN != null, _autoOnApprove: true
+            _fmt: 'ccpFreeze-v1', _sensorAuto: _endTempN != null, _autoOnApprove: true,
+            _tempMissing: _endTempN == null   // 온도 근거 없음(센서 미수집) — 감사 시 식별용
           });
           await SheetsAPI.updateRowByIndex('공정기록', _gi + 2, { 5: JSON.stringify(_sd) });
         }
