@@ -7479,14 +7479,16 @@ Screens['items-fg'] = async () => {
           } else {
             pkgLine = `${packsPerBox > 0 ? `? × ${packsPerBox}봉` : '—'}${isAdmin ? ' <span class="c-warn">· 봉당 중량 미설정</span>' : ''}`;
           }
-          const totalStock = lots.filter(l => l[1] === code && l[7] !== '출하' && l[7] !== '폐기')
-            .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
+          // 현재고 = 완제품LOT 잔량(col8=remain) 합 · 상태(col9) 비활성(출하완료·폐기·삭제·소진·채번예약) 제외.
+          //   ⚠ 구버전 버그: col7(=woId)로 필터하고 col6(=소비기한)을 합산 → 만료연도 합(예: 200,598)이 재고로 오표시.
+          const totalStock = lots.filter(l => l[1] === code && !['출하완료', '폐기', '삭제', '소진', '채번예약'].includes(l[9]))
+            .reduce((sum, l) => sum + (parseFloat(l[8]) || 0), 0);
           return `
             <div class="card">
               <div class="row between mb-4">
                 <div class="fs-14 fw-6" style="flex:1;min-width:0">${name} <span class="fs-11 c-txt-l">${code}</span></div>
                 <div class="row" style="gap:6px;align-items:center;flex-shrink:0">
-                  <span class="badge badge-pri">${totalStock > 0 ? totalStock.toLocaleString() + (unit||'') : '재고없음'}</span>
+                  <span class="badge badge-pri">${totalStock > 0 ? totalStock.toLocaleString() + '개' + (perBagKg > 0 ? ` · ${(totalStock * perBagKg).toLocaleString()}kg` : '') : '재고없음'}</span>
                   ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
                 </div>
               </div>
