@@ -6544,7 +6544,7 @@ const DB_SHEETS = {
   'SOP': ['sopId','name','target','version','status','stepCount'],
   'SOP공정단계': ['sopId','stepNo','stepName','stepType','rmCode','std','checks'],
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
-  '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status'],
+  '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status','매입단가'],
   '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage'],
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
@@ -6947,8 +6947,11 @@ function renderBomResult() {
       isShort = stockKg < needKg;
     }
     const shortKg = isShort ? needKg - stockKg : 0;
-    return { rmCode, rmName, ratio, needKg, needConv, stockKg, stockConv, isShort, shortKg, sku, isWater };
+    const unitPrice = parseFloat(item?.[13]) || 0;   // 매입단가(원/kg · 원재료품목 col13)
+    return { rmCode, rmName, ratio, needKg, needConv, stockKg, stockConv, isShort, shortKg, sku, isWater, unitPrice, cost: needKg * unitPrice };
   });
+  const totalCost = rows.reduce((s, r) => s + (r.cost || 0), 0);   // 생산원가(재료비) 합계
+  const anyNoPrice = rows.some(r => !r.isWater && !(r.unitPrice > 0));   // 단가 미입력 자재 존재 여부
 
   const anyShort = rows.some(r => r.isShort);
   const totalNeed = rows.reduce((s, r) => s + r.needKg, 0);
@@ -6966,6 +6969,18 @@ function renderBomResult() {
         </div>
       </div>
       ${anyShort ? '<div class="fs-12 c-err mt-4 fw-6">⚠ 재고 부족 자재가 있습니다 (아래 빨간색 표시)</div>' : '<div class="fs-12 c-suc mt-4 fw-6">✓ 모든 자재 재고 충분</div>'}
+    </div>
+
+    <div class="card" style="margin-top:8px;background:${anyNoPrice ? '#fff8e1' : '#f0f7ff'};border-left:3px solid ${anyNoPrice ? 'var(--warn)' : 'var(--pri)'}">
+      <div class="row between" style="align-items:baseline">
+        <div class="fs-13 fw-7">💰 생산원가 (재료비)</div>
+        <div class="fs-18 fw-8 c-pri">${Math.round(totalCost).toLocaleString()}원</div>
+      </div>
+      <div class="row between fs-11 c-txt-l mt-4" style="gap:8px">
+        <span>kg당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg).toLocaleString() : 0}원</b> · 봉(5kg)당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg * 5).toLocaleString() : 0}원</b></span>
+        <span>박스(15kg)당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg * 15).toLocaleString() : 0}원</b></span>
+      </div>
+      ${anyNoPrice ? '<div class="fs-11 c-warn mt-4">⚠ 매입단가 미입력 자재가 있어 원가가 과소 산정됩니다 — 원재료 품목 화면에서 단가를 입력하세요</div>' : '<div class="fs-10 c-txt-l mt-4">단가 = 원재료 품목 매입단가(원/kg) × 필요량(배합비×1.01). 배송·포장 제외 재료비만.</div>'}
     </div>
 
     <div class="card" style="padding:0;overflow:hidden;margin-top:8px">
@@ -6989,7 +7004,7 @@ function renderBomResult() {
               <div class="fs-11 c-txt-l">${r.isWater ? '수도 공급 · 추적 안함' : '≈ ' + r.stockConv}</div>
             </div>
           </div>
-          <div class="fs-10 c-txt-l mt-4">배합비 ${r.ratio.toFixed(4)} · SKU "${r.sku || '-'}"</div>
+          <div class="fs-10 c-txt-l mt-4">배합비 ${r.ratio.toFixed(4)} · SKU "${r.sku || '-'}"${r.isWater ? '' : ` · 단가 ${r.unitPrice > 0 ? r.unitPrice.toLocaleString() + '원/kg' : '<span style="color:var(--warn)">미입력</span>'} · 원가 <b>${Math.round(r.cost).toLocaleString()}원</b>`}</div>
         </div>
       `).join('')}
       <div class="row between" style="padding:10px 12px;background:#eef5ff">
@@ -7276,6 +7291,8 @@ Screens['items-rm'] = async () => {
           const lotCount = lots.filter(l => l[1] === code).length;
           // 표시 단위 환산 (계란: 30알/판 = 1.5kg/판 → 발주점도 판 단위로 표시)
           const parsed = parseSkuUnit(sku);
+          const unitPrice = parseFloat(item[13]) || 0;   // 매입단가(원/kg · 원재료품목 col13)
+          const skuConvHint = (unitPrice > 0 && parsed && parsed.perUnit > 0) ? ` (≈ ${Math.round(unitPrice * parsed.perUnit).toLocaleString()}원/${parsed.unitName})` : '';
           let rpDispBody = rpVal > 0 ? `${rpVal}${unit}` : '미설정';
           if (parsed && parsed.perUnit > 0 && rpVal > 0) {
             const u = Math.round(rpVal / parsed.perUnit * 10) / 10;
@@ -7298,6 +7315,10 @@ Screens['items-rm'] = async () => {
                 <div class="row between" style="margin-top:4px;align-items:center;gap:6px">
                   <div class="fs-12">현재고: <b>${totalRemain}${unit}</b> · 발주점: <b>${rpDispBody}</b>${lotCount > 0 ? ` · LOT ${lotCount}건` : ''}</div>
                   <button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px;flex-shrink:0" onclick="openReorderPointEditor(${editPayload})">✏️ 발주점</button>
+                </div>
+                <div class="row between" style="margin-top:4px;align-items:center;gap:6px">
+                  <div class="fs-12">매입단가: <b>${unitPrice > 0 ? unitPrice.toLocaleString() + '원/' + unit : '<span style="color:var(--warn)">미입력</span>'}</b><span class="fs-11 c-txt-l">${skuConvHint}</span></div>
+                  <button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px;flex-shrink:0" onclick="openRmCostEditor('${code}','${(name||'').replace(/'/g,"\\'")}',${unitPrice},'${(sku||'').replace(/'/g,"\\'")}','${unit}')">✏️ 단가</button>
                 </div>
               ` : ''}
               ${!isWater && (leadDays || orderCycle) ? `<div class="fs-11 c-txt-l">리드타임: ${leadDays || '-'}일 · 주문주기: ${orderCycle || '-'}</div>` : ''}
@@ -7370,6 +7391,64 @@ async function saveReorderPoint(code, name, perUnit, unit, closeFn) {
   } finally {
     hideLoading();
     releaseLock('saveReorderPoint');
+  }
+}
+
+/* 매입단가 편집 모달 — 원/kg 입력(공급가 기준) · 구매단위(판/포대/통) 환산 헬퍼. BOM 원가계산에 사용 */
+function openRmCostEditor(code, name, currentPrice, sku, unit) {
+  const parsed = parseSkuUnit(sku);
+  const hasSkuUnit = parsed && parsed.perUnit > 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:340px">
+      <div class="fs-16 fw-7 mb-8">💰 매입단가 수정</div>
+      <div class="fs-12 c-txt-l mb-8">${code} · ${name}${sku ? ' · ' + sku : ''}</div>
+      <div class="input-group" style="margin-bottom:8px">
+        <label>매입단가 (원/${unit || 'kg'} · 공급가 기준)</label>
+        <input type="number" id="rmcost-input" value="${currentPrice || ''}" min="0" step="1" inputmode="numeric" placeholder="예: 2000" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      ${hasSkuUnit ? `
+        <div class="card bl-info" style="background:#e3f2fd;padding:8px;margin-bottom:12px">
+          <div class="fs-11 c-info">${parsed.unitName} 1개 = ${parsed.perUnit}${unit || 'kg'}</div>
+          <div class="fs-11 c-txt-l" id="rmcost-conv">${currentPrice > 0 ? `≈ ${Math.round(currentPrice * parsed.perUnit).toLocaleString()}원/${parsed.unitName}` : `${parsed.unitName}당 가격 ÷ ${parsed.perUnit} = 원/${unit || 'kg'}`}</div>
+        </div>
+      ` : `<div class="fs-11 c-txt-l mb-12">원가계산은 ${unit || 'kg'}당 단가 기준</div>`}
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="rmcost-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="rmcost-save">저장</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#rmcost-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  const convEl = overlay.querySelector('#rmcost-conv');
+  if (hasSkuUnit && convEl) overlay.querySelector('#rmcost-input').addEventListener('input', e => {
+    const v = parseFloat(e.target.value) || 0;
+    convEl.textContent = v > 0 ? `≈ ${Math.round(v * parsed.perUnit).toLocaleString()}원/${parsed.unitName}` : `${parsed.unitName}당 가격 ÷ ${parsed.perUnit} = 원/${unit || 'kg'}`;
+  });
+  overlay.querySelector('#rmcost-save').onclick = () => saveRmCost(code, name, unit, close);
+  setTimeout(() => $id('rmcost-input')?.focus(), 50);
+}
+
+async function saveRmCost(code, name, unit, closeFn) {
+  const price = parseFloat($id('rmcost-input')?.value);
+  if (isNaN(price) || price < 0) { toast('0 이상의 숫자를 입력하세요', 'err'); return; }
+  if (!acquireLock('saveRmCost')) return;
+  try {
+    showLoading();
+    await SheetsAPI.updateCell('원재료품목', 0, code, 13, String(Math.round(price)));   // col13 = 매입단가(원/기본단위)
+    SheetsAPI.invalidateCache('원재료품목');
+    toast(`${code} ${name} 매입단가 ${Math.round(price).toLocaleString()}원/${unit || 'kg'} 저장`, 'suc');
+    closeFn && closeFn();
+    await Screens['items-rm']();
+  } catch (e) {
+    toast('저장 실패: ' + e.message, 'err', 5000);
+  } finally {
+    hideLoading();
+    releaseLock('saveRmCost');
   }
 }
 
