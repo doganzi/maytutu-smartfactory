@@ -5028,10 +5028,12 @@ async function loadReprintStock() {
     });
 
     fgLots.forEach(l => {
-      const remain = parseFloat(l[7]) || 0;
+      // 완제품 잔량 = col8(remain). ⚠ 구버그: col7(=woId)를 잔량으로 합산 → woId가 문자열이면 전부 skip돼 완제품이 목록에서 누락.
+      const remain = parseFloat(l[8]) || 0;
       if (remain <= 0) return;
       const key = `fg:${l[1]}`;
-      if (!items[key]) items[key] = { code: l[1], name: l[2], type: 'fg', typeLabel: '완제품', totalStock: 0, lotCount: 0, unit: l[4] || 'ea' };
+      // 완제품 단위 = 개(봉). col4(=packUnit '5kg')를 단위로 쓰면 '732 5kg'처럼 오표시됨.
+      if (!items[key]) items[key] = { code: l[1], name: l[2], type: 'fg', typeLabel: '완제품', totalStock: 0, lotCount: 0, unit: '개' };
       items[key].totalStock += remain;
       items[key].lotCount++;
     });
@@ -5089,7 +5091,7 @@ async function loadReprintLots(type, itemCode, itemName) {
     const cache = window._reprintCache || {};
     let lots = [];
     if (type === 'rm') lots = (cache.rmLots || await SheetsAPI.getAll('원재료LOT')).filter(l => l[1] === itemCode && (parseFloat(l[8]) || 0) > 0 && !['폐기','입고취소'].includes(l[9]));
-    else if (type === 'fg') lots = (cache.fgLots || await SheetsAPI.getAll('완제품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[7]) || 0) > 0 && !['삭제','채번예약','출하완료','폐기','소진'].includes(l[9]));
+    else if (type === 'fg') lots = (cache.fgLots || await SheetsAPI.getAll('완제품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[8]) || 0) > 0 && !['삭제','채번예약','출하완료','폐기','소진'].includes(l[9]));
     else if (type === 'sp') lots = (cache.spLots || await SheetsAPI.getAll('소모품LOT')).filter(l => l[1] === itemCode && (parseFloat(l[6]) || 0) > 0 && l[7] !== '폐기');
 
     area.innerHTML = `
@@ -5100,8 +5102,9 @@ async function loadReprintLots(type, itemCode, itemName) {
       </div>
       ${lots.length === 0 ? '<div class="fs-12 c-txt-l">잔량이 있는 LOT가 없습니다</div>' : lots.map(l => {
         const lotId = l[0];
-        const remain = type === 'rm' ? l[8] : type === 'fg' ? l[7] : l[6];
-        const unit = type === 'rm' ? (l[5]||'kg') : type === 'fg' ? (l[4]||'ea') : (l[4]||'');
+        // 완제품: 잔량 col8(remain), 단위 '개'(봉). ⚠ 구버그: col7(=woId)를 잔량으로 표시.
+        const remain = type === 'rm' ? l[8] : type === 'fg' ? l[8] : l[6];
+        const unit = type === 'rm' ? (l[5]||'kg') : type === 'fg' ? '개' : (l[4]||'');
         const exp = type === 'rm' ? (l[7]||'') : type === 'fg' ? (l[6]||'') : '';
         const indivCnt = type === 'rm' ? (l[10]||'') : '';
         const date = type === 'rm' ? (l[6]||'') : (l[5]||'');
