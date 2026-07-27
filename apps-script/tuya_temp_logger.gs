@@ -125,7 +125,9 @@ function getLogSheet_() {
   var sh = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
-    sh.appendRow(['기록시각(KST)', '기기ID', '기기명', '온도(℃)', '상태', '원시값']);
+    // G~I열(이탈사유·기록자·기록시각)은 앱(동결온도 모니터링)에서 사람이 기재한다.
+    // 이 스크립트는 A~F열만 적재하므로 사유 칸을 덮어쓰지 않는다.
+    sh.appendRow(['기록시각(KST)', '기기ID', '기기명', '온도(℃)', '상태', '원시값', '이탈사유', '사유기록자', '사유기록시각']);
     sh.setFrozenRows(1);
   }
   return sh;
