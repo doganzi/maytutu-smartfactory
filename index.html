@@ -8077,6 +8077,136 @@ function parseLogTs(s) {   // 'YYYY-MM-DD HH:mm:ss'(KST) → epoch ms
 }
 const tempLogName = r => r[2] || r[1] || '(미상)';
 
+/* ── 이탈·결측 사유 (동결온도로그 G/H/I열: 사유 · 기록자 · 기록시각) ────────────────
+   종이 일지의 '이탈내용'에 대응. 성애 제거·문 열림처럼 창고 운전상태가 아닌 순간 이벤트는
+   transient=true 로 구분해, 작업지시서 CCP 일지의 냉동고 온도 대표값 산정에서 제외한다
+   (제외 사실·사유는 일지에 그대로 남긴다 — 이탈을 지우는 것이 아니라 사유를 붙이는 것).
+   ※ 시트 G열이 없어도 앱은 정상 동작하며, 첫 저장 시 값이 채워진다(Apps Script 적재는 A~F열만 사용). */
+const TEMP_REASON_COL = 6;                       // 0-based (시트 G열)
+const TEMP_REASON_PRESETS = [
+  { t: '성애 제거(제상)',            transient: true  },
+  { t: '문 열림 — 제품 투입',        transient: true  },
+  { t: '문 열림 — 제품 반출·출하',   transient: true  },
+  { t: '문 열림 — 재고 점검·정리',   transient: true  },
+  { t: '설비 고장·수리',             transient: false },
+  { t: '정전',                       transient: false },
+  { t: '센서·통신 오류',             transient: false },
+];
+const tempReasonOf = r => String((r && r[TEMP_REASON_COL]) || '').trim();
+// 사유는 사람이 입력한 자유 문자열 — 표·다이얼로그에 넣기 전 이스케이프
+const escReason = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/* 사유가 '순간 이벤트'인가 — 프리셋과 일치할 때만 true.
+   직접입력 사유는 판단 근거가 없으므로 항상 false(보수적: 대표값에서 함부로 빼지 않는다). */
+function tempReasonTransient(reason) {
+  const s = String(reason || '').trim();
+  if (!s) return false;
+  return TEMP_REASON_PRESETS.some(p => p.transient && s.startsWith(p.t));
+}
+function tempNowStamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/* ── CCP 일지용 냉동창고 온도 선정 ────────────────────────────────────────────
+   종이 일지의 '냉동창고 온도계 확인'에 대응하는 값을 센서 로그에서 고른다.
+   문제: 기준시각에 가장 가까운 1건을 그대로 쓰면 <b>제품 투입 = 문 개방</b> 순간의 값
+        (예: 10:40 −13.3℃)이 창고 보관온도로 일지에 실려, 실제로는 −18℃ 이하를 유지한
+        창고가 서류상 한계기준 이탈로 남는다.
+   규칙:
+     ① 사유가 기록된 순간 이탈(성애 제거·문 열림)은 창고 운전상태가 아니므로 후보에서 제외.
+        제외 내역·사유는 excluded 로 돌려주어 일지에 그대로 표기한다 — 삭제·은폐가 아니라 구분.
+     ② 투입 기준: 문을 열기 전 상태인 '기준시각 이전 최근값'을 우선 채택(mode 기본).
+     ③ 그래도 −18℃ 초과면 그 값을 그대로 쓰고 dev=true — <b>사유 없는 이탈은 대체하지 않는다.</b>
+   반환: { temp, at, dev, basis, excluded[] } · 창(window) 안에 실측이 없으면 null */
+function pickFreezerTemp(logs, targetMs, opt) {
+  opt = opt || {};
+  const beforeMs = opt.beforeMs != null ? opt.beforeMs : 60 * 60000;
+  const afterMs  = opt.afterMs  != null ? opt.afterMs  : 40 * 60000;
+  if (!targetMs || !Array.isArray(logs)) return null;
+  const cands = [];
+  logs.forEach(r => {
+    if (!String(r[2] || r[1] || '').includes('냉동창고')) return;
+    const ts = parseLogTs(r[0]), t = tempNum(r[3]);
+    if (!ts || isNaN(t)) return;
+    if (ts < targetMs - beforeMs || ts > targetMs + afterMs) return;
+    cands.push({ ts, t, at: String(r[0] || ''), reason: tempReasonOf(r) });
+  });
+  if (!cands.length) return null;
+  const isDev = c => c.t > -18;
+  const excluded = cands.filter(c => isDev(c) && tempReasonTransient(c.reason));
+  let pool = cands.filter(c => excluded.indexOf(c) < 0);
+  if (!pool.length) pool = cands;                       // 후보가 전부 '사유 있는 이탈' → 숨기지 않고 그대로 쓴다
+  let hit, basis;
+  if (opt.mode === 'latest') {
+    hit = pool.slice().sort((a, b) => b.ts - a.ts)[0]; basis = '최근값';
+  } else {
+    const before = pool.filter(c => c.ts <= targetMs).sort((a, b) => b.ts - a.ts);
+    const after  = pool.filter(c => c.ts >  targetMs).sort((a, b) => a.ts - b.ts);
+    if (before.length) { hit = before[0]; basis = '기준시각 직전값'; }
+    else { hit = after[0]; basis = '기준시각 직후값'; }
+  }
+  return { temp: hit.t, at: hit.at, dev: isDev(hit), basis, excluded };
+}
+
+/* 사유 입력 다이얼로그 — 프리셋 칩 + 직접입력. 같은 기기의 연속 이탈 구간은 일괄 적용 가능
+   (성애 제거 1회가 10분 간격 기록 3~6건에 걸치므로, 건별 입력은 현장에서 지켜지지 않는다). */
+function openTempReasonDialog(sheetRow) {
+  const meta = (window.__tempReasonRows || {})[sheetRow];
+  if (!meta) return;
+  const streak = meta.streak || [sheetRow];
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px">
+      <div class="fs-16 fw-7 mb-8">📝 ${meta.state} 사유 기록</div>
+      <div class="fs-12 c-txt-l mb-12">${meta.at} · ${meta.name} · <b>${meta.temp}</b> <span class="badge badge-${TEMP_STATE_UI[meta.state]?.b || 'warn'}" style="font-size:10px">${meta.state}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        ${TEMP_REASON_PRESETS.map(p => `<div class="tr-chip" data-t="${p.t}" style="padding:6px 10px;border:1px solid var(--gray-l);border-radius:14px;font-size:12px;cursor:pointer;background:var(--white)">${p.t}</div>`).join('')}
+      </div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label>사유 (직접입력·보완)</label>
+        <input type="text" id="tr-text" value="${escReason(meta.reason)}" placeholder="예: 성애 제거(제상) — 10분 내 −18℃ 이하 회복 확인" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      ${streak.length > 1 ? `<label class="fs-12" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="tr-bulk" checked> 이 ${meta.state} 구간 <b>연속 ${streak.length}건</b>에 함께 적용</label>` : ''}
+      <div class="fs-11 c-txt-l mb-12">기록자·기록시각이 함께 남습니다. 사유는 HACCP 이탈기록이므로 사실만 기재하세요.</div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="tr-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="tr-ok">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#tr-text');
+  overlay.querySelectorAll('.tr-chip').forEach(c => c.onclick = () => { input.value = c.dataset.t; input.focus(); });
+  overlay.querySelector('#tr-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#tr-ok').onclick = async () => {
+    const reason = input.value.trim();
+    if (!reason) { toast('사유를 입력하세요', 'warn'); return; }
+    const bulk = overlay.querySelector('#tr-bulk')?.checked;
+    const targets = bulk ? streak : [sheetRow];
+    overlay.remove();
+    try {
+      showLoading();
+      await saveTempReasons(targets, reason);
+      hideLoading();
+      toast(`사유 저장 완료 (${targets.length}건)`, 'suc', 2000);
+      Router.go('temp-log');
+    } catch (e) { hideLoading(); toast('사유 저장 실패: ' + e.message, 'err'); }
+  };
+}
+
+async function saveTempReasons(sheetRows, reason) {
+  const who = (State.user?.email || '').split('@')[0] || '-';
+  const at = tempNowStamp();
+  await SheetsAPI.batchUpdate([
+    // 헤더 보강 — G~I열은 Apps Script 적재(A~F) 밖이라 라벨이 없다. 매 저장 시 동일값으로 덮어써 항상 맞춘다.
+    { range: '동결온도로그!G1:I1', values: [['이탈사유', '사유기록자', '사유기록시각']] },
+    ...sheetRows.map(rw => ({ range: `동결온도로그!G${rw}:I${rw}`, values: [[reason, who, at]] }))
+  ]);
+  SheetsAPI.invalidateCache('동결온도로그');
+}
+
 Screens['temp-log'] = async () => {
   renderHeader('동결온도 모니터링', '냉장/냉동 실시간 온도 로그', { back: 'more' });
   showLoading();
@@ -8089,9 +8219,32 @@ Screens['temp-log'] = async () => {
   const sel = State.tempPeriod;
   const startMs = tempPeriodStart(sel);
 
-  const inRange = rows.map(r => ({ ts: parseLogTs(r[0]), r }))
+  // row = 시트 실제 행번호(헤더 1행 + 0-based idx) — 사유 저장 대상 지정에 사용
+  const inRange = rows.map((r, i) => ({ ts: parseLogTs(r[0]), r, row: i + 2 }))
     .filter(x => !startMs || x.ts >= startMs)
     .sort((a, b) => b.ts - a.ts);
+
+  /* 연속 이탈·결측 구간 — 기기별 시간순으로 같은 상태가 이어지는 묶음.
+     성애 제거 1회가 기록 여러 건에 걸치므로 사유를 구간 단위로 한 번에 남길 수 있게 한다. */
+  const streakOf = {};
+  {
+    const byDev = {};
+    rows.forEach((r, i) => {
+      const n = tempLogName(r);
+      (byDev[n] = byDev[n] || []).push({ ts: parseLogTs(r[0]), row: i + 2, st: tempRowState(r[3], tempLimitFor(n)) });
+    });
+    Object.keys(byDev).forEach(n => {
+      const list = byDev[n].sort((a, b) => a.ts - b.ts);
+      let run = [];
+      const flush = () => { if (run.length) { const ids = run.map(x => x.row); ids.forEach(id => { streakOf[id] = ids; }); } run = []; };
+      list.forEach(x => {
+        if (x.st === '적합') { flush(); return; }
+        if (run.length && run[run.length - 1].st !== x.st) flush();
+        run.push(x);
+      });
+      flush();
+    });
+  }
 
   // 현황카드 — 알람은 '최근 6시간 평균' 기준(문 여닫음 등 순간 이탈 노이즈 제거), 현재값은 참고 표시
   const latest = {};
@@ -8143,21 +8296,43 @@ Screens['temp-log'] = async () => {
       <div class="fs-11 c-txt-l mt-4">센서·게이트웨이 또는 <b>Tuya 구독 만료</b>를 확인하세요. 확인 전까지 CCP 온도 근거가 없습니다.</div>
     </div>` : '';
 
+  // 사유 미기재 현황 — HACCP 은 이탈 1건마다 원인·조치 기록을 요구한다. 남은 건수를 눈에 보이게.
+  const needReason = inRange.filter(x => tempRowState(x.r[3], tempLimitFor(tempLogName(x.r))) !== '적합');
+  const noReason = needReason.filter(x => !tempReasonOf(x.r));
+  const reasonBanner = needReason.length ? `<div class="card" style="border-left:4px solid ${noReason.length ? 'var(--warn,#e65100)' : 'var(--suc,#1e8e3e)'};background:${noReason.length ? '#fff8e1' : '#f1f8f4'};padding:10px 14px;margin-bottom:10px">
+      <div class="fs-12 fw-7">${noReason.length ? `📝 사유 미기재 ${noReason.length}건` : '✅ 이탈·결측 사유 전건 기재'}</div>
+      <div class="fs-11 c-txt-l mt-4">해당 기간 이탈·결측 ${needReason.length}건${noReason.length ? ` 중 <b>${noReason.length}건</b>에 사유가 없습니다 — 아래 표의 <b>＋사유</b>를 눌러 성애 제거·문 열림 등 원인을 기록하세요.` : ' — 사유가 모두 기록되어 있습니다.'}</div>
+    </div>` : '';
+
+  window.__tempReasonRows = {};
   const MAXROW = 200;
-  const logHtml = inRange.slice(0, MAXROW).map(({r}) => {
+  const logHtml = inRange.slice(0, MAXROW).map(({r, row}) => {
     const lim = tempLimitFor(tempLogName(r)), st = tempRowState(r[3], lim), ui = TEMP_STATE_UI[st];
     const tv = st === '결측' ? '-' : tempNum(r[3]).toFixed(1);
     const bg = st === '이탈' ? 'background:rgba(198,40,40,0.07)' : st === '결측' ? 'background:rgba(230,81,0,0.06)' : '';
+    const reason = tempReasonOf(r);
+    // 일괄 적용 상한 72건(=10분 간격 12시간) — 장기 결측 구간(수백 건)까지 한 번에 쓰면 API 호출이 폭증한다.
+    const _st = streakOf[row] || [row];
+    let streak = _st;
+    if (_st.length > 72) { const p = Math.max(0, _st.indexOf(row)); streak = _st.slice(Math.max(0, p - 36), Math.max(0, p - 36) + 72); }
+    window.__tempReasonRows[row] = { at: (r[0]||'').substring(0,16), name: tempLogName(r), temp: st === '결측' ? '기록 없음' : `${tv}℃`, state: st, reason, streak };
+    const reasonCell = reason
+      ? `<span onclick="openTempReasonDialog(${row})" title="${escReason(reason)}" style="cursor:pointer;color:var(--txt)">${escReason(reason.length > 14 ? reason.substring(0,14) + '…' : reason)} ✎</span>`
+      : st === '적합'
+        ? '<span class="c-txt-l">-</span>'
+        : `<span onclick="openTempReasonDialog(${row})" style="cursor:pointer;color:var(--pri);font-weight:600">＋사유</span>`;
     return `<tr style="${bg}">
       <td style="padding:5px 8px;white-space:nowrap">${(r[0]||'').substring(5,16)}</td>
       <td style="padding:5px 8px">${tempLogName(r)}</td>
       <td style="padding:5px 8px;text-align:right;font-weight:600;color:${st==='적합'?'inherit':ui.c}">${tv}</td>
-      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${ui.b}" style="font-size:10px">${st}</span></td></tr>`;
+      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${ui.b}" style="font-size:10px">${st}</span></td>
+      <td style="padding:5px 8px;font-size:11px">${reasonCell}</td></tr>`;
   }).join('');
 
   $id('content').innerHTML = `
     <div style="padding:16px">
       ${stallBanner}
+      ${reasonBanner}
       ${cards}
       <div style="display:flex;gap:6px;margin:12px 0 8px">
         ${periods.map(p => `<div onclick="State.tempPeriod=${p.d};Router.go('temp-log')" style="flex:1;text-align:center;padding:7px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:${sel===p.d?'var(--pri)':'var(--white)'};color:${sel===p.d?'#fff':'var(--txt)'};border:1px solid var(--gray-l)">${p.l}</div>`).join('')}
@@ -8171,9 +8346,9 @@ Screens['temp-log'] = async () => {
       <div class="fs-13 fw-7" style="margin:4px 0 6px">온도 로그 <span class="fs-11 c-txt-l">(${inRange.length>MAXROW?`최근 ${MAXROW}/${inRange.length}건`:`${inRange.length}건`})</span></div>
       <div class="card" style="padding:0;overflow:hidden">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th></tr></thead>
-          <tbody>${logHtml || `<tr><td colspan="4" style="padding:14px;text-align:center" class="c-txt-l fs-12">해당 기간 기록 없음</td></tr>`}</tbody></table></div>
-      <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록<br>알람은 <b>최근 6시간 평균</b> 기준 (개별 기록의 적합/이탈 판정은 그대로 보존)</div>
+          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th><th style="padding:6px 8px;text-align:left">사유</th></tr></thead>
+          <tbody>${logHtml || `<tr><td colspan="5" style="padding:14px;text-align:center" class="c-txt-l fs-12">해당 기간 기록 없음</td></tr>`}</tbody></table></div>
+      <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록<br>알람은 <b>최근 6시간 평균</b> 기준 (개별 기록의 적합/이탈 판정은 그대로 보존)<br>이탈·결측 행의 <b>사유</b>는 성애 제거·문 열림 등 원인을 기록하는 칸입니다 (기록자·기록시각 자동 저장)</div>
     </div>`;
 };
 
@@ -8273,12 +8448,13 @@ async function generateTempLogPdf(days) {
 
   // ── 상세 로그 ──
   T(`■ 온도 로그 상세  (총 ${data.length}건)`, M, y, 11, 'bold', '#111'); y += 7;
-  const LX = { ts:M, dev:M+48, temp:M+90, jud:M+120 };
+  const LX = { ts:M, dev:M+44, temp:M+80, jud:M+108, rsn:M+124 };
   const logHead = () => {
     T('기록시각(KST)', LX.ts, y, 8.5, 'bold', '#333');
     T('기기', LX.dev, y, 8.5, 'bold', '#333');
-    T('온도℃', LX.temp, y, 8.5, 'bold', '#333', 24, 'right');
+    T('온도℃', LX.temp, y, 8.5, 'bold', '#333', 22, 'right');
     T('판정', LX.jud, y, 8.5, 'bold', '#333');
+    T('사유 (이탈·결측 원인)', LX.rsn, y, 8.5, 'bold', '#333');
     y += 5; hline(y); y += 4;
   };
   logHead();
@@ -8293,14 +8469,20 @@ async function generateTempLogPdf(days) {
     else if (miss) { doc.setFillColor(253, 240, 227); doc.rect(M, y - 0.5, CW, 5.4, 'F'); }
     T((r[0]||'').substring(0,19), LX.ts, y, 8, 'normal', '#222');
     T(tempLogName(r), LX.dev, y, 8, 'normal', '#222');
-    T(tv, LX.temp, y, 8, st === '적합' ? 'normal' : 'bold', col, 24, 'right');
+    T(tv, LX.temp, y, 8, st === '적합' ? 'normal' : 'bold', col, 22, 'right');
     T(st, LX.jud, y, 8, st === '적합' ? 'normal' : 'bold', st === '적합' ? '#1e8e3e' : col);
+    // 사유 — 이탈·결측인데 미기재면 공란이 아니라 '미기재'로 드러낸다(빈칸은 기록 완료로 오독된다)
+    const rsn = tempReasonOf(r);
+    if (rsn) T(rsn.length > 34 ? rsn.substring(0, 33) + '…' : rsn, LX.rsn, y, 7.2, 'normal', '#222', PW - M - LX.rsn);
+    else if (st !== '적합') T('미기재', LX.rsn, y, 7.2, 'bold', '#e65100', PW - M - LX.rsn);
     y += 5.4;
   });
   y += 6;
-  if (y + 22 > PH - M) { doc.addPage(); y = M; }
+  if (y + 28 > PH - M) { doc.addPage(); y = M; }
   hline(y); y += 6;
-  T('판정 기준: 냉동창고 ≤ −18℃, 냉장고 0~5℃ (HACCP). 이탈 행은 음영 표시.', M, y, 7.5, 'normal', '#777', CW); y += 9;
+  const noRsn = data.filter(r => tempRowState(r[3], tempLimitFor(tempLogName(r))) !== '적합' && !tempReasonOf(r)).length;
+  T('판정 기준: 냉동창고 ≤ −18℃, 냉장고 0~5℃ (HACCP). 이탈 행은 음영 표시.', M, y, 7.5, 'normal', '#777', CW); y += 4.5;
+  T(`사유: 이탈·결측 기록의 원인(성애 제거·문 열림·설비 이상 등)을 모니터링 담당자가 기재한 내용.${noRsn ? `  ※ 미기재 ${noRsn}건 — 확인 후 보완 기재 필요.` : ''}`, M, y, 7.5, 'normal', noRsn ? '#c62828' : '#777', CW); y += 9;
   T('점검자: _______________ (서명)            확인자: _______________ (서명)', M, y, 9, 'normal', '#333', CW);
 
   const fileName = `동결온도기록부_${periodLabel.replace(/\s/g,'')}_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}.pdf`;
@@ -11250,6 +11432,7 @@ Screens['approval-detail'] = async (params = {}) => {
             <div class="row between"><span class="fs-12 c-txt-l">현재 냉동고 온도 <span class="badge badge-info" style="font-size:9px">센서 자동${shipStamp && shipStamp.ageMin != null ? ` · ${shipStamp.ageMin}분 전` : ''}</span></span><span class="fs-15 fw-8" style="color:#00695c">${sensorEnd.toFixed(1)}°C</span></div>
             <div class="row between mt-4"><span class="fs-12 c-txt-l">제품 온도</span><span class="fs-14 fw-7" style="color:#00695c">${sensorEnd.toFixed(1)}°C <span class="fs-11 c-txt-l fw-4">(냉동고 온도와 동일)</span></span></div>
             <div class="fs-11 c-txt-l mt-4">제품온도 = 냉동고 온도와 동일(12시간+ 동결로 심부온도 평형). <b>실제 출하 시점 온도는 각 제품이 출하될 때 자동 기록</b>되어 작업기록서 '출하 이력'에 남습니다 — 출하 승인 시점 수기 기록은 불필요합니다.</div>
+            ${shipStamp?.excluded?.length ? `<div class="fs-11 mt-4" style="color:#c62828">※ 사유가 기록된 순간 이탈은 창고 보관온도에서 제외하고 채택했습니다 — ${shipStamp.excluded.map(e => `${String(e.at).substring(11,16)} ${e.t.toFixed(1)}℃ (${e.reason})`).join(' / ')}</div>` : ''}
           </div>
           <div class="fs-13 fw-7">판정: <span class="fw-8" style="color:${ccpJudge==='부적합'?'var(--err)':ccpJudge==='적합'?'var(--suc)':'var(--txt-l)'}">${ccpJudge || '-'}</span> <span class="fs-11 c-txt-l fw-4">— 12시간 경과 + 센서 온도 자동 판정</span></div>
           ${ccpJudge === '부적합' ? `
@@ -12044,22 +12227,15 @@ async function generateWOPdf(woId) {
           y += 11;
         };
         fHead();
-        // 투입 냉동고온도 — 수기값(legacy) 우선, 없으면 센서 자동기록에서 투입시각 ±40분 최근값
+        /* 투입 냉동고온도 — 수기값(legacy) 우선, 없으면 센서 자동기록에서 선정.
+           제품 투입은 문을 여는 작업이라 '투입시각에 가장 가까운 값'은 문 개방 순간값이 잡힌다.
+           pickFreezerTemp 가 ①사유 기록된 순간 이탈 제외 ②투입 직전값 우선으로 창고 보관온도를 고른다.
+           (사유 없는 이탈은 그대로 기재되고 dev 로 표시 — 아래 이탈내용 칸에도 자동 기재) */
         const dtOf = s => { const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); return m ? { d: `${+m[2]}/${+m[3]}`, t: `${m[4]}:${m[5]}` } : { d: '', t: '' }; };
-        const inTemp = (() => {
-          if (stepData.freezeTemp) return fmtFreezeTemp(stepData.freezeTemp);
-          const ts = parseLogTs(stepData.freezeStart || wo[11] || '');
-          if (!ts || !Array.isArray(tempLogs)) return '-';
-          let best = null;
-          tempLogs.forEach(tr => {
-            if (!String(tr[2] || tr[1] || '').includes('냉동창고')) return;
-            const lt = parseLogTs(tr[0]); const t = (tr[3] === '' || tr[3] == null) ? NaN : Number(tr[3]);
-            if (!lt || isNaN(t)) return;
-            const dd = Math.abs(lt - ts);
-            if (dd <= 40 * 60000 && (!best || dd < best.dd)) best = { dd, t };
-          });
-          return best ? `${best.t.toFixed(1)}°C` : '-';
-        })();
+        const inPick = stepData.freezeTemp ? null : pickFreezerTemp(tempLogs, parseLogTs(stepData.freezeStart || wo[11] || ''));
+        const inManual = stepData.freezeTemp ? normFreezeTemp(stepData.freezeTemp) : null;
+        const inTemp = inManual != null ? `${inManual.toFixed(1)}°C` : inPick ? `${inPick.temp.toFixed(1)}°C` : '-';
+        const inDev = inManual != null ? inManual > -18 : !!(inPick && inPick.dev);
         const stCkPair = (cx, cw, yy, state) => {   // 제품 상태: □양호 / □불량 (세로)
           const bs = 2.2, sx = cx + (cw - 13) / 2;
           [['양호', state === '양호', false], ['불량', state === '불량', true]].forEach(([lb, on, red], i) => {
@@ -12071,10 +12247,12 @@ async function generateWOPdf(woId) {
           });
         };
         const FRH = 9;
-        const frow = (vals, state, judge) => {
+        // devCols: 한계기준(−18℃)을 넘은 칸 — 붉게·굵게. 이탈은 서식으로도 드러나야 한다.
+        const frow = (vals, state, judge, devCols) => {
           if (y + FRH > PH - 12) { doc.addPage(); y = M; fHead(); }
           fline(y, FRH);
-          vals.forEach((v, i) => { if (v !== null) drawText(String(v), fx[i], y + 2.8, 7.2, 'normal', '#222', fx[i + 1] - fx[i], 'center'); });
+          const dv = devCols || [];
+          vals.forEach((v, i) => { if (v !== null) drawText(String(v), fx[i], y + 2.8, 7.2, dv.indexOf(i) >= 0 ? 'bold' : 'normal', dv.indexOf(i) >= 0 ? '#c62828' : '#222', fx[i + 1] - fx[i], 'center'); });
           if (state !== null) stCkPair(fx[8], fxw[8], y, state);
           if (judge) drawText(judge, fx[9], y + 2.4, 9.5, 'bold', judge === 'O' ? '#1b5e20' : '#c62828', fxw[9], 'center');
           y += FRH;
@@ -12082,10 +12260,29 @@ async function generateWOPdf(woId) {
         const fin = dtOf(stepData.freezeStart || wo[11] || ''), fout = dtOf(stepData.종료시각 || '');
         const done = !!(stepData.제품온도 || stepData.종료시각);
         const judged = stepData.판정 === '적합' ? 'O' : stepData.판정 === '부적합' ? 'X' : '';
+        const endT = normFreezeTemp(stepData.종료온도), prodT = normFreezeTemp(stepData.제품온도);
+        const fDev = [];
+        if (inDev) fDev.push(3);
+        if (done && endT != null && endT > -18) fDev.push(6);
+        if (done && prodT != null && prodT > -18) fDev.push(7);
         frow([fin.d, wo[4] || '', fin.t, inTemp, fout.d, fout.t || (done ? '' : ':'),
           done ? fmtFreezeTemp(stepData.종료온도) : '', done ? fmtFreezeTemp(stepData.제품온도) : ''],
-          done ? (stepData.판정 === '부적합' ? '불량' : '양호') : null, judged);
+          done ? (stepData.판정 === '부적합' ? '불량' : '양호') : null, judged, fDev);
         for (let i = 0; i < 5; i++) frow(['', '', ':', '', '', ':', '', ''], null, '');
+
+        /* 온도 출처 각주 — 어떤 기록을 근거로 몇 시 값을 적었는지 밝힌다.
+           '사유 있는 순간 이탈 제외'는 반드시 제외 내역까지 함께 적어야 감사에서 설명이 된다. */
+        if (inPick) {
+          const _bn = drawText(`※ 투입 시 냉동고 온도는 동결온도로그(센서 10분 자동기록)의 ${inPick.at.substring(0, 16)} ${inPick.basis} — 제품 투입은 문을 여는 작업이므로 문 개방 전 창고 온도를 기재함.`,
+            M, y + 1.5, 7, 'normal', '#555', CW);
+          y = _bn.y + _bn.h + 0.5;
+          if (inPick.excluded.length) {
+            const _ex = drawText(`※ 창고 보관온도에서 제외한 순간 이탈(사유 기록됨): ${inPick.excluded.map(e => `${e.at.substring(11, 16)} ${e.t.toFixed(1)}℃ — ${e.reason}`).join(' / ')}`,
+              M, y + 1, 7, 'normal', '#c62828', CW);
+            y = _ex.y + _ex.h + 0.5;
+          }
+          y += 1.5;
+        }
 
         // ④ 개선조치 방법
         const impT2 = '○ 냉동고 고장시\n 1) 정상작동 가능한 냉동고(또는 냉동차량)으로 이동 → 제품온도측정 → -18℃ 이상 부적합품처리 → 부적합품스티커에 선별로 표시 → 폐기\n○ 정상작동 가능한 냉동고 이동 → 제품온도측정 → -18℃이하 부적합품처리 → 부적합품스티커에 선별로 표시 → 미생물 검사 실시 → ① 검사결과 적합: 재반입 조치 ② 검사결과 부적합: 폐기\n○ 냉동고 제품온도 미달 시 추가 냉동 실시 후 최종 제품온도 -18℃이하 확인 후 출고\n○ 공통 : 개선조치 시\n - 문제 발생 시 HACCP팀장에게 보고 후 조치하며, 개선조치 후 모니터링 일지에 기록 후 HACCP팀장에게 승인을 받는다.';
@@ -12104,12 +12301,19 @@ async function generateWOPdf(woId) {
         bline(y, 6);
         ['이탈내용', '개선조치 및 결과', '개선조치자', '승인자'].forEach((t, i) => drawText(t, bX[i], y + 1.4, 7.5, 'bold', '#222', bw[i], 'center'));
         y += 6;
-        const devH2 = Math.max(measureH(stepData.이탈내용 || ' ', 7.2, 'normal', 56), measureH(stepData.개선조치 || ' ', 7.2, 'normal', 56)) + 4;
+        /* 이탈내용 — 수기 기재분 + 한계기준 초과가 실제로 남아 있으면 자동 기재.
+           (사유로 설명된 순간 이탈은 위 각주로 이미 밝혔으므로 여기 중복 기재하지 않는다) */
+        const autoDev = [];
+        if (inDev) autoDev.push(`투입 시 냉동고 온도 ${inTemp} — 한계기준(−18℃ 이하) 초과`);
+        if (done && endT != null && endT > -18) autoDev.push(`종료 시 냉동고 온도 ${endT.toFixed(1)}℃ — 한계기준 초과`);
+        if (done && prodT != null && prodT > -18) autoDev.push(`제품 온도 ${prodT.toFixed(1)}℃ — 한계기준 초과`);
+        const devText = [stepData.이탈내용 || '', autoDev.length ? `[자동] ${autoDev.join(' / ')}` : ''].filter(Boolean).join('\n');
+        const devH2 = Math.max(measureH(devText || ' ', 7.2, 'normal', 56), measureH(stepData.개선조치 || ' ', 7.2, 'normal', 56)) + 4;
         const bH = Math.max(devH2, 12);
         bline(y, bH);
-        if (stepData.이탈내용) drawText(stepData.이탈내용, bX[0] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
+        if (devText) drawText(devText, bX[0] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
         if (stepData.개선조치) drawText(stepData.개선조치, bX[1] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
-        if (stepData.이탈내용 || stepData.개선조치) drawText((wo[8] || '').split('@')[0], bX[2], y + 2, 7.2, 'normal', '#222', bw[2], 'center');
+        if (devText || stepData.개선조치) drawText((wo[8] || '').split('@')[0], bX[2], y + 2, 7.2, 'normal', '#222', bw[2], 'center');
         drawText(wo[15] ? wo[15].split('@')[0] : '', bX[3], y + 2, 7.2, 'normal', '#222', bw[3], 'center');
         y += bH;
         if (!done) { const _nr = drawText('※ 동결 진행 중 — 12시간 경과 후 출하승인 시 종료기록이 자동 기재됩니다.', M, y + 1.5, 8, 'normal', '#999', CW); y = _nr.y + _nr.h + 2; }
@@ -12883,17 +13087,24 @@ async function _executeDisposal(itemId, lotId, type, itemName, reason) {
 async function getShipFreezerStamp() {
   try {
     const rows = (await SheetsAPI.getAll('동결온도로그', false).catch(() => [])) || [];
-    let best = null;
-    rows.forEach(r => {
-      if (!String(r[2] || r[1] || '').includes('냉동창고')) return;
-      const ts = parseLogTs(r[0]);
-      const t = (r[3] === '' || r[3] == null) ? NaN : Number(r[3]);
-      if (!ts || isNaN(t)) return;
-      if (!best || ts > best.ts) best = { ts, temp: t, at: r[0] };
-    });
-    if (!best) return null;
+    /* 최근 6시간 안의 값을 쓰되, 성애 제거·문 열림처럼 <b>사유가 기록된 순간 이탈</b>은 건너뛴다.
+       (제상 중 한 건이 잡혀 CCP 부적합 → 출하 차단되던 문제. 사유 없는 이탈은 그대로 채택해 차단된다) */
+    let pick = pickFreezerTemp(rows, Date.now(), { mode: 'latest', beforeMs: 6 * 3600 * 1000, afterMs: 0 });
+    if (!pick) {   // 6시간 내 기록 없음 → 예전처럼 전 구간 최근값(오래된 값은 warnShipStamp 가 경고)
+      let best = null;
+      rows.forEach(r => {
+        if (!String(r[2] || r[1] || '').includes('냉동창고')) return;
+        const ts = parseLogTs(r[0]), t = tempNum(r[3]);
+        if (!ts || isNaN(t)) return;
+        if (!best || ts > best.ts) best = { ts, temp: t, at: String(r[0] || '') };
+      });
+      if (!best) return null;
+      pick = { temp: best.temp, at: best.at, dev: best.temp > -18, basis: '최근값', excluded: [] };
+    }
+    const ts = parseLogTs(pick.at);
     // productTemp = 냉동창고 온도와 동일 (12h+ 동결로 심부온도 평형 — 별도 탐침 측정 없이 센서 온도 참조; 작업기록서 출하시점 추적과 일치)
-    return { temp: best.temp.toFixed(1), at: best.at, ageMin: Math.round((Date.now() - best.ts) / 60000), productTemp: best.temp.toFixed(1), method: '냉동창고와 동일' };
+    return { temp: pick.temp.toFixed(1), at: pick.at, ageMin: Math.round((Date.now() - ts) / 60000),
+             productTemp: pick.temp.toFixed(1), method: '냉동창고와 동일', excluded: pick.excluded || [] };
   } catch (e) { console.warn('[출하온도]', e); return null; }
 }
 function warnShipStamp(stamp) {
