@@ -8214,6 +8214,9 @@ Screens['temp-log'] = async () => {
   try { rows = (await SheetsAPI.getAll('동결온도로그', false).catch(() => [])) || []; } catch(e) {}
   hideLoading();
   if (State.tempPeriod == null) State.tempPeriod = 1;
+  if (State.tempFilter == null) State.tempFilter = 'all';   // all | dev(이탈·결측) | todo(사유 미기재)
+  if (State.tempSort == null) State.tempSort = 'desc';      // desc 최신순 | asc 오래된순
+  if (State.tempLimit == null) State.tempLimit = 200;       // '더 보기'로 증가 — 과거 기록까지 도달 가능
 
   const periods = [{d:1,l:'오늘'},{d:7,l:'7일'},{d:30,l:'30일'},{d:0,l:'전체'}];
   const sel = State.tempPeriod;
@@ -8222,7 +8225,7 @@ Screens['temp-log'] = async () => {
   // row = 시트 실제 행번호(헤더 1행 + 0-based idx) — 사유 저장 대상 지정에 사용
   const inRange = rows.map((r, i) => ({ ts: parseLogTs(r[0]), r, row: i + 2 }))
     .filter(x => !startMs || x.ts >= startMs)
-    .sort((a, b) => b.ts - a.ts);
+    .sort((a, b) => State.tempSort === 'asc' ? a.ts - b.ts : b.ts - a.ts);
 
   /* 연속 이탈·결측 구간 — 기기별 시간순으로 같은 상태가 이어지는 묶음.
      성애 제거 1회가 기록 여러 건에 걸치므로 사유를 구간 단위로 한 번에 남길 수 있게 한다. */
@@ -8299,14 +8302,27 @@ Screens['temp-log'] = async () => {
   // 사유 미기재 현황 — HACCP 은 이탈 1건마다 원인·조치 기록을 요구한다. 남은 건수를 눈에 보이게.
   const needReason = inRange.filter(x => tempRowState(x.r[3], tempLimitFor(tempLogName(x.r))) !== '적합');
   const noReason = needReason.filter(x => !tempReasonOf(x.r));
-  const reasonBanner = needReason.length ? `<div class="card" style="border-left:4px solid ${noReason.length ? 'var(--warn,#e65100)' : 'var(--suc,#1e8e3e)'};background:${noReason.length ? '#fff8e1' : '#f1f8f4'};padding:10px 14px;margin-bottom:10px">
-      <div class="fs-12 fw-7">${noReason.length ? `📝 사유 미기재 ${noReason.length}건` : '✅ 이탈·결측 사유 전건 기재'}</div>
-      <div class="fs-11 c-txt-l mt-4">해당 기간 이탈·결측 ${needReason.length}건${noReason.length ? ` 중 <b>${noReason.length}건</b>에 사유가 없습니다 — 아래 표의 <b>＋사유</b>를 눌러 성애 제거·문 열림 등 원인을 기록하세요.` : ' — 사유가 모두 기록되어 있습니다.'}</div>
+  // 전 기간 미기재 — '오늘'만 보고 있어도 과거에 남은 미기재가 몇 건인지 알려준다(놓치면 영영 안 채워진다)
+  const allTodo = rows.filter(r => tempRowState(r[3], tempLimitFor(tempLogName(r))) !== '적합' && !tempReasonOf(r)).length;
+  const reasonBanner = (needReason.length || allTodo) ? `<div class="card" style="border-left:4px solid ${allTodo ? 'var(--warn,#e65100)' : 'var(--suc,#1e8e3e)'};background:${allTodo ? '#fff8e1' : '#f1f8f4'};padding:10px 14px;margin-bottom:10px">
+      <div class="fs-12 fw-7">${allTodo ? `📝 사유 미기재 — 전 기간 ${allTodo}건${needReason.length ? ` (이 기간 ${noReason.length}건)` : ''}` : '✅ 이탈·결측 사유 전건 기재'}</div>
+      <div class="fs-11 c-txt-l mt-4">${allTodo
+        ? '표의 <b>＋사유</b>를 눌러 성애 제거·문 열림 등 원인을 기록하세요. 아래 버튼을 누르면 <b>가장 오래된 미기재부터</b> 순서대로 정리할 수 있습니다.'
+        : '이탈·결측 사유가 모두 기록되어 있습니다.'}</div>
+      ${allTodo ? `<button class="btn btn-sm btn-warn" style="margin-top:8px" onclick="State.tempPeriod=0;State.tempFilter='todo';State.tempSort='asc';State.tempLimit=200;Router.go('temp-log')">🗂 과거부터 정리하기 (오래된 순 · 미기재만)</button>` : ''}
     </div>` : '';
 
+  // 표시 대상 — 필터(전체/이탈·결측/미기재) 적용 후 '더 보기'로 늘려가며 과거까지 도달
+  const viewAll = inRange.filter(x => {
+    if (State.tempFilter === 'all') return true;
+    const st = tempRowState(x.r[3], tempLimitFor(tempLogName(x.r)));
+    if (st === '적합') return false;
+    return State.tempFilter === 'dev' ? true : !tempReasonOf(x.r);
+  });
+  const shown = Math.min(State.tempLimit, viewAll.length);
+
   window.__tempReasonRows = {};
-  const MAXROW = 200;
-  const logHtml = inRange.slice(0, MAXROW).map(({r, row}) => {
+  const logHtml = viewAll.slice(0, shown).map(({r, row}) => {
     const lim = tempLimitFor(tempLogName(r)), st = tempRowState(r[3], lim), ui = TEMP_STATE_UI[st];
     const tv = st === '결측' ? '-' : tempNum(r[3]).toFixed(1);
     const bg = st === '이탈' ? 'background:rgba(198,40,40,0.07)' : st === '결측' ? 'background:rgba(230,81,0,0.06)' : '';
@@ -8343,11 +8359,18 @@ Screens['temp-log'] = async () => {
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">최저</th><th style="padding:6px 8px;text-align:right">최고</th><th style="padding:6px 8px;text-align:right">평균</th><th style="padding:6px 8px;text-align:right">이탈</th><th style="padding:6px 8px;text-align:right">결측</th></tr></thead>
           <tbody>${statRows}</tbody></table></div>` : ''}
-      <div class="fs-13 fw-7" style="margin:4px 0 6px">온도 로그 <span class="fs-11 c-txt-l">(${inRange.length>MAXROW?`최근 ${MAXROW}/${inRange.length}건`:`${inRange.length}건`})</span></div>
+      <div class="row between" style="margin:4px 0 6px;align-items:flex-end">
+        <div class="fs-13 fw-7">온도 로그 <span class="fs-11 c-txt-l">(${shown < viewAll.length ? `${shown}/${viewAll.length}건` : `${viewAll.length}건`})</span></div>
+        <div class="fs-11" style="color:var(--pri);cursor:pointer" onclick="State.tempSort='${State.tempSort === 'asc' ? 'desc' : 'asc'}';State.tempLimit=200;Router.go('temp-log')">${State.tempSort === 'asc' ? '⬆ 오래된 순' : '⬇ 최신 순'} ⇄</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        ${[{k:'all',l:'전체'},{k:'dev',l:'이탈·결측'},{k:'todo',l:'사유 미기재'}].map(f => `<div onclick="State.tempFilter='${f.k}';State.tempLimit=200;Router.go('temp-log')" style="flex:1;text-align:center;padding:6px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;background:${State.tempFilter===f.k?'var(--pri)':'var(--white)'};color:${State.tempFilter===f.k?'#fff':'var(--txt)'};border:1px solid var(--gray-l)">${f.l}</div>`).join('')}
+      </div>
       <div class="card" style="padding:0;overflow:hidden">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th><th style="padding:6px 8px;text-align:left">사유</th></tr></thead>
-          <tbody>${logHtml || `<tr><td colspan="5" style="padding:14px;text-align:center" class="c-txt-l fs-12">해당 기간 기록 없음</td></tr>`}</tbody></table></div>
+          <tbody>${logHtml || `<tr><td colspan="5" style="padding:14px;text-align:center" class="c-txt-l fs-12">${State.tempFilter === 'todo' ? '이 기간에 사유 미기재 기록이 없습니다' : '해당 기간 기록 없음'}</td></tr>`}</tbody></table></div>
+      ${shown < viewAll.length ? `<button class="btn btn-outline btn-full" style="margin-top:8px" onclick="State.tempLimit=${State.tempLimit + 200};Router.go('temp-log')">더 보기 (남은 ${viewAll.length - shown}건)</button>` : ''}
       <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록<br>알람은 <b>최근 6시간 평균</b> 기준 (개별 기록의 적합/이탈 판정은 그대로 보존)<br>이탈·결측 행의 <b>사유</b>는 성애 제거·문 열림 등 원인을 기록하는 칸입니다 (기록자·기록시각 자동 저장)</div>
     </div>`;
 };
