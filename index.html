@@ -11456,7 +11456,9 @@ Screens['approval-detail'] = async (params = {}) => {
             <div class="row between"><span class="fs-12 c-txt-l">현재 냉동고 온도 <span class="badge badge-info" style="font-size:9px">센서 자동${shipStamp && shipStamp.ageMin != null ? ` · ${shipStamp.ageMin}분 전` : ''}</span></span><span class="fs-15 fw-8" style="color:#00695c">${sensorEnd.toFixed(1)}°C</span></div>
             <div class="row between mt-4"><span class="fs-12 c-txt-l">제품 온도</span><span class="fs-14 fw-7" style="color:#00695c">${sensorEnd.toFixed(1)}°C <span class="fs-11 c-txt-l fw-4">(냉동고 온도와 동일)</span></span></div>
             <div class="fs-11 c-txt-l mt-4">제품온도 = 냉동고 온도와 동일(12시간+ 동결로 심부온도 평형). <b>실제 출하 시점 온도는 각 제품이 출하될 때 자동 기록</b>되어 작업기록서 '출하 이력'에 남습니다 — 출하 승인 시점 수기 기록은 불필요합니다.</div>
-            ${shipStamp?.excluded?.length ? `<div class="fs-11 mt-4" style="color:#c62828">※ 사유가 기록된 순간 이탈은 창고 보관온도에서 제외하고 채택했습니다 — ${shipStamp.excluded.map(e => `${String(e.at).substring(11,16)} ${e.t.toFixed(1)}℃ (${e.reason})`).join(' / ')}</div>` : ''}
+            <!-- 제외된 순간 이탈(문 열림·성애 제거) 내역은 승인 화면에 노출하지 않는다 — 제품 반출 시 문 개방은 정상
+                 조업인데 붉은 '이탈' 문구로 보여 경고처럼 오독된다. 감사 추적용 각주는 기록부(PDF)와
+                 동결온도 모니터링(#temp-log)·CCP-1 이탈·결측 보완(#ccp-dev)에 그대로 남는다. -->
           </div>
           <div class="fs-13 fw-7">판정: <span class="fw-8" style="color:${ccpJudge==='부적합'?'var(--err)':ccpJudge==='적합'?'var(--suc)':'var(--txt-l)'}">${ccpJudge || '-'}</span> <span class="fs-11 c-txt-l fw-4">— 12시간 경과 + 센서 온도 자동 판정</span></div>
           ${ccpJudge === '부적합' ? `
