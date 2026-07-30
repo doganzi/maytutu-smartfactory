@@ -1395,6 +1395,7 @@ const Router = {
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
       'data-audit': 'more', 'ccp-fill': 'more', 'wo-pdfs': 'more', 'db-browser': 'more',
+      'ccp-dev': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -6738,7 +6739,7 @@ Screens['wo-pdfs'] = async () => {
         <div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:12px">
           <div class="fs-13 fw-7 c-info mb-4">📄 ${pdfWos.length}건 PDF 저장됨</div>
           <div class="fs-11 c-txt-l">${isAdmin ? '관리자 — 전체 작업지시서' : '본인이 작업한 건만 표시'} · 최신순</div>
-          ${isAdmin && pdfWos.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px;font-size:12px" onclick="regenerateAllWOPdfs()">🔄 전체 PDF를 최신 양식으로 재생성 (${pdfWos.length}건)</button><div id="regen-progress" class="fs-11 c-txt-l" style="margin-top:6px"></div>` : ''}
+          ${isAdmin && pdfWos.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px;font-size:12px" onclick="Router.go('ccp-dev')">🌡 CCP-1 이탈·결측 보완 (재생성 전 확인)</button><button class="btn btn-outline btn-pri btn-full" style="margin-top:6px;font-size:12px" onclick="regenerateAllWOPdfs()">🔄 전체 PDF를 최신 양식으로 재생성 (${pdfWos.length}건)</button><div id="regen-progress" class="fs-11 c-txt-l" style="margin-top:6px"></div>` : ''}
         </div>
 
         ${filterStatuses.length > 1 ? `
@@ -12336,10 +12337,24 @@ async function generateWOPdf(woId) {
         bline(y, bH);
         if (devText) drawText(devText, bX[0] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
         if (stepData.개선조치) drawText(stepData.개선조치, bX[1] + 2, y + 2, 7.2, 'normal', '#c62828', 56);
-        if (devText || stepData.개선조치) drawText((wo[8] || '').split('@')[0], bX[2], y + 2, 7.2, 'normal', '#222', bw[2], 'center');
+        if (devText || stepData.개선조치) drawText((stepData.개선조치자 || wo[8] || '').split('@')[0], bX[2], y + 2, 7.2, 'normal', '#222', bw[2], 'center');
         drawText(wo[15] ? wo[15].split('@')[0] : '', bX[3], y + 2, 7.2, 'normal', '#222', bw[3], 'center');
         y += bH;
-        if (!done) { const _nr = drawText('※ 동결 진행 중 — 12시간 경과 후 출하승인 시 종료기록이 자동 기재됩니다.', M, y + 1.5, 8, 'normal', '#999', CW); y = _nr.y + _nr.h + 2; }
+        // 사후 기재분은 기재시각·기재자를 밝힌다 — 승인 후 보완한 기록은 감사에서 반드시 설명이 필요하다.
+        if (stepData.개선조치 && stepData.개선조치기재시각) {
+          const _pa = drawText(`※ 위 이탈내용·개선조치는 사후 기재분 — 기재 ${String(stepData.개선조치기재시각).substring(0, 16)} · 기재자 ${String(stepData.개선조치자 || '-').split('@')[0]}. 근거: 동결온도로그(센서 10분 자동기록)의 이탈사유 기록.`,
+            M, y + 1.5, 7, 'normal', '#555', CW);
+          y = _pa.y + _pa.h + 1;
+        }
+        /* 종료기록이 없는 건 — 승인 완료 건이면 '진행 중'이 아니라 '미기재'다.
+           (출하승인 시 종료기록 자동기재 도입 이전 승인건 등) 사실과 다른 문구를 기록부에 남기지 않도록 분기한다. */
+        if (!done) {
+          const _apv = wo[16] || wo[15];
+          const _mt = _apv
+            ? `※ 동결 종료기록 미기재 — 출하승인 완료(${String(wo[16] || '').substring(0, 16)}${wo[15] ? ' · ' + String(wo[15]).split('@')[0] : ''}) 건이나 종료시각·냉동고온도·제품온도·판정이 기록되지 않았음.${stepData.종료기록미기재사유 ? ` 사유: ${stepData.종료기록미기재사유}` : ''}`
+            : '※ 동결 진행 중 — 12시간 경과 후 출하승인 시 종료기록이 자동 기재됩니다.';
+          const _nr = drawText(_mt, M, y + 1.5, _apv ? 7.2 : 8, 'normal', _apv ? '#c62828' : '#999', CW); y = _nr.y + _nr.h + 2;
+        }
         else { const _nr = drawText('※ 제품온도 = 냉동고 온도와 동일(12h+ 동결 평형). 실제 출하 시점의 냉동창고·제품 온도는 아래 출하 이력(각 제품별)에 기록됩니다.', M, y + 1.5, 7.5, 'normal', '#00695c', CW); y = _nr.y + _nr.h + 2; }
         y += 3;
         // ⑥ 출하 이력 — 제품번호(LOT개별)별 출하 시 냉동창고 온도 (출하기록 연동)
@@ -12759,6 +12774,134 @@ async function ccpFillSave(woId) {
     Screens['ccp-fill']();
   } catch (e) { toast('저장 실패: ' + e.message, 'err'); }
   finally { hideLoading(); releaseLock('ccpFill'); }
+}
+
+/* ── CCP-1 이탈·결측 보완 (관리자) — 저장된 작업지시서 전수 스캔 ─────────────────
+   ① 한계기준(−18℃ 이하) 초과가 남은 건 → 이탈내용·개선조치를 사후 기재(기재자·기재시각 함께 기록)
+   ② 출하승인 완료인데 동결 종료기록이 없는 건 → 미기재 사유를 기재
+   ⚠ 온도값은 채우지 않는다 — HACCP 실측만 기록(날조 금지). 이 화면은 '설명'을 남기는 용도이며,
+     기재 결과는 작업지시서 PDF 「이탈내용 | 개선조치 및 결과 | 개선조치자」칸과 각주에 그대로 인쇄된다. */
+const CCP_DEV_ACT_PRESETS = [
+  '센서·통신 오류 구간값 — 전후 실측 −18℃ 이하 유지 확인, 냉동설비 운전 이상 없음',
+  '문 개방 순간값 — 10분 내 −18℃ 이하 회복 확인',
+  '냉동설비 점검 실시 — 이상 없음',
+  '제품온도 재측정 — −18℃ 이하 확인 후 출고',
+  '정상 냉동고로 이동 후 제품온도 재측정 — 적합 확인',
+];
+const CCP_DEV_MISS_PRESETS = [
+  '출하승인 시 종료기록 자동기재 도입(2026-06-19) 이전 승인 건 — 종료 온도·판정 미기재',
+  '승인 시점 센서값 미수집으로 종료온도 기재 불가 — 동결온도로그 참조',
+];
+function ccpDevChip(woId, field, i) {
+  const v = (field === 'act' ? CCP_DEV_ACT_PRESETS : CCP_DEV_MISS_PRESETS)[i] || '';
+  const el = $id(`cd-${woId}-${field}`); if (!el) return;
+  el.value = v; el.focus();
+}
+Screens['ccp-dev'] = async () => {
+  renderHeader('CCP-1 이탈·결측 보완', '동결온도 사후 기재 · 관리자', { back: 'wo-pdfs' });
+  if (State.user?.role !== 'admin') { $id('content').innerHTML = '<div style="padding:16px"><div class="card bl-err"><div class="c-err fw-7">관리자 권한 필요</div></div></div>'; return; }
+  $id('content').innerHTML = '<div style="padding:16px"><div class="loading-inline"><div class="spinner-s"></div> 전수 스캔 중...</div></div>';
+  const [wos, recs, logs] = await Promise.all([
+    SheetsAPI.getAll('작업지시서', false),
+    SheetsAPI.getAll('공정기록', false),
+    SheetsAPI.getAll('동결온도로그', false).catch(() => [])
+  ]);
+  // 냉동창고 실측만 추린 사본 — 로그 사유 조회·전후 정상값 표시에 사용(선정 자체는 pickFreezerTemp 가 원본으로 수행)
+  const FZ = logs.filter(r => String(r[2] || r[1] || '').includes('냉동창고'))
+    .map(r => ({ ts: parseLogTs(r[0]), t: tempNum(r[3]), at: String(r[0] || ''), rsn: tempReasonOf(r) }))
+    .filter(x => x.ts && !isNaN(x.t));
+  const rsnAt = at => (FZ.find(x => x.at === at) || {}).rsn || '';
+  const normNear = ms => {
+    if (!ms) return '(기준시각 없음)';
+    const c = FZ.filter(x => x.t <= -18 && Math.abs(x.ts - ms) <= 90 * 60000);
+    const bf = c.filter(x => x.ts <= ms).sort((a, b) => b.ts - a.ts)[0];
+    const af = c.filter(x => x.ts > ms).sort((a, b) => a.ts - b.ts)[0];
+    return [bf, af].filter(Boolean).map(x => `${x.at.substring(11, 16)} ${x.t.toFixed(1)}℃`).join(' / ') || '(90분 내 −18℃ 이하 실측 없음)';
+  };
+  window.__ccpDev = {};
+  const items = [];
+  wos.filter(w => w[19] && String(w[19]).trim() && w[12] !== '삭제').forEach(wo => {
+    const ri = recs.findIndex(r => r[0] === wo[0] && r[3] === 'store');
+    if (ri < 0) return;
+    let sd = {}; try { sd = JSON.parse(recs[ri][5] || '{}'); } catch (e) { return; }
+    if (!(sd.freezeStart || sd.제품온도 || sd.종료시각)) return;   // 동결 모니터링일지 대상 아님
+    const startMs = parseLogTs(sd.freezeStart || wo[11] || '');
+    const inPick = sd.freezeTemp ? null : pickFreezerTemp(logs, startMs);
+    const inT = sd.freezeTemp ? normFreezeTemp(sd.freezeTemp) : (inPick ? inPick.temp : null);
+    const endT = normFreezeTemp(sd.종료온도), prodT = normFreezeTemp(sd.제품온도);
+    const done = !!(sd.제품온도 || sd.종료시각);
+    const devs = [];
+    if (inT != null && inT > -18) devs.push({ k: '투입 시 냉동고 온도', v: inT, at: inPick ? inPick.at : '', src: sd.freezeTemp ? '수기 입력값' : '센서 선정값' });
+    if (done && endT != null && endT > -18) devs.push({ k: '종료 시 냉동고 온도', v: endT, at: '', src: '기록값' });
+    if (done && prodT != null && prodT > -18) devs.push({ k: '제품 온도', v: prodT, at: '', src: '기록값' });
+    const miss = !done && !!(wo[16] || wo[15]);   // 승인 완료인데 종료기록 없음
+    if (!devs.length && !miss) return;
+    const ok = (!devs.length || !!sd.개선조치) && (!miss || !!sd.종료기록미기재사유);
+    window.__ccpDev[wo[0]] = { rowIdx: ri + 2, sd, hasDev: !!devs.length, miss };
+    const chips = (field, arr) => `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">${arr.map((p, i) =>
+      `<div onclick="ccpDevChip('${wo[0]}','${field}',${i})" title="${escReason(p)}" style="padding:5px 9px;border:1px solid var(--gray-l);border-radius:13px;font-size:11px;cursor:pointer;background:var(--white)">${p.length > 24 ? p.substring(0, 24) + '…' : p}</div>`).join('')}</div>`;
+    items.push({ ok, woId: wo[0], html: `<div class="card" style="margin-bottom:10px;border-left:3px solid ${ok ? 'var(--suc)' : 'var(--err)'}">
+      <div class="row between mb-4">
+        <span class="fs-13 fw-7">${wo[0]}</span>
+        <span class="badge badge-${ok ? 'suc' : 'err'}" style="font-size:10px">${ok ? '기재 완료' : '기재 필요'}</span>
+      </div>
+      <div class="fs-11 c-txt-l mb-8">${wo[4] || ''} · ${wo[12] || ''} · 투입 ${String(sd.freezeStart || wo[11] || '-').substring(0, 16)}${wo[16] ? ` · 승인 ${String(wo[16]).substring(0, 16)}` : ''}</div>
+      ${devs.length ? `
+      <div class="card" style="background:#fdecea;padding:9px;margin-bottom:8px">
+        ${devs.map(d => `<div class="fs-12 c-err fw-6">⚠ ${d.k} <b>${d.v.toFixed(1)}℃</b> — 한계기준(−18℃ 이하) 초과 <span class="fs-11 fw-4">(${d.src})</span></div>
+        ${d.at ? `<div class="fs-11 c-txt-l">채택 로그 ${d.at.substring(0, 16)} · 로그 사유: <b>${rsnAt(d.at) ? escReason(rsnAt(d.at)) : '미기재'}</b></div>` : ''}`).join('')}
+        <div class="fs-11 c-txt-l mt-4">투입시각 전후 −18℃ 이하 실측: ${normNear(startMs)}</div>
+        ${inPick && inPick.excluded.length ? `<div class="fs-11 c-txt-l">규칙상 제외된 순간 이탈(사유 기록됨): ${inPick.excluded.map(e => `${String(e.at).substring(11, 16)} ${e.t.toFixed(1)}℃`).join(' / ')}</div>` : ''}
+      </div>
+      <div class="input-group"><label>이탈내용 (선택 — 비우면 PDF에 [자동] 문구만 인쇄)</label><input type="text" id="cd-${wo[0]}-dev" value="${escReason(sd.이탈내용)}" placeholder="예: 투입시각 직전 센서값 채택 — 로그 사유 '센서·통신 오류'"></div>
+      ${chips('act', CCP_DEV_ACT_PRESETS)}
+      <div class="input-group"><label>개선조치 및 결과 <span class="c-err">*</span></label><input type="text" id="cd-${wo[0]}-act" value="${escReason(sd.개선조치)}" placeholder="실제 확인·조치한 사실만 기재"></div>` : ''}
+      ${miss ? `
+      <div class="card" style="background:#fff8e1;padding:9px;margin-bottom:8px">
+        <div class="fs-12 c-warn fw-6">△ 동결 종료기록 없음 — 출하승인 완료 건</div>
+        <div class="fs-11 c-txt-l">종료시각·종료온도·제품온도·판정이 모두 공란. PDF에는 '미기재'로 인쇄됩니다(사유 기재 시 함께 인쇄).</div>
+        <div class="fs-11 c-txt-l mt-4">참고 — 승인시각 전후 −18℃ 이하 실측: ${normNear(parseLogTs(wo[16] || ''))} <span class="c-err">※ 온도값은 자동 기재하지 않습니다(실측만 기록)</span></div>
+      </div>
+      ${chips('rsn', CCP_DEV_MISS_PRESETS)}
+      <div class="input-group"><label>종료기록 미기재 사유 <span class="c-err">*</span></label><input type="text" id="cd-${wo[0]}-rsn" value="${escReason(sd.종료기록미기재사유)}" placeholder="사실만 기재"></div>` : ''}
+      <button class="btn btn-suc btn-full mt-4" onclick="ccpDevSave('${wo[0]}')">저장 (사후 기재 — 기재자·시각 함께 기록)</button>
+      ${sd.개선조치기재시각 || sd.종료기록사유기재시각 ? `<div class="fs-11 c-txt-l mt-8">기재 이력 — ${[
+        sd.개선조치기재시각 ? `개선조치 ${sd.개선조치기재시각} (${String(sd.개선조치자 || '-').split('@')[0]})` : '',
+        sd.종료기록사유기재시각 ? `미기재사유 ${sd.종료기록사유기재시각} (${String(sd.종료기록사유기록자 || '-').split('@')[0]})` : ''
+      ].filter(Boolean).join(' · ')}</div>` : ''}
+    </div>` });
+  });
+  const need = items.filter(x => !x.ok).length;
+  items.sort((a, b) => a.ok === b.ok ? String(b.woId).localeCompare(String(a.woId)) : (a.ok ? 1 : -1));
+  $id('content').innerHTML = `<div style="padding:16px">
+    <div class="card bl-${need ? 'err' : 'suc'} mb-12" style="background:${need ? '#fdecea' : '#e8f5e9'}">
+      <div class="fs-13 fw-7 ${need ? 'c-err' : 'c-suc'}">${need ? `기재 필요 ${need}건` : '✅ 전 건 기재 완료'} <span class="fs-11 c-txt-l fw-4">/ 해당 ${items.length}건</span></div>
+      <div class="fs-11 c-txt-l mt-4">저장된 작업지시서 PDF를 전수 스캔해 <b>한계기준(−18℃ 이하) 초과가 남은 건</b>과 <b>출하승인 후 종료기록이 없는 건</b>을 모았습니다. 온도값은 채우지 않습니다(실측만 기록). 기재 후 「전체 PDF 재생성」을 실행하면 기록부에 반영됩니다.</div>
+    </div>
+    ${items.length ? items.map(x => x.html).join('') : '<div class="card bl-suc"><div class="c-suc fw-7">✅ 이탈·결측 없음 — 전 건 한계기준 이내·종료기록 완비</div></div>'}
+  </div>`;
+};
+async function ccpDevSave(woId) {
+  const d = window.__ccpDev?.[woId]; if (!d) { toast('데이터 없음 — 새로고침 후 다시', 'err'); return; }
+  const dev = ($id(`cd-${woId}-dev`)?.value || '').trim();
+  const act = ($id(`cd-${woId}-act`)?.value || '').trim();
+  const rsn = ($id(`cd-${woId}-rsn`)?.value || '').trim();
+  if (d.hasDev && !act) { toast('개선조치를 입력하세요 — 이탈 기록은 개선조치가 필수입니다', 'warn', 4000); return; }
+  if (d.miss && !rsn) { toast('종료기록 미기재 사유를 입력하세요', 'warn', 4000); return; }
+  if (!acquireLock('ccpDev')) return;
+  try {
+    showLoading();
+    const who = State.user?.email || '-', at = tempNowStamp();
+    const sd = d.sd;
+    if (d.hasDev) { sd.이탈내용 = dev; sd.개선조치 = act; sd.개선조치자 = who; sd.개선조치기재시각 = at; }
+    if (d.miss) { sd.종료기록미기재사유 = rsn; sd.종료기록사유기록자 = who; sd.종료기록사유기재시각 = at; }
+    sd._ccpDevFill = 'posthoc-v1';
+    await SheetsAPI.updateRowByIndex('공정기록', d.rowIdx, { 5: JSON.stringify(sd) });
+    SheetsAPI.invalidateCache('공정기록');
+    toast(`${woId} 사후 기재 저장 — PDF 재생성 시 기록부에 반영됩니다`, 'suc', 3500);
+    Screens['ccp-dev']();
+  } catch (e) { toast('저장 실패: ' + e.message, 'err', 4000); }
+  finally { hideLoading(); releaseLock('ccpDev'); }
 }
 
 async function approveWO(woId) {
