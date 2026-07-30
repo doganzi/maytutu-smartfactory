@@ -6739,7 +6739,11 @@ Screens['wo-pdfs'] = async () => {
         <div class="card bl-info" style="background:#e3f2fd;padding:10px;margin-bottom:12px">
           <div class="fs-13 fw-7 c-info mb-4">📄 ${pdfWos.length}건 PDF 저장됨</div>
           <div class="fs-11 c-txt-l">${isAdmin ? '관리자 — 전체 작업지시서' : '본인이 작업한 건만 표시'} · 최신순</div>
-          ${isAdmin && pdfWos.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px;font-size:12px" onclick="Router.go('ccp-dev')">🌡 CCP-1 이탈·결측 보완 (재생성 전 확인)</button><button class="btn btn-outline btn-pri btn-full" style="margin-top:6px;font-size:12px" onclick="regenerateAllWOPdfs()">🔄 전체 PDF를 최신 양식으로 재생성 (${pdfWos.length}건)</button><div id="regen-progress" class="fs-11 c-txt-l" style="margin-top:6px"></div>` : ''}
+          <!-- 관리자 일괄도구 버튼 제거(2026-07-30) — 일회성 작업 완료: 전체 PDF 재생성 91건(오류 0),
+               CCP-1 이탈·결측 7건 기재. ccp-fill 과 동일하게 **버튼만 제거하고 화면·함수 코드는 보존**한다.
+               재진입: 해시 #ccp-dev (CCP-1 이탈·결측 보완) / 콘솔 regenerateAllWOPdfs() (전체 재생성).
+               단건 재생성은 작업지시서 상세 화면의 🔄 재생성 버튼. 버튼 재추가는 이 자리에.
+               재추가 시 진행표시 <div id="regen-progress"> 도 함께 넣어야 진행률이 보인다. -->
         </div>
 
         ${filterStatuses.length > 1 ? `
