@@ -325,6 +325,40 @@ a { text-decoration:none; color:inherit; }
 })();
 
 /* ═══════════════════════════════════════════════
+   MODAL DRAG GUARD
+   모달 안에서 마우스를 누른 뒤(인풋 텍스트 선택 등) 드래그해 오버레이 밖에서
+   버튼을 떼면, click 의 target 이 '누른 곳과 뗀 곳의 공통조상' = 오버레이가 되어
+   각 모달의 click 핸들러(if e.target===overlay)가 오작동으로 닫히던 문제.
+   해결: 오버레이 닫기는 '오버레이에서 눌러 → 오버레이에서 뗀' 순수 탭일 때만 유효.
+   시작/종료가 오버레이가 아닌 드래그성 click 은 캡처 단계에서 차단(각 모달 코드 수정 불필요).
+   cf. ERP 동일 가드 (maytutu-erp #1164)
+   ═══════════════════════════════════════════════ */
+(function modalDragGuard() {
+  // 백드롭 판정 — SF 오버레이는 모두 class="dialog-overlay"(position:fixed·inset:0).
+  //   클래스가 없는 인라인 오버레이도 잡도록 fixed·뷰포트 60%↑ 를 보조 기준으로 둔다.
+  const isBackdrop = (el) => {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.classList && el.classList.contains('dialog-overlay')) return true;
+    let cs; try { cs = getComputedStyle(el); } catch (e) { return false; }
+    if (cs.position !== 'fixed') return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= window.innerWidth * 0.6 && r.height >= window.innerHeight * 0.6;
+  };
+  let downT = null, upT = null;
+  document.addEventListener('pointerdown', (e) => { downT = e.target; upT = null; }, { capture: true, passive: true });
+  document.addEventListener('pointerup', (e) => { upT = e.target; }, { capture: true, passive: true });
+  document.addEventListener('pointercancel', () => { downT = upT = null; }, { capture: true, passive: true });
+  document.addEventListener('click', (e) => {
+    const t = e.target, d = downT, u = upT;
+    downT = upT = null;
+    if (d == null) return;                           // 키보드/프로그램적 click — 무시
+    if (d === t && (u == null || u === t)) return;   // 순수 탭(누른 곳=뗀 곳=click 대상) — 통과
+    // 드래그성 click(시작 또는 종료가 대상 밖). 대상이 오버레이면 오작동 닫힘이므로 차단.
+    if (isBackdrop(t)) { e.stopPropagation(); e.stopImmediatePropagation(); }
+  }, true);
+})();
+
+/* ═══════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════ */
 const CONFIG = {
