@@ -56,6 +56,11 @@ HACCP 감사 바인더로 들어가므로 번호가 기준서와 다르면 심�
 - 앙버터 호두과자 SOP 는 `#haccp-std` 「SOP 생성」(`hsSeedAngbutterSop`)으로 기준서 값에서 한 번에 만든다 — 손으로 옮겨 적지 말 것.
 - 공장 기준정보 원천(품목보고번호·배합비·설비·성적서) = `docs/FACTORY_MASTER_DATA.md`
 
+### UI 함정
+- **`.btn-outline` 은 단독으로 쓰면 안 된다** — `.btn` 기본값인 흰 글씨·흰 테두리라 흰 카드 위에서 보이지 않는다.
+  반드시 색상 modifier 와 짝짓는다: `btn-outline btn-pri` / `btn-gray` / `btn-info` / `btn-warn` / `btn-err`.
+  (2026-08-05 라이브 검수에서 버튼 4개가 통째로 안 보이던 실장애)
+
 ## 데이터 모델
 
 ### 시트 컬럼 인덱스
