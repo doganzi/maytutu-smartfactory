@@ -1824,14 +1824,28 @@ Screens.dashboard = async () => {
   // Load data for dashboard
   let pendingApproval = 0, inProgress = 0, lowStock = 0, upcomingChecks = 0;
   let orderAlertItems = [], pendingWOs = [], recentActivity = [], calAlerts = [];
+  let certAlerts = [], openDevCount = 0;
 
   try {
-    const [woData, rmItems, rmLots, eqData] = await Promise.all([
+    const [woData, rmItems, rmLots, eqData, certData, devData] = await Promise.all([
       SheetsAPI.getAll('작업지시서').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
       SheetsAPI.getAll('원재료LOT').catch(() => []),
       SheetsAPI.getAll('기기관리').catch(() => []),
+      SheetsAPI.getAll('시험성적서').catch(() => []),   // 시트 없으면 [] — 화면은 그대로 동작
+      SheetsAPI.getAll('기준편차').catch(() => []),
     ]);
+
+    // 시험성적서 만료·임박 (검교정 알림과 동일 정책)
+    certData.forEach(c => {
+      if ((c[12] || '유효') === '폐기') return;
+      const st = HaccpStd.certStatus(c[7]);
+      if (st.badge === 'err' || st.badge === 'warn') {
+        certAlerts.push({ name: c[3] || c[2] || '-', code: c[2] || '', lab: c[4] || '', until: c[7] || '-', ...st });
+      }
+    });
+    certAlerts.sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999));
+    openDevCount = devData.filter(d => d[7] && d[7] !== '완료').length;
 
     State.workOrders = woData;
     State.rawMaterialItems = rmItems.filter(i => i[12] !== '비활성');
@@ -1931,6 +1945,13 @@ Screens.dashboard = async () => {
         toast(`🔧 검교정 임박 ${upcoming.length}건: ${upcoming.map(a=>a.name).join(', ')}`, 'warn');
       }
     }
+    // 시험성적서 알림 — 만료는 입고검사 기준 미충족이므로 즉시 알린다
+    if (certAlerts.length > 0) {
+      const expired = certAlerts.filter(a => a.badge === 'err');
+      if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${expired.map(a=>a.name).join(', ')}`, 'err', 6000);
+      const soon = certAlerts.filter(a => a.badge !== 'err');
+      if (soon.length > 0) toast(`🧪 시험성적서 갱신 임박 ${soon.length}건: ${soon.map(a=>a.name).join(', ')}`, 'warn', 5000);
+    }
 
     localStorage.setItem('lastNotifCheck', now);
   } catch (e) {
@@ -1985,6 +2006,16 @@ Screens.dashboard = async () => {
           <div class="stat-icon">${calAlerts.length > 0 ? '🔧' : '✅'}</div>
           <div class="stat-num ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${calAlerts.length}건</div>
           <div class="stat-label">${calAlerts.length > 0 ? '검교정 알림' : '검교정 정상'}</div>
+        </div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'var(--err)' : 'var(--warn)') : 'var(--suc)'}" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})">
+          <div class="stat-icon">${certAlerts.length > 0 ? '🧪' : '✅'}</div>
+          <div class="stat-num ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${certAlerts.length}건</div>
+          <div class="stat-label">${certAlerts.length > 0 ? '성적서 알림' : '성적서 정상'}</div>
+        </div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${openDevCount > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="State._hsTab='편차';Router.go('haccp-std',{tab:'편차'})">
+          <div class="stat-icon">${openDevCount > 0 ? '📑' : '✅'}</div>
+          <div class="stat-num ${openDevCount > 0 ? 'c-warn' : 'c-suc'}">${openDevCount}건</div>
+          <div class="stat-label">${openDevCount > 0 ? '기준편차 처리중' : 'HACCP 기준 정상'}</div>
         </div>
       </div>
 
@@ -2049,6 +2080,21 @@ Screens.dashboard = async () => {
                 <div class="fs-12 c-txt-l">${a.code} · ${a.type || ''} · 다음 검교정: ${a.nextDate}</div>
               </div>
               <span class="badge badge-${a.badge}">${a.status}</span>
+            </div>
+          </div>
+        `).join('')}
+      ` : ''}
+
+      ${certAlerts.length > 0 ? `
+        <div class="fs-14 fw-7 mb-8 mt-8">🧪 시험성적서 알림 (${certAlerts.length}건)</div>
+        ${certAlerts.map(a => `
+          <div class="card clickable" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})" style="border-left:3px solid ${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">
+            <div class="row between">
+              <div>
+                <div class="fs-14 fw-6" style="color:${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">${a.name}</div>
+                <div class="fs-12 c-txt-l">${a.code} ${a.lab} · 유효기한: ${a.until}</div>
+              </div>
+              <span class="badge badge-${a.badge}">${a.label}</span>
             </div>
           </div>
         `).join('')}
@@ -4729,6 +4775,7 @@ Screens.more = () => {
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
     { icon: '🧹', label: '소모품 품목', desc: '소모품 마스터 데이터 관리', target: 'items-sp' },
     { icon: '🏢', label: '거래처', desc: '공급업체, 고객사 관리', target: 'vendors' },
+    { icon: '📑', label: 'HACCP 기준 관리', desc: 'CCP 한계기준 · 시험성적서 · 기준편차', target: 'haccp-std' },
     { icon: '🔩', label: '기기관리', desc: '기기 목록, 점검 스케줄, 교정 이력', target: 'equip' },
     { icon: '📊', label: 'DB 시트 열기', desc: 'Google Sheets 직접 편집', target: 'db-sheet' },
     { icon: '⚙️', label: '설정', desc: '계정, 앱 설정, 로그아웃', target: 'settings' },
@@ -6568,6 +6615,63 @@ async function autoFixDupFgIndivIds() {
    외부 자격증명 노출 없이 사용자 OAuth 만으로 동작.
 
    주요 시트 컬럼 헤더 (CLAUDE.md 참조 — 다른 시트는 col0,col1... 로 표시) */
+
+/* ═══════════════════════════════════════════════════════════════════
+   HACCP 기준 SSOT — 「메이투투 해썹관리기준서 26.08.05」 (인증 확정본)
+   제정 2026.03.30 → 개정1 2026.06.02 「가열 CCP 추가」
+   원본: Drive 공유드라이브 ANGHODU_KR/07_공장/HACCP/기준서_최신본/
+
+   ⚠ CCP 번호는 기준서 개정에서 재배정되었다. 구 번호(동결 CCP-1B · 금속 CCP-2P)를
+     화면·PDF에 하드코딩하지 말 것 — 표시 문자열은 반드시 이 상수를 통해서만 쓴다.
+     시트명·필드키(CCP_동결온도 등)는 기존 기록 호환을 위해 그대로 둔다.
+   기준값을 바꿀 때는 이 상수가 아니라 시트 「HACCP기준」을 고치고,
+   여기 값은 시트를 못 읽을 때 쓰는 fallback 으로만 남긴다.               */
+const CCP = {
+  METAL: {
+    key: 'METAL', no: 'CCP-1P', legacyNo: 'CCP-2P', name: '금속검출', sheet: 'CCP_금속검출',
+    limit: { feMm: 2.5, stsMm: 4.0 },
+    limitText: 'Fe 2.5mm∅ · STS 4.0mm∅ 이상 불검출',
+    cycle: '매 작업 전 · 작업 중 2시간마다 · 작업 종료 시',
+    verify: '금속검출기 성능검사 1회/년',
+  },
+  FREEZE: {
+    key: 'FREEZE', no: 'CCP-2B', legacyNo: 'CCP-1B', name: '동결공정', sheet: 'CCP_동결온도',
+    limit: { tempC: -18, hours: 12 },
+    limitText: '냉동 −18℃ 이하 · 냉동시간 12시간 이상',
+    cycle: '제품 투입·냉동 종료 시 · 작업 중 2시간마다',
+    verify: '공정품 미생물검사 1회/12개월',
+  },
+  HEAT: {
+    key: 'HEAT', no: 'CCP-3B', legacyNo: null, name: '가열공정', sheet: 'CCP_가열',
+    limit: { minC: 175, maxC: 190, secMin: 150, secMax: 180, coreC: 90 },
+    limitText: '가열온도 175~190℃ · 가열시간 2분30초~3분 · 가열 후 품온 90℃ 이상',
+    cycle: '매 작업 전 · 작업 종료 시',
+    verify: '공정품 미생물검사 1회/12개월',
+  },
+};
+/** CCP 표시 문자열 — `ccpLabel(CCP.FREEZE)` → "CCP-2B 동결공정" */
+const ccpLabel = (c, withName = true) => withName ? `${c.no} ${c.name}` : c.no;
+/** 기준서 정본 정보 — 개정 감지의 기준선 */
+const HACCP_DOC = {
+  title: '메이투투 해썹관리기준서 26.08.05',
+  revision: '개정1 (2026.06.02 가열 CCP 추가)',
+  revisedAt: '2026-08-05',
+  teamLeader: '이상현',
+  // Drive 공유드라이브 ANGHODU_KR/07_공장/HACCP/기준서_최신본
+  driveFolderId: '1ju8-_yqUyWieSWONXD9aGwwy4dxR0wbG',
+  recheckDays: 30,   // 개정 확인 주기(일)
+};
+
+const HACCP_STD_HEADER = ['stdId','구분','항목','대상품목','위해요소','한계기준(JSON)','한계기준(표시)','모니터링주기','담당','검증주기','기록보관','근거문서','개정일','상태','audit_note'];
+const CERT_SHEET_HEADER = ['certId','구분','itemCode','itemName','발행기관','성적서번호','발행일','유효기한','판정','파일링크','등록자','등록일시','상태','비고'];
+const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근거','심각도','상태','담당','조치내용','조치일','등록자','등록일시','audit_note'];
+/** 완제품품목 확장 컬럼 — 기존 [0]~[9] 뒤에 append (기존 인덱스 절대 변경 금지) */
+const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17 };
+const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
+                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격'];
+/** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
+const CERT_WARN_DAYS = 30;
+
 const DB_SHEETS = {
   '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
   '원재료LOT': ['lotId','itemCode','itemName','supplier','qty','unit','mfgDate','expDate','remain','status','indivCount','temp'],
@@ -6580,13 +6684,16 @@ const DB_SHEETS = {
   'SOP공정단계': ['sopId','stepNo','stepName','stepType','rmCode','std','checks'],
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
   '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status','매입단가'],
-  '완제품품목': ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage'],
+  '완제품품목': FG_SHEET_HEADER,
   '소모품품목': ['code','name','spec','unit','status'],
   '거래처': ['code','name','type','phone','address'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
   '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],
   '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
-  '기기': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
+  '기기관리': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
+  'HACCP기준': HACCP_STD_HEADER,
+  '시험성적서': CERT_SHEET_HEADER,
+  '기준편차': DEV_SHEET_HEADER,
 };
 
 Screens['db-browser'] = async (params = {}) => {
@@ -7695,6 +7802,43 @@ async function openFgSpecEditor(code) {
         <label>규격</label>
         <input type="text" id="fg-spec" value="${esc(item[2])}" placeholder="예: 호두과자 (냉동생지)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
       </div>
+
+      <!-- 규제정보 — 품목제조보고·라벨 (기준서/품목제조보고서 기재값 그대로) -->
+      <details style="margin-bottom:10px;border:1px solid var(--gray-l);border-radius:6px;padding:8px 10px" ${item[FG_EXT.reportNo] ? '' : 'open'}>
+        <summary class="fs-13 fw-6" style="cursor:pointer">📑 규제정보 (품목제조보고 · 라벨)</summary>
+        <div class="fs-11 c-txt-l mt-4 mb-8">식약처 품목제조보고서·라벨 표기와 <b>글자 그대로</b> 일치해야 합니다.</div>
+        <div class="grid-2" style="gap:8px;margin-bottom:8px">
+          <div class="input-group">
+            <label>품목보고번호</label>
+            <input type="text" inputmode="numeric" id="fg-reportno" value="${esc(item[FG_EXT.reportNo])}" placeholder="예: 202602733081" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          </div>
+          <div class="input-group">
+            <label>품목제조보고일</label>
+            <input type="date" id="fg-reportdate" value="${esc(item[FG_EXT.reportDate])}" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          </div>
+          <div class="input-group">
+            <label>식품유형</label>
+            <input type="text" id="fg-foodtype" value="${esc(item[FG_EXT.foodType])}" placeholder="예: 빵류" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          </div>
+          <div class="input-group">
+            <label>제조(포장)단위</label>
+            <input type="text" id="fg-packsize" value="${esc(item[FG_EXT.packSize])}" placeholder="예: 5kg / 50구" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          </div>
+        </div>
+        <div class="input-group" style="margin-bottom:8px">
+          <label>성분배합비율</label>
+          <textarea id="fg-recipe" rows="2" placeholder="예: 곡류가공품[델리만쥬용믹스2] 58.9%, 계란 17.6%, 정제수 17.6%, 옥수수기름(옥배유) 5.9%" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:13px">${esc(item[FG_EXT.recipe])}</textarea>
+        </div>
+        <div class="input-group" style="margin-bottom:8px">
+          <label>완제품규격 (사내)</label>
+          <textarea id="fg-specnote" rows="2" placeholder="예: 일반세균 1,000 이하 · 대장균군 0 · 금속성이물 Fe 2.5mm∅·STS 4.0mm∅ 이상 불검출" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:13px">${esc(item[FG_EXT.specNote])}</textarea>
+        </div>
+        <div class="input-group">
+          <label>라벨 원본 링크 (Drive)</label>
+          <input type="url" id="fg-labelfile" value="${esc(item[FG_EXT.labelFile])}" placeholder="https://drive.google.com/..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:13px">
+          ${item[FG_EXT.labelUpdatedAt] ? `<div class="fs-11 c-txt-l mt-4">라벨 갱신: ${esc(item[FG_EXT.labelUpdatedAt])}</div>` : ''}
+        </div>
+      </details>
       <div class="grid-2" style="gap:8px;margin-bottom:10px">
         <div class="input-group">
           <label>봉당 중량(kg)</label>
@@ -7777,6 +7921,25 @@ async function saveFgSpec(isNew, origCode, closeFn) {
   if (ppbRaw !== '' && (isNaN(ppb) || ppb < 1)) { toast('박스당 봉수는 1 이상의 정수', 'err'); return; }
   const ppbStr = (ppbRaw === '' ? '' : String(ppb));
 
+  // 규제정보 (품목제조보고 · 라벨) — 시트 [10]~[17]
+  const reg = {
+    [FG_EXT.reportNo]:   $id('fg-reportno')?.value.trim() || '',
+    [FG_EXT.reportDate]: $id('fg-reportdate')?.value.trim() || '',
+    [FG_EXT.foodType]:   $id('fg-foodtype')?.value.trim() || '',
+    [FG_EXT.recipe]:     $id('fg-recipe')?.value.trim() || '',
+    [FG_EXT.packSize]:   $id('fg-packsize')?.value.trim() || '',
+    [FG_EXT.labelFile]:  $id('fg-labelfile')?.value.trim() || '',
+    [FG_EXT.specNote]:   $id('fg-specnote')?.value.trim() || '',
+  };
+  if (reg[FG_EXT.reportNo] && !/^\d{8,14}$/.test(reg[FG_EXT.reportNo])) {
+    toast('품목보고번호는 숫자 8~14자리입니다', 'err', 4000); return;
+  }
+  // 라벨 링크가 바뀐 경우에만 갱신일 기록 (감사 추적)
+  const prevItem = (window._fgItemsCache || []).find(x => x[0] === origCode) || [];
+  const labelChanged = (prevItem[FG_EXT.labelFile] || '') !== reg[FG_EXT.labelFile];
+  reg[FG_EXT.labelUpdatedAt] = labelChanged && reg[FG_EXT.labelFile]
+    ? formatDateTime() : (prevItem[FG_EXT.labelUpdatedAt] || '');
+
   if (!acquireLock('saveFgSpec')) return;
   try {
     showLoading();
@@ -7798,15 +7961,17 @@ async function saveFgSpec(isNew, origCode, closeFn) {
         toast(`이미 존재하는 코드입니다: ${code}`, 'err', 5000); return;
       }
       if (window._fgLabelFile) labelUrl = await DriveAPI.uploadPhoto(window._fgLabelFile);
-      // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox,labelImage
-      await SheetsAPI.append('완제품품목', [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr, labelUrl]);
+      // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox,labelImage + 규제정보[10]~[17]
+      const row = [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr, labelUrl];
+      for (let i = 10; i <= FG_EXT.specNote; i++) row[i] = reg[i] || '';
+      await SheetsAPI.append('완제품품목', row);
       SheetsAPI.invalidateCache('완제품품목');
       toast(`${code} ${name} 등록 완료`, 'suc');
     } else {
       if (window._fgLabelFile) labelUrl = await DriveAPI.uploadPhoto(window._fgLabelFile);
       // col: 1=name, 2=spec, 3=unit, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox, 9=labelImage
       await SheetsAPI.updateRow('완제품품목', 0, origCode, {
-        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr, 9: labelUrl
+        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr, 9: labelUrl, ...reg
       });
       SheetsAPI.invalidateCache('완제품품목');
       toast(`${origCode} 스펙 저장 완료`, 'suc');
@@ -8065,12 +8230,490 @@ Screens.haccp = async () => {
         `).join('')
       }
 
+      <div class="card clickable" style="border-left:4px solid #c62828;margin-top:12px" onclick="Router.go('haccp-std')">
+        <div class="row between">
+          <div><div class="fs-13 fw-7">📑 HACCP 기준 관리</div>
+            <div class="fs-11 c-txt-l">CCP 한계기준 · 시험성적서 유효기한 · 기준편차 시정조치</div></div>
+          <span class="fs-16" style="color:var(--txt-l)">›</span>
+        </div>
+      </div>
+
       <div class="card" style="text-align:center;background:var(--bg);border:1px dashed var(--gray);margin-top:12px">
         <div class="fs-12 c-txt-l">HACCP 문서 관리는 <span style="color:var(--pri);cursor:pointer" onclick="window.open('https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}','_blank')"><b>Google Sheets</b></span>에서 확인하세요</div>
       </div>
     </div>
   `;
 };
+
+/* ═══════════════════════════════════════════════════════════════════════
+   HACCP 기준 · 시험성적서 · 기준편차 관리  (#haccp-std)
+
+   목적 3가지
+   ① 기준서(정본)를 시트 「HACCP기준」에 두고, 앱이 그 값으로 판정한다.
+      → 기준이 바뀌면 코드 배포 없이 시트만 고치면 된다.
+   ② 기준서 원본(Drive)의 개정을 주기적으로 감지해 "미반영" 을 편차로 띄운다.
+      ⚠ .hwp 본문을 브라우저에서 파싱할 수는 없다. 자동화하는 것은 **개정 감지**까지고,
+        조문 반영은 사람이 확인해서 시트를 고친다 — 없는 것을 지어내지 않는다.
+   ③ 원부재료 시험성적서 유효기한을 추적해 만료 전에 알린다.
+
+   직무분리: 등록·작성 = 실무자 / 기준 반영·편차 완료 = 관리자
+   ═══════════════════════════════════════════════════════════════════════ */
+const HS_ESC = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const HS_TABS = ['기준', '성적서', '편차'];
+
+const HaccpStd = {
+  /* 시트가 없으면 만든다 (구매주문 자동생성 패턴과 동일) */
+  async ensureSheet(tab, header) {
+    try {
+      await SheetsAPI.getAll(tab, false);
+      return true;
+    } catch (e) {
+      await SheetsAPI.createSheet(tab, header);
+      SheetsAPI.invalidateCache(tab);
+      return false;
+    }
+  },
+
+  /** 기준서 정본 → 시트 시드 행. CCP 3종 + 검증 4종. */
+  seedRows() {
+    const doc = HACCP_DOC.title, rev = HACCP_DOC.revisedAt, who = HACCP_DOC.teamLeader;
+    const ccpRow = (c, targets, hazard) => [
+      c.no, 'CCP', c.name, targets, hazard,
+      JSON.stringify(c.limit), c.limitText, c.cycle, who, c.verify, '2년', doc, rev, '적용중', ''
+    ];
+    return [
+      ccpRow(CCP.METAL, '전제품', '금속성 이물(금속검출기 감도설정 오류·기기고장)'),
+      ccpRow(CCP.FREEZE, '전제품', '장출혈성대장균, 리스테리아 모노사이토제네스'),
+      ccpRow(CCP.HEAT, '앙버터 호두과자', '장출혈성대장균, 리스테리아 모노사이토제네스'),
+      ['VER-METAL', '검증', '금속검출기 성능검사', '전제품', '', '', '연 1회 이상 검·교정', '1회/년', who, '1회/년', '2년', doc, rev, '적용중', ''],
+      ['VER-CALIB', '검증', '온도계·타이머 검·교정', '전제품', '', '', '연 1회 이상 검·교정(내부/외부)', '1회/년', who, '1회/년', '2년', doc, rev, '적용중', ''],
+      ['VER-MICRO', '검증', '공정품 미생물검사', '전제품', '', '', '공정품 미생물검사', '1회/12개월', who, '1회/12개월', '2년', doc, rev, '적용중', ''],
+      ['VER-CCPCHK', '검증', '중요관리점 검증점검표', '전제품', '', '', '중요관리점검증점검표 작성', '월 1회', who, '월 1회', '2년', doc, rev, '적용중', ''],
+    ];
+  },
+
+  /** 최초 1회 — 기준 시트가 비어 있으면 기준서 값으로 채운다 */
+  async seedIfEmpty() {
+    const rows = await SheetsAPI.getAll('HACCP기준', false).catch(() => []);
+    if (rows.length > 0) return 0;
+    for (const r of this.seedRows()) await SheetsAPI.append('HACCP기준', r);
+    SheetsAPI.invalidateCache('HACCP기준');
+    return this.seedRows().length;
+  },
+
+  /** 시트 행 → 객체. 시트를 못 읽으면 코드 상수로 fallback (판정이 멈추지 않도록) */
+  parse(rows) {
+    if (!rows || rows.length === 0) {
+      return this.seedRows().map(r => this._toObj(r)).map(o => ({ ...o, _fallback: true }));
+    }
+    return rows.map(r => this._toObj(r));
+  },
+  _toObj(r) {
+    let limit = {};
+    try { limit = r[5] ? JSON.parse(r[5]) : {}; } catch (e) { limit = {}; }
+    return {
+      id: r[0] || '', kind: r[1] || '', name: r[2] || '', targets: r[3] || '', hazard: r[4] || '',
+      limit, limitText: r[6] || '', cycle: r[7] || '', owner: r[8] || '', verify: r[9] || '',
+      keep: r[10] || '', doc: r[11] || '', revisedAt: r[12] || '', status: r[13] || '', _fallback: false,
+    };
+  },
+
+  /** 시험성적서 유효기한 판정 — 검교정 알림과 동일 정책(만료 / 30일 이내 임박) */
+  certStatus(validUntil) {
+    if (!validUntil) return { badge: 'warn', label: '기한없음', days: null };
+    const d = Math.ceil((new Date(validUntil) - new Date(formatDate())) / 86400000);
+    if (isNaN(d)) return { badge: 'warn', label: '기한오류', days: null };
+    if (d < 0) return { badge: 'err', label: `만료 ${-d}일 경과`, days: d };
+    if (d <= CERT_WARN_DAYS) return { badge: 'warn', label: d === 0 ? '오늘 만료' : `${d}일 남음`, days: d };
+    return { badge: 'suc', label: '유효', days: d };
+  },
+
+  /** 기준서 개정 감지 — Drive 「기준서_최신본」 폴더의 최신 수정시각을 본다 */
+  async checkRevision() {
+    const q = encodeURIComponent(`'${HACCP_DOC.driveFolderId}' in parents and trashed=false`);
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
+      + `&fields=files(id,name,modifiedTime,webViewLink)&orderBy=modifiedTime%20desc&pageSize=20`
+      + `&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${State.token}` } });
+    if (!res.ok) throw new Error(`Drive ${res.status}`);
+    const files = (await res.json()).files || [];
+    if (files.length === 0) return { files: [], newest: null, changed: false };
+    const newest = files[0];
+    const newestDate = (newest.modifiedTime || '').substring(0, 10);
+    localStorage.setItem('haccpDocCheckedAt', formatDate());
+    localStorage.setItem('haccpDocNewest', `${newestDate}|${newest.name}`);
+    return { files, newest, newestDate, changed: newestDate > HACCP_DOC.revisedAt };
+  },
+  lastCheckedAt() { return localStorage.getItem('haccpDocCheckedAt') || ''; },
+
+  /** 자동 준수 점검 — 지금 데이터로 판정 가능한 것만. 각 항목은 편차로 등록할 수 있다. */
+  compliance({ std, certs, fgItems, rmItems, devs }) {
+    const out = [];
+    const today = formatDate();
+    const add = (sev, kind, title, detail, basis) => out.push({ sev, kind, title, detail, basis });
+
+    // ① 코드 상수 ↔ 시트 기준값 불일치 (누가 시트만 고치고 앱이 안 따라간 경우)
+    Object.values(CCP).forEach(c => {
+      const s = std.find(x => x.id === c.no);
+      if (!s) { add('err', '기준불일치', `${c.no} 기준 미등록`, `「HACCP기준」시트에 ${c.no}(${c.name}) 행이 없습니다.`, HACCP_DOC.title); return; }
+      if (JSON.stringify(s.limit) !== JSON.stringify(c.limit)) {
+        add('err', '기준불일치', `${c.no} 한계기준이 앱과 다름`,
+          `시트 ${JSON.stringify(s.limit)} ↔ 앱 ${JSON.stringify(c.limit)}. 앱 판정은 앱 값으로 동작하므로 코드 반영이 필요합니다.`, s.doc || HACCP_DOC.title);
+      }
+    });
+
+    // ② 기준서 개정 확인 지연 / 미반영
+    const checked = this.lastCheckedAt();
+    if (!checked) add('warn', '기준서', '기준서 개정 확인 이력 없음', '「기준 개정 확인」을 한 번도 실행하지 않았습니다.', HACCP_DOC.title);
+    else if (Math.ceil((new Date(today) - new Date(checked)) / 86400000) > HACCP_DOC.recheckDays)
+      add('warn', '기준서', `기준서 확인 ${HACCP_DOC.recheckDays}일 초과`, `마지막 확인 ${checked}. 최신본 여부를 다시 확인하세요.`, HACCP_DOC.title);
+    const newestRaw = localStorage.getItem('haccpDocNewest') || '';
+    const newestDate = newestRaw.split('|')[0];
+    if (newestDate && newestDate > HACCP_DOC.revisedAt)
+      add('err', '기준서', '기준서 개정 미반영', `Drive 최신본 ${newestRaw.replace('|', ' · ')} > 앱 반영본 ${HACCP_DOC.revisedAt}. 개정 내용을 확인해 기준을 갱신하세요.`, 'Drive 기준서_최신본');
+
+    // ③ 시험성적서 — 만료·임박, 그리고 성적서가 아예 없는 원재료
+    certs.forEach(c => {
+      if ((c[12] || '유효') === '폐기') return;
+      const st = this.certStatus(c[7]);
+      if (st.badge === 'err') add('err', '성적서만료', `${c[3] || c[2]} 성적서 만료`, `유효기한 ${c[7]} (${st.label}) · ${c[4] || ''} ${c[5] || ''}`, '원·부재료 입고검사 기준');
+      else if (st.badge === 'warn') add('warn', '성적서만료', `${c[3] || c[2]} 성적서 ${st.label}`, `유효기한 ${c[7] || '미기재'} · ${c[4] || ''}`, '원·부재료 입고검사 기준');
+    });
+    const validCodes = new Set(certs.filter(c => (c[12] || '유효') !== '폐기' && this.certStatus(c[7]).badge !== 'err').map(c => c[2]));
+    rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성').forEach(i => {
+      if (!validCodes.has(i[0])) add('warn', '성적서없음', `${i[1]} 유효 성적서 없음`, `${i[0]} — 입고기준(시험성적서 확인)을 충족하는 유효 성적서가 등록되지 않았습니다.`, '원·부재료 입고검사 기준');
+    });
+
+    // ④ 완제품 규제정보 — 품목보고번호·라벨은 제품이 나가는 근거다
+    fgItems.filter(i => i[7] !== '비활성').forEach(i => {
+      const miss = [];
+      if (!i[FG_EXT.reportNo]) miss.push('품목보고번호');
+      if (!i[FG_EXT.reportDate]) miss.push('품목제조보고일');
+      if (!i[FG_EXT.foodType]) miss.push('식품유형');
+      if (!i[FG_EXT.packSize]) miss.push('제조포장단위');
+      if (!i[5]) miss.push('소비기한');
+      if (miss.length) add('warn', '완제품정보', `${i[1] || i[0]} 규제정보 누락`, `누락: ${miss.join(', ')}`, '품목제조보고서');
+      if (!i[9] && !i[FG_EXT.labelFile]) add('warn', '라벨', `${i[1] || i[0]} 라벨 미등록`, '라벨 이미지·원본 링크가 모두 없습니다.', '식품 등의 표시기준');
+    });
+
+    // ⑤ 이미 편차로 등록해 처리 중인 건은 중복 노출하지 않는다
+    const openTitles = new Set(devs.filter(d => d[7] !== '완료').map(d => d[3]));
+    return out.map(f => ({ ...f, tracked: openTitles.has(f.title) }));
+  },
+
+  async addDev({ kind, title, detail, basis, sev }) {
+    const devId = await generateSeqId('DEV', '기준편차');
+    await SheetsAPI.append('기준편차', [
+      devId, formatDate(), kind || '기타', title, detail || '', basis || '',
+      sev === 'err' ? '높음' : sev === 'warn' ? '보통' : '낮음',
+      '열림', HACCP_DOC.teamLeader, '', '', State.user?.email || '', formatDateTime(), ''
+    ]);
+    SheetsAPI.invalidateCache('기준편차');
+    return devId;
+  },
+};
+
+/* ── 화면 ─────────────────────────────────────────────────────────── */
+Screens['haccp-std'] = async (params = {}) => {
+  const tab = params.tab || State._hsTab || '기준';
+  State._hsTab = tab;
+  renderHeader('HACCP 기준 관리', `${HACCP_DOC.title} · ${tab}`, { back: 'haccp' });
+  showLoading();
+
+  let std = [], certs = [], devs = [], fgItems = [], rmItems = [];
+  try {
+    await Promise.all([
+      HaccpStd.ensureSheet('HACCP기준', HACCP_STD_HEADER),
+      HaccpStd.ensureSheet('시험성적서', CERT_SHEET_HEADER),
+      HaccpStd.ensureSheet('기준편차', DEV_SHEET_HEADER),
+    ]);
+    await HaccpStd.seedIfEmpty();
+    [std, certs, devs, fgItems, rmItems] = await Promise.all([
+      SheetsAPI.getAll('HACCP기준').catch(() => []),
+      SheetsAPI.getAll('시험성적서').catch(() => []),
+      SheetsAPI.getAll('기준편차').catch(() => []),
+      SheetsAPI.getAll('완제품품목').catch(() => []),
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+    ]);
+  } catch (e) {
+    hideLoading();
+    $id('content').innerHTML = `<div style="padding:16px"><div class="card bl-err"><div class="fw-7 c-err">기준 데이터를 불러오지 못했습니다</div><div class="fs-12 c-txt-l mt-4">${HS_ESC(e.message)}</div></div></div>`;
+    return;
+  }
+  hideLoading();
+
+  const stdObjs = HaccpStd.parse(std);
+  window._hsCache = { std: stdObjs, certs, devs, fgItems, rmItems };
+  const findings = HaccpStd.compliance({ std: stdObjs, certs, fgItems, rmItems, devs });
+  const openDevs = devs.filter(d => d[7] !== '완료');
+  const errN = findings.filter(f => f.sev === 'err').length;
+
+  const tabBar = `<div class="tab-filter">${HS_TABS.map(t => {
+    const n = t === '편차' ? openDevs.length : t === '성적서' ? certs.length : findings.length;
+    return `<div class="tab ${t === tab ? 'active' : ''}" onclick="Router.go('haccp-std',{tab:'${t}'})">${t}${n ? ` (${n})` : ''}</div>`;
+  }).join('')}</div>`;
+
+  let body = '';
+  if (tab === '기준') body = hsStandardTab(stdObjs, findings);
+  else if (tab === '성적서') body = hsCertTab(certs, rmItems, fgItems);
+  else body = hsDevTab(devs);
+
+  $id('content').innerHTML = `
+    ${tabBar}
+    <div style="padding:14px">
+      <div class="card" style="background:linear-gradient(135deg,#1b5e20,#2e7d32);color:#fff;padding:14px">
+        <div class="fs-15 fw-7">${HS_ESC(HACCP_DOC.title)}</div>
+        <div class="fs-11 mt-2" style="opacity:.85">${HS_ESC(HACCP_DOC.revision)} · HACCP팀장 ${HS_ESC(HACCP_DOC.teamLeader)}</div>
+        <div class="grid-2 mt-8">
+          <div style="text-align:center"><div class="fs-20 fw-7">${errN}</div><div class="fs-11" style="opacity:.8">즉시 조치</div></div>
+          <div style="text-align:center"><div class="fs-20 fw-7">${openDevs.length}</div><div class="fs-11" style="opacity:.8">처리 중 편차</div></div>
+        </div>
+      </div>
+      ${body}
+    </div>
+  `;
+};
+
+function hsStandardTab(std, findings) {
+  const ccps = std.filter(s => s.kind === 'CCP');
+  const vers = std.filter(s => s.kind === '검증');
+  const checked = HaccpStd.lastCheckedAt();
+  const sevColor = s => s === 'err' ? 'var(--err,#c62828)' : s === 'warn' ? 'var(--warn,#e65100)' : 'var(--info,#1565c0)';
+
+  return `
+    <div class="card mt-12" style="border-left:3px solid var(--info,#1565c0)">
+      <div class="row between" style="align-items:center">
+        <div style="flex:1">
+          <div class="fs-13 fw-7">📄 기준 개정 확인</div>
+          <div class="fs-11 c-txt-l mt-2">마지막 확인 ${checked || '없음'} · 권장 ${HACCP_DOC.recheckDays}일마다</div>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="hsCheckRevision()">확인</button>
+      </div>
+      <div class="fs-11 c-txt-l mt-8" style="line-height:1.5">Drive 「기준서_최신본」 폴더의 파일 수정시각만 비교합니다. <b>개정 내용 반영은 사람이 확인해서</b> 시트 「HACCP기준」을 고쳐야 합니다.</div>
+    </div>
+
+    <div class="fs-14 fw-7 mt-12 mb-8">🔴 중요관리점 (CCP)</div>
+    ${ccps.map(c => `
+      <div class="card" style="border-left:3px solid #c62828">
+        <div class="row between"><div class="fs-14 fw-7">${HS_ESC(c.id)} ${HS_ESC(c.name)}</div>
+          <span class="badge badge-${c.status === '적용중' ? 'suc' : 'warn'}">${HS_ESC(c.status || '-')}</span></div>
+        <div class="fs-12 mt-4" style="color:#c62828;font-weight:600">${HS_ESC(c.limitText)}</div>
+        <div class="fs-11 c-txt-l mt-4">주기: ${HS_ESC(c.cycle)}</div>
+        <div class="fs-11 c-txt-l">담당: ${HS_ESC(c.owner)} · 검증: ${HS_ESC(c.verify)} · 보관: ${HS_ESC(c.keep)}</div>
+        <div class="fs-11 c-txt-l">대상: ${HS_ESC(c.targets)}</div>
+        ${c._fallback ? '<div class="fs-11 mt-4" style="color:var(--warn,#e65100)">⚠ 시트를 못 읽어 앱 내장값으로 표시 중</div>' : ''}
+      </div>`).join('')}
+
+    <div class="fs-14 fw-7 mt-12 mb-8">🔍 검증 주기</div>
+    ${vers.map(v => `
+      <div class="card" style="padding:10px 14px">
+        <div class="row between"><div><div class="fs-13 fw-6">${HS_ESC(v.name)}</div>
+          <div class="fs-11 c-txt-l">${HS_ESC(v.cycle)} · 기록보관 ${HS_ESC(v.keep)}</div></div>
+          <span class="badge badge-info">${HS_ESC(v.verify)}</span></div>
+      </div>`).join('')}
+
+    <div class="fs-14 fw-7 mt-12 mb-8">🛠 준수 점검 결과 (${findings.length}건)</div>
+    ${findings.length === 0
+      ? '<div class="card"><div class="fs-12 c-suc" style="text-align:center">기준 대비 확인된 문제가 없습니다</div></div>'
+      : findings.map((f, i) => `
+        <div class="card" style="border-left:3px solid ${sevColor(f.sev)}">
+          <div class="row between">
+            <div style="flex:1">
+              <div class="fs-13 fw-7" style="color:${sevColor(f.sev)}">${HS_ESC(f.title)}</div>
+              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5">${HS_ESC(f.detail)}</div>
+              <div class="fs-11 c-txt-l mt-2">근거: ${HS_ESC(f.basis)}</div>
+            </div>
+            ${f.tracked
+              ? '<span class="badge badge-info" style="align-self:flex-start">처리 중</span>'
+              : `<button class="btn btn-sm btn-outline" style="align-self:flex-start;white-space:nowrap" onclick="hsTrackFinding(${i})">편차 등록</button>`}
+          </div>
+        </div>`).join('')}
+  `;
+}
+
+function hsCertTab(certs, rmItems, fgItems) {
+  const rows = certs.slice().sort((a, b) => String(a[7] || '').localeCompare(String(b[7] || '')));
+  const opts = [
+    ...rmItems.filter(i => i[12] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '원재료' })),
+    ...fgItems.filter(i => i[7] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '완제품' })),
+  ];
+  const inp = 'width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px';
+  return `
+    <details class="card mt-12" style="border-left:3px solid var(--pri)">
+      <summary class="fs-13 fw-7" style="cursor:pointer">➕ 시험성적서 등록 · 갱신</summary>
+      <div class="fs-11 c-txt-l mt-4 mb-8">갱신은 <b>새 행으로 등록</b>합니다 — 이전 성적서는 이력으로 남습니다.</div>
+      <div class="grid-2" style="gap:8px;margin-bottom:8px">
+        <div class="input-group"><label>대상 품목 *</label>
+          <select id="ct-item" style="${inp}">
+            <option value="">선택</option>
+            ${opts.map(o => `<option value="${HS_ESC(o.code)}|${HS_ESC(o.name)}|${o.kind}">[${o.kind}] ${HS_ESC(o.code)} ${HS_ESC(o.name)}</option>`).join('')}
+            <option value="|부재료|부재료">[부재료] 직접입력</option>
+          </select></div>
+        <div class="input-group"><label>발행기관</label><input type="text" id="ct-lab" placeholder="예: 디아이분석센터" style="${inp}"></div>
+        <div class="input-group"><label>성적서번호</label><input type="text" id="ct-no" placeholder="예: R20260619-0049" style="${inp}"></div>
+        <div class="input-group"><label>판정</label>
+          <select id="ct-result" style="${inp}"><option>적합</option><option>부적합</option></select></div>
+        <div class="input-group"><label>발행일 *</label><input type="date" id="ct-issued" value="${formatDate()}" style="${inp}"></div>
+        <div class="input-group"><label>유효기한 *</label><input type="date" id="ct-until" style="${inp}"></div>
+      </div>
+      <div class="input-group" style="margin-bottom:8px"><label>파일 링크 (Drive)</label><input type="url" id="ct-link" placeholder="https://drive.google.com/..." style="${inp}"></div>
+      <div class="input-group" style="margin-bottom:8px"><label>비고</label><input type="text" id="ct-note" placeholder="직접입력 품목명 등" style="${inp}"></div>
+      <button class="btn btn-pri" style="width:100%" onclick="hsSaveCert()">저장</button>
+    </details>
+
+    <div class="fs-14 fw-7 mt-12 mb-8">📋 등록된 성적서 (${rows.length}건)</div>
+    ${rows.length === 0
+      ? '<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">등록된 시험성적서가 없습니다</div></div>'
+      : rows.map(c => {
+          const st = HaccpStd.certStatus(c[7]);
+          const dead = (c[12] || '유효') === '폐기';
+          return `
+          <div class="card" style="border-left:3px solid ${dead ? 'var(--gray)' : st.badge === 'err' ? 'var(--err,#c62828)' : st.badge === 'warn' ? 'var(--warn,#e65100)' : 'var(--suc,#2e7d32)'};${dead ? 'opacity:.55' : ''}">
+            <div class="row between">
+              <div style="flex:1">
+                <div class="fs-13 fw-7">${HS_ESC(c[3] || c[2] || '-')} <span class="fs-11 c-txt-l">${HS_ESC(c[1] || '')} ${HS_ESC(c[2] || '')}</span></div>
+                <div class="fs-11 c-txt-l mt-2">${HS_ESC(c[4] || '')} ${HS_ESC(c[5] || '')} · 발행 ${HS_ESC(c[6] || '-')} → 유효 ${HS_ESC(c[7] || '-')}</div>
+                <div class="fs-11 c-txt-l">판정 ${HS_ESC(c[8] || '-')} · 등록 ${HS_ESC((c[11] || '').substring(0, 10))} ${HS_ESC((c[10] || '').split('@')[0])}</div>
+                ${c[9] ? `<a href="${HS_ESC(c[9])}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">성적서 열기 ›</a>` : ''}
+              </div>
+              <div style="text-align:right">
+                <span class="badge badge-${dead ? 'gray' : st.badge}">${dead ? '폐기' : st.label}</span>
+                ${!dead && State.user?.role === 'admin' ? `<div class="fs-11 mt-4" style="color:var(--err,#c62828);cursor:pointer" onclick="hsVoidCert('${HS_ESC(c[0])}')">폐기</div>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+  `;
+}
+
+function hsDevTab(devs) {
+  const order = { '열림': 0, '조치중': 1, '보류': 2, '완료': 3 };
+  const rows = devs.slice().sort((a, b) => (order[a[7]] ?? 9) - (order[b[7]] ?? 9) || String(b[1]).localeCompare(String(a[1])));
+  const isAdmin = State.user?.role === 'admin';
+  const sevBadge = s => s === '높음' ? 'err' : s === '보통' ? 'warn' : 'info';
+  return `
+    <div class="fs-11 c-txt-l mt-12 mb-8">작성·조치 = 실무자 / <b>완료 처리 = 관리자</b> (작성≠승인)</div>
+    ${rows.length === 0
+      ? '<div class="card"><div class="fs-12 c-suc" style="text-align:center">등록된 편차가 없습니다</div></div>'
+      : rows.map(d => {
+          const done = d[7] === '완료';
+          return `
+          <div class="card" style="border-left:3px solid ${done ? 'var(--suc,#2e7d32)' : d[6] === '높음' ? 'var(--err,#c62828)' : 'var(--warn,#e65100)'};${done ? 'opacity:.6' : ''}">
+            <div class="row between">
+              <div style="flex:1">
+                <div class="fs-13 fw-7">${HS_ESC(d[3])}</div>
+                <div class="fs-11 c-txt-l mt-2" style="line-height:1.5">${HS_ESC(d[4])}</div>
+                <div class="fs-11 c-txt-l mt-2">${HS_ESC(d[0])} · 발견 ${HS_ESC(d[1])} · ${HS_ESC(d[2])} · 담당 ${HS_ESC(d[8] || '-')}</div>
+                ${d[9] ? `<div class="fs-11 mt-4" style="color:var(--suc,#2e7d32)">조치: ${HS_ESC(d[9])} (${HS_ESC(d[10] || '')})</div>` : ''}
+              </div>
+              <div style="text-align:right;white-space:nowrap">
+                <span class="badge badge-${done ? 'suc' : sevBadge(d[6])}">${HS_ESC(d[7])}</span>
+              </div>
+            </div>
+            ${done ? '' : `
+              <div class="row mt-8" style="gap:6px">
+                <input type="text" id="dev-note-${HS_ESC(d[0])}" placeholder="조치 내용" value="${HS_ESC(d[9])}" style="flex:1;padding:7px;border-radius:6px;border:1px solid var(--gray-l);font-size:13px">
+                <button class="btn btn-sm btn-outline" onclick="hsSetDev('${HS_ESC(d[0])}','조치중')">조치 기록</button>
+                ${isAdmin ? `<button class="btn btn-sm btn-pri" onclick="hsSetDev('${HS_ESC(d[0])}','완료')">완료</button>` : ''}
+              </div>`}
+          </div>`;
+        }).join('')}
+  `;
+}
+
+/* ── 액션 ─────────────────────────────────────────────────────────── */
+async function hsCheckRevision() {
+  if (!acquireLock('hsCheckRevision')) return;
+  try {
+    showLoading();
+    const r = await HaccpStd.checkRevision();
+    hideLoading();
+    if (!r.newest) { toast('기준서 폴더에 파일이 없습니다', 'warn', 4000); return; }
+    if (r.changed) {
+      toast(`⚠ 기준서 개정 감지: ${r.newest.name} (${r.newestDate})\n앱 반영본 ${HACCP_DOC.revisedAt} — 개정 내용을 확인하세요`, 'err', 8000);
+    } else {
+      toast(`최신본 확인 완료 — ${r.newest.name} (${r.newestDate})`, 'suc', 5000);
+    }
+    await Screens['haccp-std']({ tab: '기준' });
+  } catch (e) {
+    hideLoading();
+    toast('기준서 확인 실패: ' + e.message, 'err', 6000);
+  } finally { releaseLock('hsCheckRevision'); }
+}
+
+async function hsTrackFinding(idx) {
+  const c = window._hsCache; if (!c) return;
+  const findings = HaccpStd.compliance(c);
+  const f = findings[idx]; if (!f) return;
+  confirm('편차로 등록', `"${f.title}" 을(를) 기준편차로 등록하고 시정조치를 추적합니다.`, async () => {
+    try {
+      showLoading();
+      const id = await HaccpStd.addDev({ kind: f.kind, title: f.title, detail: f.detail, basis: f.basis, sev: f.sev });
+      hideLoading();
+      toast(`${id} 등록 완료`, 'suc');
+      await Screens['haccp-std']({ tab: '편차' });
+    } catch (e) { hideLoading(); toast('등록 실패: ' + e.message, 'err', 5000); }
+  });
+}
+
+async function hsSetDev(devId, status) {
+  const note = $id(`dev-note-${devId}`)?.value.trim() || '';
+  if (status === '완료') {
+    if (State.user?.role !== 'admin') { toast('완료 처리는 관리자만 가능합니다', 'err'); return; }
+    if (!note) { toast('조치 내용을 입력해야 완료할 수 있습니다', 'err', 4000); return; }
+  }
+  if (!acquireLock('hsSetDev')) return;
+  try {
+    showLoading();
+    await SheetsAPI.updateRow('기준편차', 0, devId, { 7: status, 9: note, 10: formatDate() });
+    SheetsAPI.invalidateCache('기준편차');
+    hideLoading();
+    toast(`${devId} → ${status}`, 'suc');
+    await Screens['haccp-std']({ tab: '편차' });
+  } catch (e) { hideLoading(); toast('저장 실패: ' + e.message, 'err', 5000); }
+  finally { releaseLock('hsSetDev'); }
+}
+
+async function hsSaveCert() {
+  const sel = $id('ct-item')?.value || '';
+  const [code, name, kind] = sel.split('|');
+  const issued = $id('ct-issued')?.value || '';
+  const until = $id('ct-until')?.value || '';
+  const note = $id('ct-note')?.value.trim() || '';
+  if (!sel) { toast('대상 품목을 선택하세요', 'err'); return; }
+  if (!issued || !until) { toast('발행일·유효기한을 입력하세요', 'err'); return; }
+  if (until <= issued) { toast('유효기한이 발행일보다 빠릅니다', 'err', 4000); return; }
+  if (!acquireLock('hsSaveCert')) return;
+  try {
+    showLoading();
+    const certId = await generateSeqId('CERT', '시험성적서');
+    await SheetsAPI.append('시험성적서', [
+      certId, kind || '원재료', code || '', name || note || '-',
+      $id('ct-lab')?.value.trim() || '', $id('ct-no')?.value.trim() || '',
+      issued, until, $id('ct-result')?.value || '적합', $id('ct-link')?.value.trim() || '',
+      State.user?.email || '', formatDateTime(), '유효', note
+    ]);
+    SheetsAPI.invalidateCache('시험성적서');
+    hideLoading();
+    toast(`${certId} 등록 완료`, 'suc');
+    await Screens['haccp-std']({ tab: '성적서' });
+  } catch (e) { hideLoading(); toast('저장 실패: ' + e.message, 'err', 5000); }
+  finally { releaseLock('hsSaveCert'); }
+}
+
+async function hsVoidCert(certId) {
+  if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
+  confirm('성적서 폐기', `${certId} 를 폐기 처리합니다. 행은 이력으로 남습니다.`, async () => {
+    try {
+      showLoading();
+      await SheetsAPI.updateRow('시험성적서', 0, certId, { 12: '폐기' });
+      SheetsAPI.invalidateCache('시험성적서');
+      hideLoading();
+      toast('폐기 처리 완료', 'suc');
+      await Screens['haccp-std']({ tab: '성적서' });
+    } catch (e) { hideLoading(); toast('실패: ' + e.message, 'err', 5000); }
+  });
+}
 
 /* ═══════════════════════════════════════════════
    동결온도 모니터링 (Tuya 센서 온도로그) + HACCP 기록 PDF
@@ -11273,7 +11916,7 @@ function renderProcessRecordCard(r) {
   }
   else if (type === 'store') {
     bodyHtml += `<div class="info-box" style="background:rgba(0,105,92,0.1)">
-      <div class="fs-12 fw-6" style="color:#00695c">냉동 보관 (CCP-1 동결온도)</div>
+      <div class="fs-12 fw-6" style="color:#00695c">냉동 보관 (${ccpLabel(CCP.FREEZE)})</div>
     </div>`;
     if (stepData.freezeStart) bodyHtml += `<div class="fs-11 c-txt-l mt-4">냉동 시작: <strong>${stepData.freezeStart}</strong></div>`;
     if (stepData.freezeTemp) bodyHtml += `<div class="fs-11 c-txt-l mt-4">투입 냉동고 온도: <strong>${fmtFreezeTemp(stepData.freezeTemp)}</strong> <span style="color:var(--txt-l)">(한계 −18℃ 이하)</span></div>`;
@@ -11486,7 +12129,7 @@ Screens['approval-detail'] = async (params = {}) => {
         </div>
 
         <div class="card" style="border-left:3px solid #00695c">
-          <div class="fs-13 fw-7 mb-4" style="color:#00695c">❄ 동결온도 CCP-1 — 동결 완료 확인 (동결공정 모니터링일지)</div>
+          <div class="fs-13 fw-7 mb-4" style="color:#00695c">❄ ${ccpLabel(CCP.FREEZE)} — 동결 완료 확인 (동결공정 모니터링일지)</div>
           <div class="fs-11 c-txt-l mb-4">한계기준: 제품온도 ≤ −18℃ AND 냉동 12시간 이상 → 적합 (출하 승인 시 자동 판정·기록)</div>
           <div class="fs-11 c-txt-l mb-8">투입(냉동 시작): ${freezeSd.freezeStart || wo[11] || '-'}${freezeSd.freezeTemp ? ` · 투입 냉동고온도 ${fmtFreezeTemp(freezeSd.freezeTemp)}` : ''}</div>
           ${sensorEnd != null ? `
@@ -12074,7 +12717,7 @@ async function generateWOPdf(woId) {
           // ① 제목 밴드 + 결재칸 (작성/승인)
           const AP_W = 44, AP_L = 8, AP_C = (AP_W - AP_L) / 2, T_H = 15;
           bx(M, y, CW, T_H);
-          drawText('금속검출기(CCP) 모니터링 기록부', M + 3, y + 4, 15, 'bold', '#111', CW - AP_W - 6);
+          drawText(`금속검출공정(${CCP.METAL.no}) 모니터링 기록부`, M + 3, y + 4, 15, 'bold', '#111', CW - AP_W - 6);
           const apx = M + CW - AP_W;
           vline(apx, y, T_H); vline(apx + AP_L, y, T_H); vline(apx + AP_L + AP_C, y, T_H);
           drawText('결', apx + 2.2, y + 3, 7.5, 'normal', '#333', AP_L); drawText('재', apx + 2.2, y + 8.5, 7.5, 'normal', '#333', AP_L);
@@ -12116,7 +12759,7 @@ async function generateWOPdf(woId) {
           drawText('Fe 2.5mm / SUS 4.0mm 이상의\n금속성이물질 100% 검출할 것', CON_X + 93, y + 2.6, 7.2, 'normal', '#222', CW - 26 - SUB_W - 95);
           y += tgtH;
           // 방법 행
-          const mTxt = '1. CCP-2P 모니터링 담당자는 금속검출기의 정상작동 유무를 확인한다.\n- 작업시작 전: 시편만 통과 시 감지확인\n- 2시간마다: 시편만 통과, 제품 단독통과, 시편과 제품을 동시에 통과 시 감지확인\n- 작업종료(마지막공정품): 시편과 마지막 제품을 동시에 통과 시 감지 확인\n2. 시편을 이용하여 금속검출기의 가운데(제품위쪽가운데)에 놓고 점검한다.\n   시편과 제품을 이용하여 금속검출기를 통과 시킨 후 모니터링일지에 기록한다.';
+          const mTxt = '1. ' + CCP.METAL.no + ' 모니터링 담당자는 금속검출기의 정상작동 유무를 확인한다.\n- 작업시작 전: 시편만 통과 시 감지확인\n- 2시간마다: 시편만 통과, 제품 단독통과, 시편과 제품을 동시에 통과 시 감지확인\n- 작업종료(마지막공정품): 시편과 마지막 제품을 동시에 통과 시 감지 확인\n2. 시편을 이용하여 금속검출기의 가운데(제품위쪽가운데)에 놓고 점검한다.\n   시편과 제품을 이용하여 금속검출기를 통과 시킨 후 모니터링일지에 기록한다.';
           const mH = Math.max(measureH(mTxt, 7.2, 'normal', CW - 26 - SUB_W - 4) + 3, 24);
           bx(M, y, CW, mH); vline(SUB_X, y, mH); vline(CON_X, y, mH);
           drawText('방법', SUB_X + 2, y + mH / 2 - 2, 8, 'normal', '#222', SUB_W - 3);
@@ -12245,7 +12888,7 @@ async function generateWOPdf(woId) {
         // ① 제목 + 결재칸
         const AP2 = 44, APL = 8, APC = (AP2 - APL) / 2, TH2 = 15;
         bx2(M, y, CW, TH2);
-        drawText('모니터링일지 (동결공정)', M + 3, y + 4, 15, 'bold', '#111', CW - AP2 - 6);
+        drawText(`모니터링일지 (동결공정 ${CCP.FREEZE.no})`, M + 3, y + 4, 15, 'bold', '#111', CW - AP2 - 6);
         const ax = M + CW - AP2;
         vl2(ax, y, TH2); vl2(ax + APL, y, TH2); vl2(ax + APL + APC, y, TH2);
         drawText('결', ax + 2.2, y + 3, 7.5, 'normal', '#333', APL); drawText('재', ax + 2.2, y + 8.5, 7.5, 'normal', '#333', APL);
@@ -12816,7 +13459,7 @@ async function ccpFillSave(woId) {
   finally { hideLoading(); releaseLock('ccpFill'); }
 }
 
-/* ── CCP-1 이탈·결측 보완 (관리자) — 저장된 작업지시서 전수 스캔 ─────────────────
+/* ── 동결공정(CCP-2B·구 CCP-1) 이탈·결측 보완 (관리자) — 저장된 작업지시서 전수 스캔 ──
    ① 한계기준(−18℃ 이하) 초과가 남은 건 → 이탈내용·개선조치를 사후 기재(기재자·기재시각 함께 기록)
    ② 출하승인 완료인데 동결 종료기록이 없는 건 → 미기재 사유를 기재
    ⚠ 온도값은 채우지 않는다 — HACCP 실측만 기록(날조 금지). 이 화면은 '설명'을 남기는 용도이며,
@@ -12838,7 +13481,7 @@ function ccpDevChip(woId, field, i) {
   el.value = v; el.focus();
 }
 Screens['ccp-dev'] = async () => {
-  renderHeader('CCP-1 이탈·결측 보완', '동결온도 사후 기재 · 관리자', { back: 'wo-pdfs' });
+  renderHeader(CCP.FREEZE.no + ' 이탈·결측 보완', '동결온도 사후 기재 · 관리자', { back: 'wo-pdfs' });
   if (State.user?.role !== 'admin') { $id('content').innerHTML = '<div style="padding:16px"><div class="card bl-err"><div class="c-err fw-7">관리자 권한 필요</div></div></div>'; return; }
   $id('content').innerHTML = '<div style="padding:16px"><div class="loading-inline"><div class="spinner-s"></div> 전수 스캔 중...</div></div>';
   const [wos, recs, logs] = await Promise.all([
@@ -12981,7 +13624,7 @@ async function approveWO(woId) {
         //    비상계획: 수기 실측 → 이탈내용/개선조치란에 측정값·사유 기재)
         const _judge = _endTempN != null ? ccpFreezeJudge(_endTempN, freezeHours) : '온도미확인';
         if (_judge === '온도미확인') {
-          toast('⚠ CCP-1 온도 근거 없음 — 냉동고 센서값 미수집. 비상계획에 따라 수기 실측값을 기록하세요.', 'err', 6000);
+          toast(`⚠ ${CCP.FREEZE.no} 온도 근거 없음 — 냉동고 센서값 미수집. 비상계획에 따라 수기 실측값을 기록하세요.`, 'err', 6000);
         }
         if (_judge === '부적합') {
           toast(`동결온도 CCP 부적합 — 냉동고 온도 ${_endTempN.toFixed(1)}℃ (한계 −18℃). 냉동 상태 점검 후 재시도하세요.`, 'err', 5000);
