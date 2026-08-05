@@ -8500,7 +8500,7 @@ function hsStandardTab(std, findings) {
           <div class="fs-13 fw-7">📄 기준 개정 확인</div>
           <div class="fs-11 c-txt-l mt-2">마지막 확인 ${checked || '없음'} · 권장 ${HACCP_DOC.recheckDays}일마다</div>
         </div>
-        <button class="btn btn-sm btn-outline" onclick="hsCheckRevision()">확인</button>
+        <button class="btn btn-sm btn-outline btn-info" onclick="hsCheckRevision()">확인</button>
       </div>
       <div class="fs-11 c-txt-l mt-8" style="line-height:1.5">Drive 「기준서_최신본」 폴더의 파일 수정시각만 비교합니다. <b>개정 내용 반영은 사람이 확인해서</b> 시트 「HACCP기준」을 고쳐야 합니다.</div>
     </div>
@@ -8550,7 +8550,7 @@ function hsStandardTab(std, findings) {
             </div>
             ${f.tracked
               ? '<span class="badge badge-info" style="align-self:flex-start">처리 중</span>'
-              : `<button class="btn btn-sm btn-outline" style="align-self:flex-start;white-space:nowrap" onclick="hsTrackFinding(${i})">편차 등록</button>`}
+              : `<button class="btn btn-sm btn-outline btn-pri" style="align-self:flex-start;white-space:nowrap" onclick="hsTrackFinding(${i})">편차 등록</button>`}
           </div>
         </div>`).join('')}
   `;
@@ -8638,7 +8638,7 @@ function hsDevTab(devs) {
             ${done ? '' : `
               <div class="row mt-8" style="gap:6px">
                 <input type="text" id="dev-note-${HS_ESC(d[0])}" placeholder="조치 내용" value="${HS_ESC(d[9])}" style="flex:1;padding:7px;border-radius:6px;border:1px solid var(--gray-l);font-size:13px">
-                <button class="btn btn-sm btn-outline" onclick="hsSetDev('${HS_ESC(d[0])}','조치중')">조치 기록</button>
+                <button class="btn btn-sm btn-outline btn-gray" onclick="hsSetDev('${HS_ESC(d[0])}','조치중')">조치 기록</button>
                 ${isAdmin ? `<button class="btn btn-sm btn-pri" onclick="hsSetDev('${HS_ESC(d[0])}','완료')">완료</button>` : ''}
               </div>`}
           </div>`;
@@ -10045,7 +10045,7 @@ function renderStepContent(step, stepType) {
       <div id="heat-rows-${stepNo}" class="mt-12">
         ${HEAT_PHASES.map((p, i) => heatRowHtml(stepNo, i, p)).join('')}
       </div>
-      <button class="btn btn-sm btn-outline" style="width:100%" onclick="heatAddRow(${stepNo})">＋ 측정 행 추가 (중간 측정)</button>
+      <button class="btn btn-sm btn-outline btn-gray" style="width:100%" onclick="heatAddRow(${stepNo})">＋ 측정 행 추가 (중간 측정)</button>
       <div class="input-group mt-12"><label>이탈내용 (한계기준 벗어난 경우)</label>
         <input type="text" id="heat-dev-${stepNo}" placeholder="예: 3호기 품온 87℃" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></div>
       <div class="input-group mt-8"><label>개선조치 및 결과</label>
