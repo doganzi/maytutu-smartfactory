@@ -28,10 +28,11 @@ function slice(startMark, endMark) {
   assert.notStrictEqual(j, -1, `index.html 에서 종료 마커를 찾지 못함: ${endMark}`);
   return SRC.slice(i, j);
 }
-const code = slice('const CCP = {', 'const DB_SHEETS = {')      // 기준 상수
-           + '\n' + slice('const HS_ESC =', '/* ── 화면 ')       // HaccpStd 모듈
-           + '\n;({ CCP, HACCP_DOC, FG_EXT, HaccpStd })';
-const { CCP, HACCP_DOC, FG_EXT, HaccpStd } = vm.runInThisContext(code, { filename: 'index.html#HaccpStd' });
+const code = slice('const CCP = {', 'const DB_SHEETS = {')       // 기준 상수
+           + '\n' + slice('const HS_ESC =', '/* ── 화면 ')        // HaccpStd 모듈
+           + '\n' + slice('const HEAT_PHASES =', 'function collectStepData')  // 가열 CCP-3B 판정
+           + '\n;({ CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES })';
+const { CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES } = vm.runInThisContext(code, { filename: 'index.html#HaccpStd' });
 
 let pass = 0;
 const ok = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
@@ -213,6 +214,37 @@ ok('모든 입력이 빈 배열이어도 findings 반환', () => {
   const f = HaccpStd.compliance({ std: seedStd(), certs: [], fgItems: [], rmItems: [], devs: [] });
   assert.ok(Array.isArray(f));
   assert.strictEqual(f.length, 0, '정상 상태에서는 지적 0건이어야 한다');
+});
+
+console.log('\n[8] 가열공정 CCP-3B 판정 — 175~190℃ · 150~180초 · 품온 90℃↑');
+const heat = (o = {}) => heatJudge({ startC: 180, endC: 185, coreC: 92, sec: 165, ...o });
+ok('한계기준 안쪽 전부 충족 → 적합', () => {
+  const v = heat();
+  assert.strictEqual(v.ok, true); assert.deepStrictEqual(v.bad, []);
+});
+ok('경계값 포함 (175/190 · 150/180초 · 정확히 90℃) → 적합', () => {
+  assert.strictEqual(heat({ startC: 175, endC: 190, sec: 150, coreC: 90 }).ok, true);
+  assert.strictEqual(heat({ startC: 190, endC: 175, sec: 180 }).ok, true);
+});
+ok('가열온도 미달/초과 → 부적합 + 항목명', () => {
+  assert.deepStrictEqual(heat({ startC: 174.9 }).bad, ['시작온도']);
+  assert.deepStrictEqual(heat({ endC: 190.1 }).bad, ['종료온도']);
+});
+ok('가열시간 2분29초 → 부적합', () => assert.deepStrictEqual(heat({ sec: 149 }).bad, ['가열시간']));
+ok('가열시간 3분1초 → 부적합', () => assert.deepStrictEqual(heat({ sec: 181 }).bad, ['가열시간']));
+ok('품온 89.9℃ → 부적합 (병원성 미생물 잔존 위험)', () => {
+  assert.deepStrictEqual(heat({ coreC: 89.9 }).bad, ['가열후품온']);
+});
+ok('빈칸은 적합으로 넘어가지 않는다 (4항목 모두 이탈)', () => {
+  const v = heatJudge({ startC: '', endC: '', coreC: '', sec: '' });
+  assert.strictEqual(v.ok, false);
+  assert.deepStrictEqual(v.bad, ['시작온도', '종료온도', '가열시간', '가열후품온']);
+});
+ok('여러 항목 동시 이탈이면 전부 열거', () => {
+  assert.deepStrictEqual(heat({ startC: 160, coreC: 80 }).bad, ['시작온도', '가열후품온']);
+});
+ok('기본 측정 시점 = 매 작업 전 · 작업 종료 (기준서 주기)', () => {
+  assert.deepStrictEqual(HEAT_PHASES, ['작업 전', '작업 종료']);
 });
 
 console.log(`\n✅ ${pass}개 통과\n`);

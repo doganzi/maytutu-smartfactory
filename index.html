@@ -7269,8 +7269,8 @@ function renderSopStepPreview(step, recipes, targetKg, packCount) {
   const stepNo = parseInt(step[1]);
   const stepType = step[3] || 'input';
   const isMixing = stepType === 'process' && (step[2]||'').includes('믹싱');
-  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', seal: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal', 'qr-label': 'info' };
-  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', seal: '포장(밀봉)', inspect: '검사(CCP)', pack: '포장', store: '보관', 'qr-label': 'QR라벨' };
+  const typeColor = { input: 'info', process: isMixing ? 'teal' : 'pri', seal: 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal', 'qr-label': 'info', heat: 'err' };
+  const typeLabel = { input: '투입', process: isMixing ? '믹싱' : '공정', seal: '포장(밀봉)', inspect: '검사(CCP)', pack: '포장', store: '보관', 'qr-label': 'QR라벨', heat: `가열(${CCP.HEAT.no})` };
   const color = typeColor[stepType] || 'gray';
   const label = typeLabel[stepType] || stepType;
   const checks = (step[6] || '').split(',').filter(c => c.trim());
@@ -7385,6 +7385,16 @@ function renderSopStepPreview(step, recipes, targetKg, packCount) {
     body += `<div class="input-group mt-8"><label>냉동 시작 시각 (자동 기록)</label><input type="text" placeholder="자동 입력 됨" ${dis}></div>`;
   }
   else {
+    if (stepType === 'heat') {
+      body += `
+        <div class="info-box" style="background:#c6282810">
+          <div class="fs-12 fw-6" style="color:#c62828">${ccpLabel(CCP.HEAT)}</div>
+          <div class="fs-12 mt-4">${CCP.HEAT.limitText}</div>
+          <div class="fs-11 c-txt-l mt-4">주기: ${CCP.HEAT.cycle}</div>
+        </div>
+        <div class="fs-12 fw-6 c-txt-l mb-4 mt-8">측정 기록 (호기별)</div>
+        <div class="fs-11 c-txt-l">${HEAT_PHASES.join(' · ')} — 호기 · 측정시각 · 시작온도 · 가열시간 · 종료온도 · 가열후품온 · 판정</div>`;
+    } else
     body += `<div class="fs-12 c-txt-l">미정의 stepType: ${stepType}</div>`;
   }
 
@@ -8428,13 +8438,16 @@ Screens['haccp-std'] = async (params = {}) => {
       HaccpStd.ensureSheet('기준편차', DEV_SHEET_HEADER),
     ]);
     await HaccpStd.seedIfEmpty();
-    [std, certs, devs, fgItems, rmItems] = await Promise.all([
+    let sops;
+    [std, certs, devs, fgItems, rmItems, sops] = await Promise.all([
       SheetsAPI.getAll('HACCP기준').catch(() => []),
       SheetsAPI.getAll('시험성적서').catch(() => []),
       SheetsAPI.getAll('기준편차').catch(() => []),
       SheetsAPI.getAll('완제품품목').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('SOP').catch(() => []),
     ]);
+    window._hsSops = sops;
   } catch (e) {
     hideLoading();
     $id('content').innerHTML = `<div style="padding:16px"><div class="card bl-err"><div class="fw-7 c-err">기준 데이터를 불러오지 못했습니다</div><div class="fs-12 c-txt-l mt-4">${HS_ESC(e.message)}</div></div></div>`;
@@ -8443,7 +8456,7 @@ Screens['haccp-std'] = async (params = {}) => {
   hideLoading();
 
   const stdObjs = HaccpStd.parse(std);
-  window._hsCache = { std: stdObjs, certs, devs, fgItems, rmItems };
+  window._hsCache = { std: stdObjs, certs, devs, fgItems, rmItems, sops: window._hsSops || [] };
   const findings = HaccpStd.compliance({ std: stdObjs, certs, fgItems, rmItems, devs });
   const openDevs = devs.filter(d => d[7] !== '완료');
   const errN = findings.filter(f => f.sev === 'err').length;
@@ -8503,6 +8516,18 @@ function hsStandardTab(std, findings) {
         <div class="fs-11 c-txt-l">대상: ${HS_ESC(c.targets)}</div>
         ${c._fallback ? '<div class="fs-11 mt-4" style="color:var(--warn,#e65100)">⚠ 시트를 못 읽어 앱 내장값으로 표시 중</div>' : ''}
       </div>`).join('')}
+
+    ${State.user?.role === 'admin' && !(window._hsCache?.sops || []).some(s => s[2] === ANGBUTTER.fgCode) ? `
+      <div class="card mt-12" style="border-left:3px solid #c62828">
+        <div class="row between" style="align-items:center">
+          <div style="flex:1">
+            <div class="fs-13 fw-7" style="color:#c62828">🥮 앙버터 호두과자 SOP 없음</div>
+            <div class="fs-11 c-txt-l mt-2">${CCP.HEAT.no} 가열은 앙버터 호두과자 전용 CCP인데 해당 SOP가 없어 기록할 공정이 없습니다.</div>
+          </div>
+          <button class="btn btn-sm btn-pri" style="white-space:nowrap" onclick="hsSeedAngbutterSop()">SOP 생성</button>
+        </div>
+        <div class="fs-11 c-txt-l mt-8">기준서 「8. 제조공정도」의 ${ANGBUTTER.steps.length}개 공정(가열 → 냉각 → 동결 → 절단 → 버터투입 → 내포장 → 금속검출 → 외포장 → 동결공정)과 배합비(적팥앙금S 50 · 반죽 31 · 버터 13 · 호두 6)를 그대로 만듭니다.</div>
+      </div>` : ''}
 
     <div class="fs-14 fw-7 mt-12 mb-8">🔍 검증 주기</div>
     ${vers.map(v => `
@@ -8622,6 +8647,106 @@ function hsDevTab(devs) {
 }
 
 /* ── 액션 ─────────────────────────────────────────────────────────── */
+/* ── 앙버터 호두과자 SOP 생성 (기준서 8.제조공정도 그대로) ──────────────
+   손으로 옮겨 적으면 CCP 순서·한계기준이 어긋나므로 기준서 값에서 한 번에 만든다.
+   반죽은 자사 반제품(FG002 앙호두 전용반죽)이라 SOP레시피 rmCode 가 FG 코드다 —
+   원재료 재고 조회에는 잡히지 않는다(완제품LOT 으로 관리). 의도된 예외.        */
+const ANGBUTTER = {
+  fgCode: 'FG003', fgName: '앙버터 호두과자',
+  reportDate: '2026-05-04', foodType: '빵류', packSize: '50구', shelfLife: '12개월',
+  storage: '냉동(-18℃ 이하)', doughCode: 'FG002',
+  recipeText: '조림류[적팥앙금S] 50%, 빵류[앙호두 전용반죽] 31%, 버터 13%, 호두 6%',
+  // [자재명, 배합비, 비고]  — 기준서 제품설명서 5.성분배합비율
+  mats: [
+    { name: '적팥앙금S', ratio: 0.50, storage: '실온(1~35℃)' },
+    { name: '버터',      ratio: 0.13, storage: '냉동(-18℃ 이하) · 해동 -2~5℃ 12시간 이내' },
+    { name: '호두',      ratio: 0.06, storage: '실온(1~35℃)' },
+  ],
+  // [stepName, stepType, rmKey, std, checks]
+  steps: [
+    ['반죽 입고',      'input',   'DOUGH',  '자사 앙호두 전용반죽(FG002) LOT 사용', '소비기한 확인,LOT 확인'],
+    ['팥앙금 입고',    'input',   '적팥앙금S', '입고기준: 시험성적서 확인 · 실온보관 1~35℃', '시험성적서 확인,외관 이상 없음'],
+    ['호두 입고',      'input',   '호두',    '입고기준: 시험성적서 확인 · 실온보관 1~35℃', '시험성적서 확인,외관 이상 없음'],
+    ['버터 입고·해동', 'input',   '버터',    '냉동보관 -18℃ 이하 → 해동 -2~5℃ · 12시간 이내', '해동온도 확인,해동시간 확인'],
+    ['반죽 주입',      'process', '',        '가열기 틀에 반죽을 주입한다', '주입량 균일'],
+    ['앙금·호두 투입', 'process', '',        '팥앙금과 호두를 반죽 내부에 투입한다', '투입량 확인'],
+    ['가열',           'heat',    '',        '가열온도 175~190℃ · 가열시간 2분30초~3분 · 가열 후 품온 90℃ 이상', ''],
+    ['냉각',           'process', '',        '실온 냉각 1~35℃ (열식힘)', '품온 확인'],
+    ['동결',           'process', '',        '냉동실 이동 후 동결 · 냉동온도 -18℃ 이하', '냉동고 온도 확인'],
+    ['절단',           'process', '',        '동결된 호두과자 중앙을 절단한다', '절단 상태 확인'],
+    ['버터 투입',      'process', '',        '절단된 틈새에 버터를 꽂는다', '투입 규격 확인'],
+    ['내포장',         'seal',    '',        '이상 없는 제품을 내포장재에 담고 중량 확인 후 밀봉', '중량 확인,밀봉 상태'],
+    ['금속검출',       'inspect', '',        'Fe 2.5mm∅ · STS 4.0mm∅ 이상 불검출', ''],
+    ['외포장',         'pack',    '',        '제품 중량에 맞게 박스포장', '박스 수량 확인'],
+    ['QR 라벨',        'qr-label','',        '완제품 개별 QR 라벨 출력', ''],
+    ['동결공정',       'store',   '',        '냉동온도 -18℃ 이하 · 냉동시간 12시간 이상', ''],
+  ],
+};
+
+async function hsSeedAngbutterSop() {
+  if (State.user?.role !== 'admin') { toast('관리자만 가능합니다', 'err'); return; }
+  const A = ANGBUTTER;
+  confirm('앙버터 호두과자 SOP 생성',
+    `기준서 「8. 제조공정도」 그대로 ${A.steps.length}개 공정(가열 ${CCP.HEAT.no} 포함)과 배합비를 만듭니다.\n`
+    + `완제품 ${A.fgCode} · 원재료 ${A.mats.length}종도 없으면 함께 등록합니다.`, async () => {
+    if (!acquireLock('hsSeedSop')) return;
+    try {
+      showLoading();
+      const [sops, rmItems, fgItems] = await Promise.all([
+        SheetsAPI.getAll('SOP', false).catch(() => []),
+        SheetsAPI.getAll('원재료품목', false).catch(() => []),
+        SheetsAPI.getAll('완제품품목', false).catch(() => []),
+      ]);
+      if (sops.some(s => s[2] === A.fgCode)) { hideLoading(); toast(`${A.fgCode} SOP 가 이미 있습니다`, 'warn', 4000); return; }
+
+      // ① 원재료 — 이름이 같으면 재사용, 없으면 다음 RM 번호로 신규
+      let maxRm = 0;
+      rmItems.forEach(i => { const m = /^RM(\d+)$/.exec(String(i[0] || '')); if (m) maxRm = Math.max(maxRm, parseInt(m[1])); });
+      const codeOf = {};
+      for (const mat of A.mats) {
+        const hit = rmItems.find(i => String(i[1] || '').trim() === mat.name);
+        if (hit) { codeOf[mat.name] = hit[0]; continue; }
+        const code = 'RM' + String(++maxRm).padStart(3, '0');
+        codeOf[mat.name] = code;
+        // code,name,spec,sku,unit,category,reorderQty,allergen,storage,reorderPoint,leadDays,orderCycle,status,매입단가
+        await SheetsAPI.append('원재료품목', [code, mat.name, '', 'kg', 'kg', '부재료', '', '', mat.storage, '', '', '', '', '']);
+      }
+      codeOf.DOUGH = A.doughCode;
+
+      // ② 완제품 (규제정보 포함) — 품목보고번호는 문서 확보 후 입력
+      if (!fgItems.some(i => i[0] === A.fgCode)) {
+        const row = [A.fgCode, A.fgName, A.recipeText, '개', '', A.shelfLife, A.storage, '', '', ''];
+        row[FG_EXT.reportNo] = ''; row[FG_EXT.reportDate] = A.reportDate;
+        row[FG_EXT.foodType] = A.foodType; row[FG_EXT.recipe] = A.recipeText;
+        row[FG_EXT.packSize] = A.packSize; row[FG_EXT.labelFile] = '';
+        row[FG_EXT.labelUpdatedAt] = ''; row[FG_EXT.specNote] = '일반세균 1,000 이하 · 대장균군 0 · 식중독균 6종 음성 · 금속성이물 Fe 2.5mm∅·STS 4.0mm∅ 이상 불검출';
+        await SheetsAPI.append('완제품품목', row);
+      }
+
+      // ③ SOP · 공정단계 · 레시피
+      let maxSop = 0;
+      sops.forEach(s => { const m = /^SOP-(\d+)$/.exec(String(s[0] || '')); if (m) maxSop = Math.max(maxSop, parseInt(m[1])); });
+      const sopId = 'SOP-' + String(maxSop + 1).padStart(3, '0');
+      await SheetsAPI.append('SOP', [sopId, `${A.fgName} 제조`, A.fgCode, 'v1', '활성', String(A.steps.length)]);
+      for (let i = 0; i < A.steps.length; i++) {
+        const [name, type, key, std, checks] = A.steps[i];
+        await SheetsAPI.append('SOP공정단계', [sopId, String(i + 1), name, type, key ? (codeOf[key] || '') : '', std, checks]);
+      }
+      await SheetsAPI.append('SOP레시피', [sopId, A.doughCode, '앙호두 (호두과자 전용반죽)', '0.31', 'kg', '1']);
+      for (let i = 0; i < A.mats.length; i++) {
+        const m = A.mats[i];
+        await SheetsAPI.append('SOP레시피', [sopId, codeOf[m.name], m.name, String(m.ratio), 'kg', String(i + 2)]);
+      }
+      ['SOP', 'SOP공정단계', 'SOP레시피', '원재료품목', '완제품품목'].forEach(t => SheetsAPI.invalidateCache(t));
+      hideLoading();
+      toast(`${sopId} ${A.fgName} 생성 완료 — 공정 ${A.steps.length}단계`, 'suc', 6000);
+      await Screens['haccp-std']({ tab: '기준' });
+    } catch (e) {
+      hideLoading(); toast('생성 실패: ' + e.message, 'err', 7000);
+    } finally { releaseLock('hsSeedSop'); }
+  });
+}
+
 async function hsCheckRevision() {
   if (!acquireLock('hsCheckRevision')) return;
   try {
@@ -9592,8 +9717,8 @@ function renderWOExecute() {
 
   const stepType = step[3] || 'input';
   const isMixingStep = stepType === 'process' && (step[2]||'').includes('믹싱');
-  const typeColor = { input: 'info', process: isMixingStep ? 'teal' : 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal' };
-  const typeLabel = { input: '투입', process: isMixingStep ? '믹싱' : '공정', inspect: '검사(CCP)', pack: '포장', store: '보관' };
+  const typeColor = { input: 'info', process: isMixingStep ? 'teal' : 'pri', inspect: 'warn', pack: 'gray-d', store: 'teal', heat: 'err' };
+  const typeLabel = { input: '투입', process: isMixingStep ? '믹싱' : '공정', inspect: '검사(CCP)', pack: '포장', store: '보관', heat: `가열(${CCP.HEAT.no})` };
 
   // Header
   renderHeader(woId, `${State.woExec.wo?.[4] || ''} ${targetQty}kg · ${unit}포장`);
@@ -9907,6 +10032,27 @@ function renderStepContent(step, stepType) {
     `;
   }
 
+  else if (stepType === 'heat') {
+    // 가열공정 CCP-3B — 종이 「중요관리점(CCP-3B)점검표」 1:1. 주기 = 매 작업 전 · 작업 종료 시
+    const L = CCP.HEAT.limit;
+    html += `
+      <div class="card" style="padding:12px 14px;border-left:3px solid #c62828;background:#c6282808">
+        <div class="fs-13 fw-7" style="color:#c62828">${ccpLabel(CCP.HEAT)} — 한계기준</div>
+        <div class="fs-12 fw-6 mt-4">${CCP.HEAT.limitText}</div>
+        <div class="fs-11 c-txt-l mt-4">주기: ${CCP.HEAT.cycle} · 담당: ${HACCP_DOC.teamLeader}</div>
+        <div class="fs-11 c-txt-l">측정: 가열온도=적외선온도계 · 가열시간=타이머 · 품온=탐침온도계 (육안 확인)</div>
+      </div>
+      <div id="heat-rows-${stepNo}" class="mt-12">
+        ${HEAT_PHASES.map((p, i) => heatRowHtml(stepNo, i, p)).join('')}
+      </div>
+      <button class="btn btn-sm btn-outline" style="width:100%" onclick="heatAddRow(${stepNo})">＋ 측정 행 추가 (중간 측정)</button>
+      <div class="input-group mt-12"><label>이탈내용 (한계기준 벗어난 경우)</label>
+        <input type="text" id="heat-dev-${stepNo}" placeholder="예: 3호기 품온 87℃" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></div>
+      <div class="input-group mt-8"><label>개선조치 및 결과</label>
+        <input type="text" id="heat-act-${stepNo}" placeholder="예: 재가열 후 품온 92℃ 확인, 관능검사 이상 없음" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px"></div>
+      <div class="fs-11 c-txt-l mt-8" style="line-height:1.5">한계기준 이탈 시 <b>즉시 작업을 중지</b>하고 온도·시간을 재조정해 재가열한 뒤 관능검사에서 이상이 없을 때 다음 공정을 진행합니다. 조치 후 HACCP팀장(${HACCP_DOC.teamLeader}) 승인을 받습니다.</div>
+    `;
+  }
   else if (stepType === 'qr-label') {
     // QR 라벨 출력 공정 — 밀봉 수량 기반 자동 생성 (기존 라벨 시스템 통일)
     const sealQty = State.woExec.packCount || 0;
@@ -10635,6 +10781,101 @@ function ccpGridReadView(d) {
 }
 
 // ── 공정 입력값 수집 (JSON string 리턴) ──
+/* ── 가열공정 CCP-3B 기록 ────────────────────────────────────────────────
+   종이 양식 「중요관리점(CCP-3B)점검표 [가열공정]」 1:1
+   열: 품명 · 측정시각 · 호기 · 시작온도 · 가열시간 · 종료온도 · 가열후품온 · 판정 · 서명
+   주기: 매 작업 전 · 작업 종료 시 (중간 측정은 행 추가)
+   한계기준은 CCP.HEAT.limit — 숫자를 여기 다시 쓰지 말 것            */
+const HEAT_PHASES = ['작업 전', '작업 종료'];
+
+/** 한 행 판정 — 한계기준을 벗어난 항목명을 그대로 돌려준다(이탈 사유 기재용) */
+function heatJudge(r) {
+  const L = CCP.HEAT.limit, bad = [];
+  const num = v => (v === '' || v == null) ? NaN : parseFloat(v);
+  const s = num(r.startC), e = num(r.endC), c = num(r.coreC), sec = num(r.sec);
+  if (isNaN(s) || s < L.minC || s > L.maxC) bad.push('시작온도');
+  if (isNaN(e) || e < L.minC || e > L.maxC) bad.push('종료온도');
+  if (isNaN(sec) || sec < L.secMin || sec > L.secMax) bad.push('가열시간');
+  if (isNaN(c) || c < L.coreC) bad.push('가열후품온');
+  return { ok: bad.length === 0, bad };
+}
+
+function heatRowHtml(stepNo, i, phase) {
+  const ip = 'width:100%;padding:7px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px';
+  const id = f => `heat-${stepNo}-${i}-${f}`;
+  return `
+    <div class="card" data-heat-row="${stepNo}" style="padding:10px 12px;margin-bottom:8px;border-left:3px solid #c62828">
+      <div class="row between mb-8">
+        <div class="fs-13 fw-7">${i + 1}. ${phase || '추가 측정'}</div>
+        <span class="badge badge-gray" id="${id('verdict')}">미입력</span>
+      </div>
+      <input type="hidden" id="${id('phase')}" value="${phase || '추가 측정'}">
+      <div class="grid-2" style="gap:8px">
+        <div class="input-group"><label>호기</label>
+          <input type="text" id="${id('unit')}" placeholder="예: 1호기" style="${ip}" oninput="heatSync(${stepNo},${i})"></div>
+        <div class="input-group"><label>측정시각</label>
+          <input type="time" id="${id('at')}" style="${ip}" oninput="heatSync(${stepNo},${i})"></div>
+        <div class="input-group"><label>시작온도 (℃)</label>
+          <input type="number" inputmode="decimal" step="0.1" id="${id('start')}" placeholder="175~190" style="${ip}" oninput="heatSync(${stepNo},${i})"></div>
+        <div class="input-group"><label>종료온도 (℃)</label>
+          <input type="number" inputmode="decimal" step="0.1" id="${id('end')}" placeholder="175~190" style="${ip}" oninput="heatSync(${stepNo},${i})"></div>
+      </div>
+      <div class="grid-2" style="gap:8px;margin-top:8px">
+        <div class="input-group"><label>가열시간</label>
+          <div class="row" style="gap:6px">
+            <div class="input-suffix" style="flex:1"><input type="number" inputmode="numeric" id="${id('min')}" placeholder="2" style="${ip}" oninput="heatSync(${stepNo},${i})"><span>분</span></div>
+            <div class="input-suffix" style="flex:1"><input type="number" inputmode="numeric" id="${id('sec')}" placeholder="30" style="${ip}" oninput="heatSync(${stepNo},${i})"><span>초</span></div>
+          </div></div>
+        <div class="input-group"><label>가열 후 품온 (℃)</label>
+          <input type="number" inputmode="decimal" step="0.1" id="${id('core')}" placeholder="90 이상" style="${ip}" oninput="heatSync(${stepNo},${i})"></div>
+      </div>
+      <div class="fs-11 mt-4" id="${id('why')}" style="color:var(--err,#c62828)"></div>
+    </div>`;
+}
+
+/** 입력 즉시 판정 배지 갱신 — 작업자가 이탈을 바로 본다 */
+function heatSync(stepNo, i) {
+  const g = f => $id(`heat-${stepNo}-${i}-${f}`)?.value ?? '';
+  const filled = ['start', 'end', 'core', 'min', 'sec'].some(f => g(f) !== '');
+  const r = { startC: g('start'), endC: g('end'), coreC: g('core'), sec: (parseInt(g('min')) || 0) * 60 + (parseInt(g('sec')) || 0) };
+  const badge = $id(`heat-${stepNo}-${i}-verdict`), why = $id(`heat-${stepNo}-${i}-why`);
+  if (!badge) return;
+  if (!filled) { badge.className = 'badge badge-gray'; badge.textContent = '미입력'; if (why) why.textContent = ''; return; }
+  const v = heatJudge(r);
+  badge.className = 'badge badge-' + (v.ok ? 'suc' : 'err');
+  badge.textContent = v.ok ? '적합' : '부적합';
+  if (why) why.textContent = v.ok ? '' : `한계기준 이탈: ${v.bad.join(', ')} — 즉시 작업 중지 후 개선조치를 기재하세요`;
+  validateStepInputs(stepNo);
+}
+
+function heatAddRow(stepNo) {
+  const box = $id(`heat-rows-${stepNo}`); if (!box) return;
+  const i = box.querySelectorAll('[data-heat-row]').length;
+  box.insertAdjacentHTML('beforeend', heatRowHtml(stepNo, i, ''));
+}
+
+function heatCollect(stepNo) {
+  const box = $id(`heat-rows-${stepNo}`);
+  const cnt = box ? box.querySelectorAll('[data-heat-row]').length : 0;
+  const rows = [];
+  for (let i = 0; i < cnt; i++) {
+    const g = f => $id(`heat-${stepNo}-${i}-${f}`)?.value ?? '';
+    const sec = (parseInt(g('min')) || 0) * 60 + (parseInt(g('sec')) || 0);
+    const r = { 구분: g('phase'), 호기: g('unit'), 시각: g('at'), startC: g('start'), endC: g('end'), coreC: g('core'), sec };
+    const v = heatJudge(r);
+    rows.push({ ...r, 판정: v.ok ? '적합' : '부적합', 이탈항목: v.bad });
+  }
+  return {
+    ccpNo: CCP.HEAT.no,
+    limit: CCP.HEAT.limit,
+    rows,
+    판정: rows.length && rows.every(r => r.판정 === '적합') ? '적합' : '부적합',
+    이탈내용: $id(`heat-dev-${stepNo}`)?.value || '',
+    개선조치: $id(`heat-act-${stepNo}`)?.value || '',
+    _fmt: 'ccpHeat-v1',
+  };
+}
+
 function collectStepData(stepNo, stepType, step) {
   const data = {};
 
@@ -10681,6 +10922,9 @@ function collectStepData(stepNo, stepType, step) {
   }
   else if (stepType === 'inspect') {
     Object.assign(data, ccpGridCollect(stepNo));   // 신 격자(checks·판정·통과량 등) 수집
+  }
+  else if (stepType === 'heat') {
+    Object.assign(data, heatCollect(stepNo));      // 가열공정 CCP-3B (호기별 행)
   }
   else if (stepType === 'qr-label') {
     data.qrQty = $id(`qr-label-qty-${stepNo}`)?.value || '';
@@ -11676,7 +11920,23 @@ function validateStepInputs(stepNo) {
 
   let allValid = true;
 
-  if (stepType === 'input') {
+  if (stepType === 'heat') {
+    // CCP 는 빈칸을 허용하지 않는다 — 모든 측정행의 6개 값이 있어야 완료 가능
+    const box = $id(`heat-rows-${stepNo}`);
+    const cnt = box ? box.querySelectorAll('[data-heat-row]').length : 0;
+    if (cnt === 0) allValid = false;
+    let anyBad = false;
+    for (let i = 0; i < cnt; i++) {
+      const g = f => $id(`heat-${stepNo}-${i}-${f}`)?.value ?? '';
+      if (['unit', 'at', 'start', 'end', 'core'].some(f => g(f) === '')) allValid = false;
+      if (g('min') === '' && g('sec') === '') allValid = false;
+      const r = { startC: g('start'), endC: g('end'), coreC: g('core'), sec: (parseInt(g('min')) || 0) * 60 + (parseInt(g('sec')) || 0) };
+      if (!heatJudge(r).ok) anyBad = true;
+    }
+    // 이탈이 있으면 개선조치 없이는 넘어갈 수 없다 (기준서 개선조치 절차)
+    if (anyBad && !($id(`heat-act-${stepNo}`)?.value || '').trim()) allValid = false;
+  }
+  else if (stepType === 'input') {
     // Check: 투입량 입력됨?
     const qtyInput = $id(`input-qty-${stepNo}`);
     const qtyVal = parseFloat(qtyInput?.value);
