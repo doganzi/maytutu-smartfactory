@@ -54,11 +54,12 @@ global.DRIVE = { FG, CALIB };
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const slice = (a, b) => SRC.slice(SRC.indexOf(a), SRC.indexOf(b, SRC.indexOf(a)));
-const { DriveDocs, HaccpStd } = vm.runInThisContext(
+const { DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile } = vm.runInThisContext(
   slice('const CCP = {', 'const DB_SHEETS = {')
   + '\n' + slice('const DOC_SLOTS = [', 'const HS_ESC =')
   + '\n' + slice('const HS_ESC =', '/* ── 화면 ')
-  + '\n;({ DriveDocs, HaccpStd })', { filename: 'index.html' });
+  + '\n' + slice('function _sfAcceptsFile', '// 정규화한 File 목록')   // 업로드 수용 판정
+  + '\n;({ DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile })', { filename: 'index.html' });
 
 (async () => {
   const scan = await DriveDocs.scan(true);
@@ -104,6 +105,49 @@ const { DriveDocs, HaccpStd } = vm.runInThisContext(
   ok('시트가 비면 13대 모두 미등록으로 뜬다', () => assert.strictEqual(by('기기미등록'), 13));
   ok('물반죽은 지적 없음 (오탐 없음)', () =>
     assert.strictEqual(f.filter(x => x.title.includes('물반죽')).length, 0));
+
+  console.log('\n[업로드] 올릴 자리 결정');
+  ok('자재 하위폴더 id 를 들고 있어야 자재별 업로드가 된다', () => {
+    const subs = S('1.물반죽', 'rm').subs;
+    // 번호 접두어가 없는 자재 폴더는 한글 가나다순으로 떨어진다
+    assert.deepStrictEqual(subs.map(s => s.name), ['계란', '앙브레드전용믹스', '콩기름']);
+    assert.ok(subs.every(s => s.id), '업로드 대상 폴더 id 가 있어야 한다');
+  });
+  ok('기기 회차 폴더도 id·이름을 함께 들고 있다', () => {
+    const r = scan.devices[0].rounds;
+    assert.strictEqual(r.length, 2);
+    assert.ok(r.every(x => x.id && x.name));
+  });
+  ok('없는 슬롯 폴더 이름 — 기존 번호 체계를 따른다', () => {
+    const slot = k => S('1.물반죽', k);
+    assert.strictEqual(docSlotFolderName(slot('rm'), '2.앙버터 호두과자'), '2.원재료 시험성적서');
+    assert.strictEqual(docSlotFolderName(slot('sub'), '2.앙버터 호두과자'), '3.부재료 시험성적서');
+    // 완제품 성적서만 제품명이 들어간다 (`4.물반죽 시험성적서` 규칙)
+    assert.strictEqual(docSlotFolderName(slot('fg'), '2.앙버터 호두과자'), '4.앙버터 호두과자 시험성적서');
+  });
+  ok('성적서 슬롯만 시트 등록으로 이어진다 (품목보고서는 유효기한이 없다)', () => {
+    assert.strictEqual(S('1.물반죽', 'report').cert, false);
+    ['rm', 'sub', 'fg'].forEach(k => assert.strictEqual(S('1.물반죽', k).cert, true, k));
+    assert.strictEqual(S('1.물반죽', 'fg').kind, '완제품');
+  });
+
+  console.log('\n[업로드] accept 판정 — PDF 성적서가 조용히 버려지지 않는다');
+  const F = (name, type) => ({ name, type });
+  const IN = accept => ({ accept });
+  ok('image/*,application/pdf 는 PDF·JPEG 둘 다 받는다', () => {
+    const i = IN('image/*,application/pdf');
+    assert.strictEqual(_sfAcceptsFile(i, F('성적서.pdf', 'application/pdf')), true);
+    assert.strictEqual(_sfAcceptsFile(i, F('사진.jpg', 'image/jpeg')), true);
+    assert.strictEqual(_sfAcceptsFile(i, F('사진.heic', 'image/heic')), true);
+  });
+  ok('기존 image/* 전용 input 의 동작은 그대로 (PDF 거부)', () => {
+    assert.strictEqual(_sfAcceptsFile(IN('image/*'), F('성적서.pdf', 'application/pdf')), false);
+    assert.strictEqual(_sfAcceptsFile(IN('image/*'), F('사진.png', 'image/png')), true);
+  });
+  ok('확장자 규칙(.pdf)과 accept 없음도 처리', () => {
+    assert.strictEqual(_sfAcceptsFile(IN('.pdf'), F('성적서.PDF', '')), true);
+    assert.strictEqual(_sfAcceptsFile(IN(''), F('무엇이든', '')), true);
+  });
 
   console.log('\n✅ 실측 트리 통합 검증 통과\n');
 })();

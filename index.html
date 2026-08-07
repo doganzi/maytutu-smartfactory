@@ -144,6 +144,11 @@ a { text-decoration:none; color:inherit; }
 .photo-upload input[type=file] { display:none; }
 .photo-upload .photo-label { font-size:12px; font-weight:600; color:var(--gray-d); }
 .photo-upload .photo-hint { font-size:11px; color:var(--txt-l); margin-top:2px; }
+/* 문서 현황 카드의 슬롯별 업로드 — photo-upload 의 컴팩트 변형(드롭·붙여넣기 배선 그대로 재사용) */
+.photo-upload.doc-up { display:inline-block; margin-top:0; padding:5px 10px; border-style:solid; border-color:var(--pri);
+  border-radius:14px; background:transparent; white-space:nowrap; }
+.photo-upload.doc-up .photo-label { color:var(--pri); font-size:11px; }
+.photo-upload.doc-up.busy { opacity:.5; pointer-events:none; }
 .photo-upload .photo-preview, .photo-preview { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 .photo-upload .photo-preview img, .photo-preview img { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--gray-l); }
 .fab { position:fixed; bottom:calc(72px + env(safe-area-inset-bottom,0)); right:16px; width:52px; height:52px; border-radius:26px; background:var(--pri); color:#fff; display:flex; align-items:center; justify-content:center; font-size:28px; box-shadow:0 4px 12px rgba(26,35,126,0.3); cursor:pointer; z-index:5; }
@@ -1323,6 +1328,29 @@ async function driveEnsurePdfFolder() {
 }
 
 const DriveAPI = {
+  /** 지정한 폴더에 파일 하나를 올린다. 성적서·검교정 원본처럼 **올릴 자리가 정해진** 업로드용.
+      반환 { id, url } — 실패는 throw. (uploadPhoto 는 이 위에 얹힌 사진 전용 래퍼) */
+  async uploadFile(file, folderId, displayName) {
+    if (isPreviewing()) { _previewSkipWrite(); return null; }
+    const metadata = { name: displayName || file.name, mimeType: file.type || 'application/octet-stream' };
+    if (folderId) metadata.parents = [folderId];
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', file);
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true', {
+      method: 'POST', headers: { Authorization: `Bearer ${State.token}` }, body: form,
+    });
+    if (res.status === 401) {
+      toast('인증이 만료되었습니다. 다시 로그인합니다…', 'warn', 3000);
+      localStorage.removeItem('mt_token');
+      setTimeout(() => Auth.login(), 1500);
+      throw new Error('토큰 만료 — 재로그인 필요');
+    }
+    if (!res.ok) throw new Error(`Drive 업로드 실패 (${res.status})`);
+    const d = await res.json();
+    return { id: d.id, url: d.webViewLink || `https://drive.google.com/file/d/${d.id}/view` };
+  },
+
   async uploadPhoto(file) {
     if (isPreviewing()) { _previewSkipWrite(); return ''; }
     const metadata = {
@@ -8369,11 +8397,20 @@ Screens.haccp = async () => {
       여기서 보는 것은 "원본이 Drive 에 실제로 있느냐" 하나뿐이다.
    ═══════════════════════════════════════════════════════════════════════ */
 const DOC_SLOTS = [   // 위에서부터 first-match-wins — `2.원재료 시험성적서` 가 fg 로 새지 않게 순서 고정
-  { key: 'report', label: '품목제조보고서',   match: /품목\s*(제조)?\s*보고/, sev: 'err'  },
-  { key: 'rm',     label: '원재료 시험성적서', match: /원\s*재료/,            sev: 'warn' },
-  { key: 'sub',    label: '부재료 시험성적서', match: /부\s*재료/,            sev: 'warn' },
-  { key: 'fg',     label: '완제품 시험성적서', match: /성적서|검사/,          sev: 'err'  },
+  //  `no` = 폴더가 없어 앱이 새로 만들 때 붙일 번호. 기존 `1.물반죽` 트리의 번호 체계를 그대로 따른다.
+  //  `cert` = 유효기한을 추적하는 성적서 슬롯 → 업로드 시 「시험성적서」 시트 등록까지 이어진다.
+  { key: 'report', no: 1, label: '품목제조보고번호', match: /품목\s*(제조)?\s*보고/, sev: 'err',  cert: false },
+  { key: 'rm',     no: 2, label: '원재료 시험성적서', match: /원\s*재료/,            sev: 'warn', cert: true, kind: '원재료' },
+  { key: 'sub',    no: 3, label: '부재료 시험성적서', match: /부\s*재료/,            sev: 'warn', cert: true, kind: '부재료' },
+  { key: 'fg',     no: 4, label: '완제품 시험성적서', match: /성적서|검사/,          sev: 'err',  cert: true, kind: '완제품' },
 ];
+
+/** 없는 슬롯 폴더를 앱이 만들 때 쓸 이름. 기존 트리 규칙(`4.물반죽 시험성적서`)에 맞춰 제품명을 넣는다.
+    예) 제품 `2.앙버터 호두과자` + fg → `4.앙버터 호두과자 시험성적서` */
+function docSlotFolderName(slot, productName) {
+  const bare = String(productName || '').replace(/^\s*\d+\s*\.\s*/, '').trim();
+  return slot.key === 'fg' && bare ? `${slot.no}.${bare} 시험성적서` : `${slot.no}.${slot.label}`;
+}
 
 const DriveDocs = {
   _cache: null, _at: 0,
@@ -8448,12 +8485,12 @@ const DriveDocs = {
       const taken = new Set();
       const slots = DOC_SLOTS.map(slot => {
         const dir = mine.find(d => !taken.has(d.id) && slot.match.test(d.name));
-        if (!dir) return { key: slot.key, label: slot.label, sev: slot.sev, dir: null, files: [], emptySubs: [], state: 'missing' };
+        if (!dir) return { ...slot, dir: null, files: [], subs: [], emptySubs: [], state: 'missing' };
         taken.add(dir.id);
         const files = pt.files.filter(f => pt.owner.get(f.id) === dir.id);
         const subs  = under(pt.dirs, dir.id).sort(this._byNum);
         const emptySubs = subs.filter(s => !pt.files.some(f => (f.parents || []).includes(s.id))).map(s => s.name);
-        return { key: slot.key, label: slot.label, sev: slot.sev, dir, files, emptySubs,
+        return { ...slot, dir, files, subs: subs.map(s => ({ id: s.id, name: s.name })), emptySubs,
                  state: files.length ? 'ok' : 'empty' };
       });
       return { id: p.id, name: p.name, url: this.folderUrl(p.id), slots };
@@ -8465,9 +8502,9 @@ const DriveDocs = {
     const dt = devDirs.length ? await this._tree(devDirs.map(f => f.id), 2) : { files: [], dirs: [], owner: new Map() };
     const devices = devDirs.map(d => {
       const files  = dt.files.filter(f => dt.owner.get(f.id) === d.id);
-      const rounds = under(dt.dirs, d.id).sort(this._byNum).map(r => r.name);
+      const rounds = under(dt.dirs, d.id).sort(this._byNum).map(r => ({ id: r.id, name: r.name }));
       return { id: d.id, name: d.name, url: this.folderUrl(d.id), files, rounds,
-               nextDue: this._nextDue(rounds), state: files.length ? 'ok' : 'empty' };
+               nextDue: this._nextDue(rounds.map(r => r.name)), state: files.length ? 'ok' : 'empty' };
     });
 
     this._cache = { products, devices, scannedAt: new Date().toISOString() };
@@ -8877,6 +8914,175 @@ function hsCertTab(certs, rmItems, fgItems) {
   `;
 }
 
+/* ── 업로드 · 등록 ────────────────────────────────────────────────────
+   실무자가 앱 안에서 원본을 올리고, 그 자리에서 유효기한·검교정일까지 넣어
+   알람이 실제로 울리는 상태로 만든다. Drive 로 나가지 않는다. */
+
+/** 작은 입력 폼 다이얼로그 — 기존 confirm() 오버레이 재사용.
+    fields: [{ id, label, type, value, required, placeholder }] → 확인 시 { id: value }, 취소면 null. */
+function hsPromptFields(title, msg, fields) {
+  return new Promise(resolve => {
+    const inp = 'width:100%;padding:9px;border-radius:6px;border:1px solid var(--gray-l);font-size:16px';
+    $id('dialog-title').textContent = title;
+    $id('dialog-msg').innerHTML = `<div class="fs-12 c-txt-l mb-8">${HS_ESC(msg)}</div>`
+      + fields.map(f => `<div class="input-group" style="margin-bottom:8px;text-align:left">
+           <label class="fs-12">${HS_ESC(f.label)}${f.required ? ' <span class="c-err">*</span>' : ''}</label>
+           <input type="${f.type || 'text'}" id="hspf-${f.id}" value="${HS_ESC(f.value || '')}"
+                  placeholder="${HS_ESC(f.placeholder || '')}" style="${inp}"></div>`).join('');
+    $id('dialog-actions').innerHTML = `
+      <button class="btn btn-sm btn-outline btn-gray" id="dialog-cancel">건너뛰기</button>
+      <button class="btn btn-sm btn-pri" id="dialog-ok">저장</button>`;
+    $id('dialog-overlay').classList.remove('hidden');
+    const close = () => { $id('dialog-overlay').classList.add('hidden'); $id('dialog-msg').innerHTML = ''; };
+    $id('dialog-ok').onclick = () => {
+      const out = {};
+      for (const f of fields) {
+        const v = ($id('hspf-' + f.id)?.value || '').trim();
+        if (f.required && !v) { toast(`${f.label}을(를) 입력하세요`, 'err'); return; }
+        out[f.id] = v;
+      }
+      close(); resolve(out);
+    };
+    $id('dialog-cancel').onclick = () => { close(); resolve(null); };
+  });
+}
+
+/** 슬롯 업로드 — 폴더가 없으면 만들고, 올린 뒤 성적서 슬롯이면 시트 등록까지 잇는다.
+    input 의 data-* 로 대상을 받는다(제품/슬롯/자재 하위폴더). */
+async function hsUploadDoc(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  const box = input.closest('.doc-up');
+  const prodId = input.dataset.prod, slotKey = input.dataset.slot, subId = input.dataset.sub || '';
+  const scan = DriveDocs._cache;
+  const product = (scan?.products || []).find(p => p.id === prodId);
+  const slot = product?.slots.find(s => s.key === slotKey);
+  if (!slot) { toast('업로드 대상을 찾지 못했습니다. 새로고침 후 다시 시도하세요.', 'err'); return; }
+  if (!acquireLock('hsUploadDoc')) return;
+  box?.classList.add('busy');
+
+  try {
+    showLoading();
+    // ① 올릴 자리 확보 — 슬롯 폴더가 없으면(앙버터 성적서처럼) 표준 이름으로 만든다
+    let target = subId || slot.dir?.id;
+    if (!target) {
+      const name = docSlotFolderName(slot, product.name);
+      target = await driveEnsureFolder(name, product.id);
+      if (!target) throw new Error(`폴더 「${name}」 를 만들지 못했습니다`);
+      toast(`폴더 「${name}」 생성`, 'info');
+    }
+    // ② 업로드 — HEIC(아이폰 기본 사진)는 기존 정규화 경로를 그대로 탄다
+    const up = [];
+    for (const raw of files) {
+      const f = await _sfNormalizeImageFile(raw);
+      up.push(await DriveAPI.uploadFile(f, target));
+    }
+    hideLoading();
+    toast(`${up.length}건 업로드 완료`, 'suc');
+
+    // ③ 성적서면 유효기한을 받아 시트에 등록 — 여기까지 해야 만료 알람이 울린다
+    if (slot.cert && up[0]) await hsRegisterCertAfterUpload(slot, product, up[0], files[0]);
+
+    DriveDocs._cache = null;              // 방금 올린 게 바로 보이도록 캐시 폐기
+    await hsRenderDocStatus(true);
+  } catch (e) {
+    hideLoading();
+    toast('업로드 실패: ' + e.message, 'err', 5000);
+  } finally {
+    box?.classList.remove('busy');
+    input.value = '';                     // 같은 파일 다시 고를 수 있게
+    releaseLock('hsUploadDoc');
+  }
+}
+
+/** 업로드 직후 「시험성적서」 시트 등록 — 파일링크가 자동으로 붙는다.
+    ⚠️ 유효기한은 **사람이 성적서를 보고 넣는다.** 파일명·업로드일에서 추정하지 않는다. */
+async function hsRegisterCertAfterUpload(slot, product, uploaded, srcFile) {
+  const guessName = (srcFile?.name || '').replace(/\.[^.]+$/, '');
+  const v = await hsPromptFields('성적서 등록',
+    `${product.name} · ${slot.label} — 유효기한을 넣어야 만료 알람이 울립니다. 건너뛰면 파일만 저장됩니다.`, [
+      { id: 'name',   label: '품목명',  value: guessName, required: true },
+      { id: 'issued', label: '발행일',  type: 'date', value: formatDate(), required: true },
+      { id: 'until',  label: '유효기한', type: 'date', required: true },
+      { id: 'lab',    label: '발행기관', placeholder: '예: 디아이분석센터' },
+      { id: 'no',     label: '성적서번호', placeholder: '예: R20260619-0049' },
+    ]);
+  if (!v) { toast('파일만 저장됨 — 유효기한 미등록이라 만료 알람은 울리지 않습니다', 'warn', 5000); return; }
+  if (v.until <= v.issued) { toast('유효기한이 발행일보다 빠릅니다 — 등록을 건너뜁니다', 'err', 5000); return; }
+  try {
+    const certId = await generateSeqId('CERT', '시험성적서');
+    await SheetsAPI.append('시험성적서', [
+      certId, slot.kind || '원재료', '', v.name, v.lab, v.no,
+      v.issued, v.until, '적합', uploaded.url,
+      State.user?.email || '', formatDateTime(), '유효', `${product.name} ${slot.label} 업로드`,
+    ]);
+    SheetsAPI.invalidateCache('시험성적서');
+    if (window._hsCache) window._hsCache.certs = await SheetsAPI.getAll('시험성적서').catch(() => window._hsCache.certs);
+    toast(`${certId} 등록 완료 — 만료 30일 전부터 알립니다`, 'suc', 4000);
+  } catch (e) { toast('시트 등록 실패(파일은 저장됨): ' + e.message, 'err', 5000); }
+}
+
+/** 기기 검교정 성적서 업로드 — 올린 뒤 「기기관리」 시트의 차기 검교정일까지 맞춘다. */
+async function hsUploadCalib(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  const box = input.closest('.doc-up');
+  const devId = input.dataset.dev;
+  const dev = (DriveDocs._cache?.devices || []).find(d => d.id === devId);
+  if (!dev) { toast('기기를 찾지 못했습니다. 새로고침 후 다시 시도하세요.', 'err'); return; }
+  if (!acquireLock('hsUploadCalib')) return;
+  box?.classList.add('busy');
+
+  try {
+    showLoading();
+    // 회차 폴더가 있으면 가장 최근 회차에, 없으면 기기 폴더 바로 밑에 넣는다
+    const target = input.dataset.round || dev.id;
+    const up = [];
+    for (const raw of files) up.push(await DriveAPI.uploadFile(await _sfNormalizeImageFile(raw), target));
+    hideLoading();
+    toast(`${up.length}건 업로드 완료`, 'suc');
+
+    const bare = String(dev.name).replace(/^\s*\d+\s*\.\s*/, '').trim();
+    const v = await hsPromptFields('검교정 기록',
+      `${bare} — 차기 검교정일을 넣어야 만료 알람이 울립니다.`, [
+        { id: 'last', label: '검교정 실시일', type: 'date', value: formatDate(), required: true },
+        { id: 'next', label: '차기 검교정 예정일', type: 'date', value: dev.nextDue || '', required: true },
+      ]);
+    if (v) await hsSaveCalib(bare, v, up[0]);
+    else toast('파일만 저장됨 — 차기 검교정일 미등록이라 알람은 울리지 않습니다', 'warn', 5000);
+
+    DriveDocs._cache = null;
+    await hsRenderDocStatus(true);
+  } catch (e) {
+    hideLoading();
+    toast('업로드 실패: ' + e.message, 'err', 5000);
+  } finally {
+    box?.classList.remove('busy');
+    input.value = '';
+    releaseLock('hsUploadCalib');
+  }
+}
+
+/** 「기기관리」 시트 반영 — 이미 있으면 검교정일만 갱신, 없으면 행을 만든다.
+    Drive 폴더는 있는데 시트에 없어 알람이 안 울리던 기기를 여기서 등록시킨다. */
+async function hsSaveCalib(name, v, uploaded) {
+  try {
+    const key = s => String(s || '').replace(/\s/g, '');
+    const rows = await SheetsAPI.getAll('기기관리').catch(() => []);
+    const hit = rows.find(r => key(r[1]) === key(name));
+    if (hit) {
+      await SheetsAPI.updateRow('기기관리', 0, hit[0], { 5: v.last, 6: v.next });
+      toast(`${name} 검교정일 갱신 — 차기 ${v.next}`, 'suc', 4000);
+    } else {
+      const code = await generateSeqId('EQ', '기기관리');
+      await SheetsAPI.append('기기관리', [code, name, '', '', '', v.last, v.next, '정상']);
+      toast(`${name} 기기 등록 — 차기 ${v.next}`, 'suc', 4000);
+    }
+    SheetsAPI.invalidateCache('기기관리');
+    if (window._hsCache) window._hsCache.equip = await SheetsAPI.getAll('기기관리').catch(() => window._hsCache.equip);
+  } catch (e) { toast('시트 반영 실패(파일은 저장됨): ' + e.message, 'err', 5000); }
+}
+
 /* ── Drive 문서 현황 (성적서 탭 상단) ──────────────────────────────────
    실무자용 화면이다. "무엇이 없는지 · 어디에 올리면 되는지"가 한 눈에 보여야 한다.
    Drive 가 안 열려도 성적서 목록은 그대로 보여야 하므로 렌더 후 비동기로 주입한다. */
@@ -8905,6 +9111,17 @@ async function hsRenderDocStatus(force = false) {
                   : st === 'missing' ? '<span class="badge badge-err">폴더없음</span>'
                   : '<span class="badge badge-err">없음</span>';
 
+  // 업로드 버튼 — label 로 input 을 감싼다(iOS Safari 는 display:none + JS .click() 을 거부한다)
+  const upBtn = (attrs, handler, text = '＋ 올리기') => `
+    <label class="photo-upload doc-up">
+      <input type="file" accept="image/*,application/pdf" multiple ${attrs} onchange="${handler}(this)">
+      <div class="photo-label">${text}</div>
+    </label>`;
+
+  const fileLine = f => `<div class="fs-11 mt-2">· <a href="${HS_ESC(f.webViewLink
+      || `https://drive.google.com/file/d/${f.id}/view`)}" target="_blank" rel="noopener"
+      style="color:var(--pri)">${HS_ESC(f.name)}</a></div>`;
+
   const productCards = (scan.products || []).map(p => `
     <div class="card" style="border-left:3px solid ${p.slots.every(s => s.state === 'ok' && !s.emptySubs.length) ? 'var(--suc,#2e7d32)' : 'var(--warn,#e65100)'}">
       <div class="row between" style="align-items:center">
@@ -8912,29 +9129,54 @@ async function hsRenderDocStatus(force = false) {
         <a href="${HS_ESC(p.url)}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">폴더 열기 ›</a>
       </div>
       ${p.slots.map(s => `
-        <div class="row between mt-4" style="align-items:center">
-          <div style="flex:1">
-            <div class="fs-12">${HS_ESC(s.label)}${s.files.length ? ` <span class="fs-11 c-txt-l">${s.files.length}건</span>` : ''}</div>
-            ${s.emptySubs.length ? `<div class="fs-11" style="color:var(--warn,#e65100)">↳ 비어 있음: ${HS_ESC(s.emptySubs.join(', '))}</div>` : ''}
+        <details class="mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">
+          <summary class="row between" style="align-items:center;cursor:pointer;list-style:none">
+            <div style="flex:1">
+              <div class="fs-12">${HS_ESC(s.label)}${s.files.length ? ` <span class="fs-11 c-txt-l">${s.files.length}건</span>` : ''}</div>
+              ${s.emptySubs.length ? `<div class="fs-11" style="color:var(--warn,#e65100)">↳ 비어 있음: ${HS_ESC(s.emptySubs.join(', '))}</div>` : ''}
+            </div>
+            ${dot(s.state)}
+          </summary>
+          <div class="mt-4">
+            ${s.files.length ? s.files.map(fileLine).join('') : '<div class="fs-11 c-txt-l">올라온 파일이 없습니다</div>'}
+            <div class="row mt-8" style="gap:6px;flex-wrap:wrap;align-items:center">
+              ${upBtn(`data-prod="${HS_ESC(p.id)}" data-slot="${HS_ESC(s.key)}"`, 'hsUploadDoc',
+                      s.state === 'missing' ? '＋ 폴더 만들고 올리기' : '＋ 올리기')}
+              ${(s.subs || []).map(sub => upBtn(
+                  `data-prod="${HS_ESC(p.id)}" data-slot="${HS_ESC(s.key)}" data-sub="${HS_ESC(sub.id)}"`,
+                  'hsUploadDoc', `＋ ${HS_ESC(sub.name)}`)).join('')}
+            </div>
           </div>
-          ${dot(s.state)}
-        </div>`).join('')}
+        </details>`).join('')}
     </div>`).join('');
 
   const devOk = (scan.devices || []).filter(d => d.state === 'ok').length;
-  const devBad = (scan.devices || []).filter(d => d.state !== 'ok');
   const deviceCard = `
-    <div class="card" style="border-left:3px solid ${devBad.length ? 'var(--err,#c62828)' : 'var(--suc,#2e7d32)'}">
+    <div class="card" style="border-left:3px solid ${devOk < (scan.devices || []).length ? 'var(--err,#c62828)' : 'var(--suc,#2e7d32)'}">
       <div class="row between" style="align-items:center">
         <div class="fs-13 fw-7">🔧 기기 검교정 성적서</div>
         <span class="fs-11 c-txt-l">${devOk}/${(scan.devices || []).length} 보유</span>
       </div>
       <div class="fs-11 c-txt-l mt-2">기준서: 온도계·타이머 검·교정 <b>1회/년</b> · 기록 보관 2년</div>
-      ${devBad.length === 0
-        ? '<div class="fs-12 mt-4" style="color:var(--suc,#2e7d32)">전 기기 성적서 보관됨</div>'
-        : devBad.map(d => `<div class="row between mt-4" style="align-items:center">
-             <a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" class="fs-12" style="color:var(--pri)">${HS_ESC(d.name)}</a>
-             <span class="badge badge-err">없음</span></div>`).join('')}
+      ${(scan.devices || []).map(d => `
+        <details class="mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">
+          <summary class="row between" style="align-items:center;cursor:pointer;list-style:none">
+            <div style="flex:1">
+              <div class="fs-12">${HS_ESC(d.name)}</div>
+              ${d.nextDue ? `<div class="fs-11 c-txt-l">폴더 기준 차기 ${HS_ESC(d.nextDue)}</div>` : ''}
+            </div>
+            ${dot(d.state)}
+          </summary>
+          <div class="mt-4">
+            ${d.files.length ? d.files.map(fileLine).join('') : '<div class="fs-11 c-txt-l">올라온 성적서가 없습니다</div>'}
+            <div class="row mt-8" style="gap:6px;flex-wrap:wrap;align-items:center">
+              ${(d.rounds || []).length
+                ? d.rounds.map(r => upBtn(`data-dev="${HS_ESC(d.id)}" data-round="${HS_ESC(r.id)}"`,
+                    'hsUploadCalib', `＋ ${HS_ESC(r.name)}`)).join('')
+                : upBtn(`data-dev="${HS_ESC(d.id)}"`, 'hsUploadCalib')}
+            </div>
+          </div>
+        </details>`).join('')}
     </div>`;
 
   el.innerHTML = `
@@ -8963,6 +9205,9 @@ async function hsRenderDocStatus(force = false) {
     </details>` : ''}
     ${productCards}
     ${deviceCard}`;
+
+  // 붙여넣기(Ctrl+V)·드래그앤드롭 배선 — 공정사진 업로드와 동일 경로 재사용
+  try { enablePhotoPasteAll(el); } catch (e) { console.warn('[문서현황] 붙여넣기 배선 실패:', e); }
 }
 
 function hsDevTab(devs) {
@@ -9714,11 +9959,11 @@ Screens.equip = async () => {
       const line = card.querySelector('.eq-doc');
       if (!line) return;
       if (!d) { line.textContent = '⚠ Drive 검교정 폴더 없음'; line.style.color = 'var(--warn,#e65100)'; return; }
-      if (d.state === 'ok') {
-        line.innerHTML = `<a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" style="color:var(--pri)">성적서 ${d.files.length}건 열기 ›</a>`;
-      } else {
-        line.innerHTML = `<a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" style="color:var(--err,#c62828)">⚠ 성적서 미보관 — 올리기 ›</a>`;
-      }
+      // 업로드 UI 는 성적서 탭 한 곳에만 둔다 — 여기서는 그리로 보낸다(막다른 링크 금지)
+      const go = `onclick="event.stopPropagation();State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})" style="cursor:pointer"`;
+      line.innerHTML = d.state === 'ok'
+        ? `<span ${go} style="color:var(--pri);cursor:pointer">성적서 ${d.files.length}건 · 관리 ›</span>`
+        : `<span ${go} style="color:var(--err,#c62828);cursor:pointer">⚠ 성적서 미보관 — 올리기 ›</span>`;
     });
   } catch (e) {
     document.querySelectorAll('.eq-doc').forEach(l => { l.textContent = ''; });
@@ -11410,6 +11655,19 @@ async function _sfNormalizeImageFile(file) {
   }
 }
 
+// 이 input 이 받는 파일인가 — 이미지로 하드코딩하면 PDF 성적서를 붙여넣기·드롭했을 때
+// 아무 반응 없이 사라진다. accept 를 그대로 해석한다(mime, `image/*`, `.pdf` 확장자 모두).
+function _sfAcceptsFile(input, file) {
+  const acc = String((input && input.accept) || '').toLowerCase().trim();
+  if (!acc) return true;
+  const type = String((file && file.type) || '').toLowerCase();
+  const name = String((file && file.name) || '').toLowerCase();
+  return acc.split(',').map(s => s.trim()).filter(Boolean).some(rule =>
+    rule.startsWith('.') ? name.endsWith(rule)
+      : rule.endsWith('/*') ? type.startsWith(rule.slice(0, -1))
+      : type === rule);
+}
+
 // 정규화한 File 목록을 input 에 주입하고 기존 onchange 경로를 그대로 발동.
 async function _sfFeedFilesToInput(input, rawFiles) {
   try {
@@ -11452,7 +11710,7 @@ function enablePhotoPaste(input) {
         stop(e);
         try {
           const files = e.dataTransfer && e.dataTransfer.files
-            ? Array.from(e.dataTransfer.files).filter(f => f.type && f.type.indexOf('image/') === 0)
+            ? Array.from(e.dataTransfer.files).filter(f => _sfAcceptsFile(input, f))
             : [];
           if (files.length) { _sfActivePhotoInput = input; _sfFeedFilesToInput(input, files); }
         } catch (err) { console.warn('[사진첨부] 드롭 처리 실패:', err && err.message); }
@@ -11481,9 +11739,9 @@ function enablePhotoPasteAll(root) {
           const files = [];
           for (let i = 0; i < items.length; i++) {
             const it = items[i];
-            if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+            if (it.kind === 'file') {
               const f = it.getAsFile();
-              if (f) files.push(f);
+              if (f && _sfAcceptsFile(target, f)) files.push(f);
             }
           }
           if (files.length) {
