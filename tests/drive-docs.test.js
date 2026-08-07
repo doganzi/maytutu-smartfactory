@@ -1,0 +1,158 @@
+/* DriveDocs.scan() 통합 검증 — 2026-08-07 실측한 `07_공장` 트리를 픽스처로 고정해 돌린다.
+   haccp-std.test.js 가 판정(docFindings)만 본다면, 여기서는 그 앞단인 **트리 해석**을 본다:
+   배치 조회·소속 귀속·슬롯 분류·회차 폴더 한 겹 더 들어가기.
+
+   실행:  node tests/drive-docs.test.js
+   ⚠️ Drive 폴더 구조를 바꾸면 이 픽스처도 같이 고쳐야 한다 — 실물과 갈라지면 통과해도 의미가 없다. */
+const assert = require('assert');
+const fs = require('fs'), path = require('path'), vm = require('vm');
+
+const D = 'application/vnd.google-apps.folder';
+const dir  = (id, name, parent) => ({ id, name, mimeType: D, parents: [parent] });
+const file = (id, name, parent) => ({ id, name, mimeType: 'application/pdf', parents: [parent] });
+
+const FG = '1EsNGO4CZA8ABqOZDBudUJkEv3UeLUaHJ', CALIB = '10OINvKBh7rRxHL-xgUDeJxHlLYut-dNf';
+const NODES = [
+  // 완제품 > 제품
+  dir('mul', '1.물반죽', FG), dir('ang', '2.앙버터 호두과자', FG),
+  // 물반죽 > 슬롯
+  dir('m1', '1.품목제조보고번호', 'mul'), dir('m2', '2.원재료 시험성적서', 'mul'),
+  dir('m3', '3.부재료 시험성적서', 'mul'), dir('m4', '4.물반죽 시험성적서', 'mul'),
+  dir('a1', '1.품목제조보고번호', 'ang'), dir('a2', '2.원재료 시험성적서', 'ang'),
+  // 슬롯 > 파일 / 자재폴더
+  file('f1', '식품.식품첨가물 품목제조보고서_202602733083.pdf', 'm1'),
+  dir('rm1', '계란', 'm2'), dir('rm2', '콩기름', 'm2'), dir('rm3', '앙브레드전용믹스', 'm2'),
+  file('f2', '비닐 시험성적서 26.01.05', 'm3'), file('f3', 'NYLON KCL 시험성적서 2026.pdf', 'm3'),
+  file('f4', '시험성적서 26.06.19~26.09.19', 'm4'),
+  file('f5', '식품.식품첨가물 품목제조보고서_202602733082.pdf', 'a1'),
+  // 앙버터 원재료 3건 — 구 `시험성적서/원재료/` 에서 이관 (2026-08-07)
+  file('f12', '버터 — 앵커버터 수입면장 260521.pdf', 'a2'),
+  file('f13', '팥 — (굿모닝서울)적팥앙금S 시험성적서.pdf', 'a2'),
+  file('f14', '호두 — 프리마베라 수입서류.pdf', 'a2'),
+  // 자재폴더 > 파일
+  file('f6', '계란 시험성적서 ~26년 06 14까지', 'rm1'),
+  file('f7', '계란 시험성적서 (1)', 'rm1'), file('f8', '계란 시험성적서 (2)', 'rm1'),
+  file('f9', '콩식용유 시험성적서 24.08.08', 'rm2'), file('f10', '콩식용유 시험성적서', 'rm2'),
+  file('f11', '앙브레드전용믹스 시험성적서 26.07.14', 'rm3'),
+];
+// 기계 검교정 > 기기 13 > 회차 2 (회차 폴더는 전부 비어 있음 — 2026-08-07 실측)
+const DEVS = ['1.표준온도계','2.적외선온도계','3.표준분동','4.냉동실 데이터로거','5.냉장실 데이터로거',
+  '6.저울(1)','7.저울(2)','8.계랑기 저울','9.냉동고 판넬온도계','10.타이머1','11.타이머2','12.타이머3','13.타이머4'];
+const DUE = ['27.03.24','27.05.10','28.03.26','27.03.31','27.03.31','27.03.31','27.03.31','27.03.31','27.03.31','27.05.28','27.06.01','27.06.01','27.06.01'];
+DEVS.forEach((n, i) => {
+  NODES.push(dir('d' + i, n, CALIB));
+  NODES.push(dir(`d${i}r1`, '1.자체 검/교정 일자 26.04.01', 'd' + i));
+  NODES.push(dir(`d${i}r2`, `2.차기 검/교정 예정 일자 ${DUE[i]}`, 'd' + i));
+});
+
+// ── 스텁: q 에서 부모 id 를 뽑아 자식을 돌려준다 ──
+let calls = 0;
+global.fetch = async (url) => {
+  calls++;
+  const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(url)[1]);
+  const parents = [...q.matchAll(/'([^']+)' in parents/g)].map(m => m[1]);
+  return { ok: true, json: async () => ({ files: NODES.filter(n => parents.includes(n.parents[0])) }) };
+};
+global.State = { token: 'x' };
+global.DRIVE = { FG, CALIB };
+
+const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const slice = (a, b) => SRC.slice(SRC.indexOf(a), SRC.indexOf(b, SRC.indexOf(a)));
+const { DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile } = vm.runInThisContext(
+  slice('const CCP = {', 'const DB_SHEETS = {')
+  + '\n' + slice('const DOC_SLOTS = [', 'const HS_ESC =')
+  + '\n' + slice('const HS_ESC =', '/* ── 화면 ')
+  + '\n' + slice('function _sfAcceptsFile', '// 정규화한 File 목록')   // 업로드 수용 판정
+  + '\n;({ DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile })', { filename: 'index.html' });
+
+(async () => {
+  const scan = await DriveDocs.scan(true);
+  const P = Object.fromEntries(scan.products.map(p => [p.name, p]));
+  const S = (p, k) => P[p].slots.find(s => s.key === k);
+  const ok = (n, f) => { f(); console.log('  ✓ ' + n); };
+
+  console.log('\n[실측 트리] DriveDocs.scan()');
+  ok(`Drive 왕복 ${calls}회 — 폴더 44개를 개별 조회하지 않는다`, () => assert.ok(calls <= 8, `${calls}회`));
+  ok('제품 2개 · 번호순', () => assert.deepStrictEqual(scan.products.map(p => p.name), ['1.물반죽', '2.앙버터 호두과자']));
+
+  ok('물반죽 — 4슬롯 전부 보유', () => {
+    ['report', 'rm', 'sub', 'fg'].forEach(k => assert.strictEqual(S('1.물반죽', k).state, 'ok', k));
+  });
+  ok('물반죽 원재료 = 자재 3폴더의 파일 6건이 한 슬롯으로 모인다', () =>
+    assert.strictEqual(S('1.물반죽', 'rm').files.length, 6));
+  ok('물반죽 부재료 = 슬롯 바로 밑 파일 2건', () =>
+    assert.strictEqual(S('1.물반죽', 'sub').files.length, 2));
+  ok('빈 자재폴더 없음 (계란·콩기름·앙브레드 모두 채워짐)', () =>
+    assert.deepStrictEqual(S('1.물반죽', 'rm').emptySubs, []));
+
+  ok('앙버터 — 품목보고서·원재료는 보유, 부재료·완제품 성적서는 폴더 자체가 없음', () => {
+    ['report', 'rm'].forEach(k => assert.strictEqual(S('2.앙버터 호두과자', k).state, 'ok', k));
+    assert.strictEqual(S('2.앙버터 호두과자', 'rm').files.length, 3);   // 버터·팥·호두
+    ['sub', 'fg'].forEach(k => assert.strictEqual(S('2.앙버터 호두과자', k).state, 'missing', k));
+  });
+
+  console.log('\n[실측 트리] 기기 13대');
+  ok('13대 번호순 — 10번이 2번 앞에 오지 않는다', () =>
+    assert.deepStrictEqual(scan.devices.map(d => d.name).slice(0, 3), ['1.표준온도계', '2.적외선온도계', '3.표준분동']));
+  ok('회차 폴더가 한 겹 더 있어도 파일 유무를 정확히 본다 (지금은 전부 비어 있음)', () =>
+    assert.ok(scan.devices.every(d => d.state === 'empty')));
+  ok('회차 폴더명에서 차기 검교정일을 읽는다', () => {
+    assert.strictEqual(scan.devices[0].nextDue, '2027-03-24');
+    assert.strictEqual(scan.devices[2].nextDue, '2028-03-26');
+  });
+
+  console.log('\n[실측 트리] docFindings — 실제로 무엇이 뜨는가');
+  const f = HaccpStd.docFindings({ scan, certs: [], equip: [] });
+  const by = k => f.filter(x => x.kind === k).length;
+  console.log(`  · 총 ${f.length}건 — 폴더없음 ${by('폴더없음')} · 검교정성적서 ${by('검교정성적서')} · 기기미등록 ${by('기기미등록')}`);
+  ok('앙버터 부재료·완제품 성적서 2슬롯이 지적된다', () => assert.strictEqual(by('폴더없음'), 2));
+  ok('기기 13대 성적서 미보관이 전부 지적된다', () => assert.strictEqual(by('검교정성적서'), 13));
+  ok('시트가 비면 13대 모두 미등록으로 뜬다', () => assert.strictEqual(by('기기미등록'), 13));
+  ok('물반죽은 지적 없음 (오탐 없음)', () =>
+    assert.strictEqual(f.filter(x => x.title.includes('물반죽')).length, 0));
+
+  console.log('\n[업로드] 올릴 자리 결정');
+  ok('자재 하위폴더 id 를 들고 있어야 자재별 업로드가 된다', () => {
+    const subs = S('1.물반죽', 'rm').subs;
+    // 번호 접두어가 없는 자재 폴더는 한글 가나다순으로 떨어진다
+    assert.deepStrictEqual(subs.map(s => s.name), ['계란', '앙브레드전용믹스', '콩기름']);
+    assert.ok(subs.every(s => s.id), '업로드 대상 폴더 id 가 있어야 한다');
+  });
+  ok('기기 회차 폴더도 id·이름을 함께 들고 있다', () => {
+    const r = scan.devices[0].rounds;
+    assert.strictEqual(r.length, 2);
+    assert.ok(r.every(x => x.id && x.name));
+  });
+  ok('없는 슬롯 폴더 이름 — 기존 번호 체계를 따른다', () => {
+    const slot = k => S('1.물반죽', k);
+    assert.strictEqual(docSlotFolderName(slot('rm'), '2.앙버터 호두과자'), '2.원재료 시험성적서');
+    assert.strictEqual(docSlotFolderName(slot('sub'), '2.앙버터 호두과자'), '3.부재료 시험성적서');
+    // 완제품 성적서만 제품명이 들어간다 (`4.물반죽 시험성적서` 규칙)
+    assert.strictEqual(docSlotFolderName(slot('fg'), '2.앙버터 호두과자'), '4.앙버터 호두과자 시험성적서');
+  });
+  ok('성적서 슬롯만 시트 등록으로 이어진다 (품목보고서는 유효기한이 없다)', () => {
+    assert.strictEqual(S('1.물반죽', 'report').cert, false);
+    ['rm', 'sub', 'fg'].forEach(k => assert.strictEqual(S('1.물반죽', k).cert, true, k));
+    assert.strictEqual(S('1.물반죽', 'fg').kind, '완제품');
+  });
+
+  console.log('\n[업로드] accept 판정 — PDF 성적서가 조용히 버려지지 않는다');
+  const F = (name, type) => ({ name, type });
+  const IN = accept => ({ accept });
+  ok('image/*,application/pdf 는 PDF·JPEG 둘 다 받는다', () => {
+    const i = IN('image/*,application/pdf');
+    assert.strictEqual(_sfAcceptsFile(i, F('성적서.pdf', 'application/pdf')), true);
+    assert.strictEqual(_sfAcceptsFile(i, F('사진.jpg', 'image/jpeg')), true);
+    assert.strictEqual(_sfAcceptsFile(i, F('사진.heic', 'image/heic')), true);
+  });
+  ok('기존 image/* 전용 input 의 동작은 그대로 (PDF 거부)', () => {
+    assert.strictEqual(_sfAcceptsFile(IN('image/*'), F('성적서.pdf', 'application/pdf')), false);
+    assert.strictEqual(_sfAcceptsFile(IN('image/*'), F('사진.png', 'image/png')), true);
+  });
+  ok('확장자 규칙(.pdf)과 accept 없음도 처리', () => {
+    assert.strictEqual(_sfAcceptsFile(IN('.pdf'), F('성적서.PDF', '')), true);
+    assert.strictEqual(_sfAcceptsFile(IN(''), F('무엇이든', '')), true);
+  });
+
+  console.log('\n✅ 실측 트리 통합 검증 통과\n');
+})();
