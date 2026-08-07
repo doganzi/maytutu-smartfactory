@@ -18,13 +18,17 @@ const NODES = [
   // 물반죽 > 슬롯
   dir('m1', '1.품목제조보고번호', 'mul'), dir('m2', '2.원재료 시험성적서', 'mul'),
   dir('m3', '3.부재료 시험성적서', 'mul'), dir('m4', '4.물반죽 시험성적서', 'mul'),
-  dir('a1', '1.품목제조보고번호', 'ang'),
+  dir('a1', '1.품목제조보고번호', 'ang'), dir('a2', '2.원재료 시험성적서', 'ang'),
   // 슬롯 > 파일 / 자재폴더
   file('f1', '식품.식품첨가물 품목제조보고서_202602733083.pdf', 'm1'),
   dir('rm1', '계란', 'm2'), dir('rm2', '콩기름', 'm2'), dir('rm3', '앙브레드전용믹스', 'm2'),
   file('f2', '비닐 시험성적서 26.01.05', 'm3'), file('f3', 'NYLON KCL 시험성적서 2026.pdf', 'm3'),
   file('f4', '시험성적서 26.06.19~26.09.19', 'm4'),
   file('f5', '식품.식품첨가물 품목제조보고서_202602733082.pdf', 'a1'),
+  // 앙버터 원재료 3건 — 구 `시험성적서/원재료/` 에서 이관 (2026-08-07)
+  file('f12', '버터 — 앵커버터 수입면장 260521.pdf', 'a2'),
+  file('f13', '팥 — (굿모닝서울)적팥앙금S 시험성적서.pdf', 'a2'),
+  file('f14', '호두 — 프리마베라 수입서류.pdf', 'a2'),
   // 자재폴더 > 파일
   file('f6', '계란 시험성적서 ~26년 06 14까지', 'rm1'),
   file('f7', '계란 시험성적서 (1)', 'rm1'), file('f8', '계란 시험성적서 (2)', 'rm1'),
@@ -81,9 +85,10 @@ const { DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile } = vm.runInThisC
   ok('빈 자재폴더 없음 (계란·콩기름·앙브레드 모두 채워짐)', () =>
     assert.deepStrictEqual(S('1.물반죽', 'rm').emptySubs, []));
 
-  ok('앙버터 — 품목보고서만 있고 성적서 3슬롯은 폴더 자체가 없음', () => {
-    assert.strictEqual(S('2.앙버터 호두과자', 'report').state, 'ok');
-    ['rm', 'sub', 'fg'].forEach(k => assert.strictEqual(S('2.앙버터 호두과자', k).state, 'missing', k));
+  ok('앙버터 — 품목보고서·원재료는 보유, 부재료·완제품 성적서는 폴더 자체가 없음', () => {
+    ['report', 'rm'].forEach(k => assert.strictEqual(S('2.앙버터 호두과자', k).state, 'ok', k));
+    assert.strictEqual(S('2.앙버터 호두과자', 'rm').files.length, 3);   // 버터·팥·호두
+    ['sub', 'fg'].forEach(k => assert.strictEqual(S('2.앙버터 호두과자', k).state, 'missing', k));
   });
 
   console.log('\n[실측 트리] 기기 13대');
@@ -100,7 +105,7 @@ const { DriveDocs, HaccpStd, docSlotFolderName, _sfAcceptsFile } = vm.runInThisC
   const f = HaccpStd.docFindings({ scan, certs: [], equip: [] });
   const by = k => f.filter(x => x.kind === k).length;
   console.log(`  · 총 ${f.length}건 — 폴더없음 ${by('폴더없음')} · 검교정성적서 ${by('검교정성적서')} · 기기미등록 ${by('기기미등록')}`);
-  ok('앙버터 성적서 3슬롯이 지적된다', () => assert.strictEqual(by('폴더없음'), 3));
+  ok('앙버터 부재료·완제품 성적서 2슬롯이 지적된다', () => assert.strictEqual(by('폴더없음'), 2));
   ok('기기 13대 성적서 미보관이 전부 지적된다', () => assert.strictEqual(by('검교정성적서'), 13));
   ok('시트가 비면 13대 모두 미등록으로 뜬다', () => assert.strictEqual(by('기기미등록'), 13));
   ok('물반죽은 지적 없음 (오탐 없음)', () =>
