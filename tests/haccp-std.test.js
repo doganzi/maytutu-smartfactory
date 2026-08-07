@@ -16,6 +16,8 @@ global.localStorage = {
   _m: {}, getItem(k) { return this._m[k] ?? null; }, setItem(k, v) { this._m[k] = String(v); },
 };
 global.State = { user: { email: 't@anghodu.biz', role: 'admin' }, token: 'x' };
+// DRIVE 상수는 슬라이스 밖(CONFIG 구역)에 있다 — DriveDocs 가 참조만 하므로 스텁으로 충분
+global.DRIVE = { ROOT: 'root', FG: 'fg', CALIB: 'calib', STD: 'std', CERT_OLD: 'old', PDF_NAME: '생산기록_PDF' };
 global.SheetsAPI = { getAll: async () => [], append: async () => {}, createSheet: async () => {}, invalidateCache: () => {} };
 global.generateSeqId = async () => 'DEV-20260805-001';
 
@@ -29,10 +31,12 @@ function slice(startMark, endMark) {
   return SRC.slice(i, j);
 }
 const code = slice('const CCP = {', 'const DB_SHEETS = {')       // 기준 상수
+           + '\n' + slice('const DOC_SLOTS = [', 'const HS_ESC =')  // Drive 문서 슬롯 + 스캐너
            + '\n' + slice('const HS_ESC =', '/* ── 화면 ')        // HaccpStd 모듈
            + '\n' + slice('const HEAT_PHASES =', 'function collectStepData')  // 가열 CCP-3B 판정
-           + '\n;({ CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES })';
-const { CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES } = vm.runInThisContext(code, { filename: 'index.html#HaccpStd' });
+           + '\n;({ CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES, DOC_SLOTS, DriveDocs })';
+const { CCP, HACCP_DOC, FG_EXT, HaccpStd, heatJudge, HEAT_PHASES, DOC_SLOTS, DriveDocs } =
+  vm.runInThisContext(code, { filename: 'index.html#HaccpStd' });
 
 let pass = 0;
 const ok = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
@@ -245,6 +249,105 @@ ok('여러 항목 동시 이탈이면 전부 열거', () => {
 });
 ok('기본 측정 시점 = 매 작업 전 · 작업 종료 (기준서 주기)', () => {
   assert.deepStrictEqual(HEAT_PHASES, ['작업 전', '작업 종료']);
+});
+
+console.log('\n[5] docFindings — Drive 서류 보유 판정');
+// 스캔 결과 픽스처 빌더 — scan() 이 뱉는 모양 그대로
+const slot = (label, state, o = {}) => ({ label, state, sev: o.sev || 'warn',
+  dir: state === 'missing' ? null : { id: 'd1' }, files: o.files || [], emptySubs: o.emptySubs || [] });
+const scanOf = (products = [], devices = []) => ({ products, devices, scannedAt: '2026-08-07T00:00:00Z' });
+const prod = (name, slots) => ({ id: 'p1', name, url: 'https://drive.google.com/drive/folders/p1', slots });
+const dev  = (name, state, files = []) => ({ id: 'e1', name, url: 'https://drive.google.com/drive/folders/e1', files, state });
+const kinds = f => f.map(x => x.kind);
+
+ok('스캔이 없으면 빈 배열 (Drive 실패해도 화면이 죽지 않는다)', () => {
+  assert.deepStrictEqual(HaccpStd.docFindings({ scan: null }), []);
+});
+ok('모든 슬롯 보유 + 기기 등록·보유 → 지적 없음', () => {
+  const s = scanOf(
+    [prod('1.물반죽', [slot('완제품 시험성적서', 'ok', { files: [{ id: 'f' }] })])],
+    [dev('1.표준온도계', 'ok', [{ id: 'f' }])]);
+  assert.deepStrictEqual(HaccpStd.docFindings({ scan: s, equip: [['EQ1', '표준온도계']] }), []);
+});
+ok('슬롯 폴더 자체가 없으면 폴더없음', () => {
+  const s = scanOf([prod('2.앙버터 호두과자', [slot('완제품 시험성적서', 'missing', { sev: 'err' })])]);
+  const f = HaccpStd.docFindings({ scan: s });
+  assert.deepStrictEqual(kinds(f), ['폴더없음']);
+  assert.strictEqual(f[0].sev, 'err');
+});
+ok('폴더는 있고 파일이 없으면 서류없음', () => {
+  const s = scanOf([prod('1.물반죽', [slot('부재료 시험성적서', 'empty')])]);
+  assert.deepStrictEqual(kinds(HaccpStd.docFindings({ scan: s })), ['서류없음']);
+});
+ok('슬롯에 파일이 있어도 빈 자재 하위폴더는 따로 지적 (앙브레드전용믹스 사례)', () => {
+  const s = scanOf([prod('1.물반죽', [
+    slot('원재료 시험성적서', 'ok', { files: [{ id: 'f' }], emptySubs: ['앙브레드전용믹스'] })])]);
+  const f = HaccpStd.docFindings({ scan: s });
+  assert.deepStrictEqual(kinds(f), ['서류없음']);
+  assert.ok(f[0].title.includes('앙브레드전용믹스'), '어느 자재가 비었는지 제목에 나와야 한다');
+});
+ok('기기 폴더가 비면 검교정성적서 (기준서 1회/년·보관 2년)', () => {
+  const f = HaccpStd.docFindings({ scan: scanOf([], [dev('4.냉동실 데이터로거', 'empty')]),
+                                   equip: [['EQ4', '냉동실 데이터로거']] });
+  assert.deepStrictEqual(kinds(f), ['검교정성적서']);
+  assert.strictEqual(f[0].sev, 'err');
+});
+ok('Drive 에만 있고 시트에 없는 기기 → 기기미등록 (다음 검교정일 추적 불가)', () => {
+  const f = HaccpStd.docFindings({ scan: scanOf([], [dev('13.타이머4', 'ok', [{ id: 'f' }])]), equip: [] });
+  assert.deepStrictEqual(kinds(f), ['기기미등록']);
+});
+ok('기기명 앞 번호·공백은 시트 대조에서 무시', () => {
+  const s = scanOf([], [dev('9.냉동고 판넬온도계', 'ok', [{ id: 'f' }])]);
+  assert.deepStrictEqual(HaccpStd.docFindings({ scan: s, equip: [['EQ9', '냉동고판넬온도계']] }), []);
+});
+ok('시트에 있으나 파일링크가 빈 성적서 → 원본없음', () => {
+  const certs = [['CERT-1', '원재료', 'RM001', '계란', '기관', 'R-1', '2026-01-01', '2026-12-31', '적합', '']];
+  assert.deepStrictEqual(kinds(HaccpStd.docFindings({ scan: scanOf(), certs })), ['원본없음']);
+});
+ok('폐기된 성적서는 원본없음으로 잡지 않는다', () => {
+  const certs = [['CERT-1', '원재료', 'RM001', '계란', '', '', '', '2026-12-31', '', '', '', '', '폐기']];
+  assert.deepStrictEqual(HaccpStd.docFindings({ scan: scanOf(), certs }), []);
+});
+ok('링크가 있으면 원본없음 아님', () => {
+  const certs = [['CERT-1', '원재료', 'RM001', '계란', '', '', '', '2026-12-31', '', 'https://drive.google.com/x']];
+  assert.deepStrictEqual(HaccpStd.docFindings({ scan: scanOf(), certs }), []);
+});
+ok('지적에는 열어볼 Drive 링크가 붙는다 (실무자가 바로 올릴 수 있어야 함)', () => {
+  const s = scanOf([prod('1.물반죽', [slot('완제품 시험성적서', 'empty', { sev: 'err' })])]);
+  assert.ok(/drive\.google\.com\/drive\/folders\//.test(HaccpStd.docFindings({ scan: s })[0].url));
+});
+
+console.log('\n[6] DriveDocs — 폴더명 해석');
+ok('슬롯 분류는 first-match-wins — `2.원재료 시험성적서` 가 완제품으로 새지 않는다', () => {
+  const pick = name => (DOC_SLOTS.find(s => s.match.test(name)) || {}).key;
+  assert.strictEqual(pick('1.품목제조보고번호'), 'report');
+  assert.strictEqual(pick('2.원재료 시험성적서'), 'rm');
+  assert.strictEqual(pick('3.부재료 시험성적서'), 'sub');
+  assert.strictEqual(pick('4.물반죽 시험성적서'), 'fg');
+});
+ok('_byNum — 10 이 2 앞에 오지 않는다 (기기 13대 정렬)', () => {
+  const names = ['13.타이머4', '2.적외선온도계', '10.타이머1', '1.표준온도계']
+    .map(name => ({ name })).sort(DriveDocs._byNum).map(f => f.name);
+  assert.deepStrictEqual(names, ['1.표준온도계', '2.적외선온도계', '10.타이머1', '13.타이머4']);
+});
+ok('_nextDue — 「2.차기 검/교정 예정 일자 27.03.24」 를 읽는다', () => {
+  assert.strictEqual(DriveDocs._nextDue(
+    ['1.공인기관 검/교정 일자 26.03.25', '2.차기 검 교정 예정 일자 27.03.24']), '2027-03-24');
+});
+ok('_nextDue — 차기 폴더가 없으면 빈 값 (지난 일자를 예정일로 오독하지 않는다)', () => {
+  assert.strictEqual(DriveDocs._nextDue(['1.자체 검/교정 일자 26.04.01']), '');
+  assert.strictEqual(DriveDocs._nextDue([]), '');
+});
+ok('시트 검교정일이 비고 Drive 에만 예정일이 있으면 검교정일미등록', () => {
+  const s = scanOf([], [{ ...dev('1.표준온도계', 'ok', [{ id: 'f' }]), nextDue: '2027-03-24' }]);
+  const f = HaccpStd.docFindings({ scan: s, equip: [['EQ1', '표준온도계', '온도계', '', '', '', '']] });
+  assert.deepStrictEqual(kinds(f), ['검교정일미등록']);
+  assert.ok(f[0].detail.includes('2027-03-24'), 'Drive 에 적힌 예정일을 알려줘야 옮겨 적을 수 있다');
+});
+ok('시트에 검교정일이 있으면 지적하지 않는다', () => {
+  const s = scanOf([], [{ ...dev('1.표준온도계', 'ok', [{ id: 'f' }]), nextDue: '2027-03-24' }]);
+  assert.deepStrictEqual(
+    HaccpStd.docFindings({ scan: s, equip: [['EQ1', '표준온도계', '온도계', '', '', '', '2027-03-24']] }), []);
 });
 
 console.log(`\n✅ ${pass}개 통과\n`);

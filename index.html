@@ -361,12 +361,24 @@ a { text-decoration:none; color:inherit; }
 /* ═══════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════ */
+/* Drive 폴더 — 공유드라이브 `ANGHODU_KR/07_공장` 이 공장 문서의 SSOT 다.
+   ⚠️ Drive 를 재편하면 **여기만** 고친다. 업로드·문서현황 화면은 전부 이 상수를 참조한다.
+   (2026-08-07 이전 값은 `Maynager/` 아래를 가리켜 공장 폴더 밖에 쌓이고 있었다) */
+const DRIVE = {
+  ROOT:     '1zrbA6o9WubK4FQh54cEGFjCVTHebEcCe', // 07_공장
+  FG:       '1EsNGO4CZA8ABqOZDBudUJkEv3UeLUaHJ', // 완제품 — 제품별 문서 트리(품목보고·성적서)
+  CALIB:    '10OINvKBh7rRxHL-xgUDeJxHlLYut-dNf', // 기계 검교정 — 기기별 검교정 성적서
+  STD:      '1ju8-_yqUyWieSWONXD9aGwwy4dxR0wbG', // HACCP/기준서_최신본
+  CERT_OLD: '1bKQVu6KuznyIl8D6jFtjq22wI29esVU4', // 시험성적서(구 구조) — 읽기 전용, 이관 잔여 확인용
+  PDF_NAME: '생산기록_PDF',                        // 07_공장 아래. 없으면 첫 업로드 때 만든다
+};
+
 const CONFIG = {
   CLIENT_ID: '905366454714-44kefd93vrs8eg1cgdeocuauo3fp9iou.apps.googleusercontent.com',
   SCOPES: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
   SHEET_ID: '1_koe58lReouU_ZZxzUh5SU8gUkuHjlwb1LNjZbJGSLU',
-  DRIVE_FOLDER_ID: '1GwQpb9KBsXIwymKe5Ko6oqrz25BjeG4g',
-  PDF_FOLDER_ID: '1XpbFpiIH9sMlK0_uSXHF8TO8Uq7Qy46Q',
+  DRIVE_FOLDER_ID: DRIVE.ROOT,   // 사진 등 일반 업로드 기본 위치
+  PDF_FOLDER_ID: '',             // 생산기록 PDF — driveEnsurePdfFolder() 가 채운다
   API_KEY: '',
 };
 
@@ -1278,6 +1290,38 @@ const SheetsAPI = {
 /* ═══════════════════════════════════════════════
    GOOGLE DRIVE API (Photo Upload)
    ═══════════════════════════════════════════════ */
+/** Drive 폴더 확보 — 이름으로 찾고 없으면 만든다(멱등). 실패하면 null.
+    폴더를 사람이 미리 만들어 두지 않아도 되게 하는 용도. */
+async function driveEnsureFolder(name, parentId) {
+  const FOLDER = 'application/vnd.google-apps.folder';
+  const hdr = { Authorization: `Bearer ${State.token}` };
+  const q = `name='${String(name).replace(/'/g, "\\'")}' and '${parentId}' in parents`
+          + ` and mimeType='${FOLDER}' and trashed=false`;
+  try {
+    const found = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`
+      + '&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true', { headers: hdr });
+    if (found.ok) {
+      const hit = ((await found.json()).files || [])[0];
+      if (hit) return hit.id;
+    }
+    const made = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id', {
+      method: 'POST',
+      headers: { ...hdr, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: FOLDER, parents: [parentId] }),
+    });
+    return made.ok ? (await made.json()).id : null;
+  } catch (e) { console.warn('[Drive] 폴더 확보 실패:', name, e); return null; }
+}
+
+/** 생산기록 PDF 폴더 — 07_공장/생산기록_PDF. 없으면 만들고 기기에 캐시한다. */
+async function driveEnsurePdfFolder() {
+  if (CONFIG.PDF_FOLDER_ID) return CONFIG.PDF_FOLDER_ID;
+  const id = await driveEnsureFolder(DRIVE.PDF_NAME, DRIVE.ROOT);
+  if (id) { CONFIG.PDF_FOLDER_ID = id; localStorage.setItem('mt_pdf_folder_v2', id); return id; }
+  return DRIVE.ROOT;   // 폴더를 못 만들어도 기록은 남겨야 한다 — 공장 루트로 fallback
+}
+
 const DriveAPI = {
   async uploadPhoto(file) {
     if (isPreviewing()) { _previewSkipWrite(); return ''; }
@@ -1343,11 +1387,7 @@ const DriveAPI = {
       name: fileName,
       mimeType: 'application/pdf',
     };
-    if (CONFIG.PDF_FOLDER_ID) {
-      metadata.parents = [CONFIG.PDF_FOLDER_ID];
-    } else if (CONFIG.DRIVE_FOLDER_ID) {
-      metadata.parents = [CONFIG.DRIVE_FOLDER_ID];
-    }
+    metadata.parents = [await driveEnsurePdfFolder()];
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     form.append('file', pdfBlob);
@@ -2100,6 +2140,9 @@ Screens.dashboard = async () => {
         `).join('')}
       ` : ''}
 
+      <!-- Drive 서류 부족 — 렌더 후 hsLoadHomeDocAlert() 가 채운다 -->
+      <div id="home-doc-alert"></div>
+
       <!-- 빠른 작업 -->
       <div class="sec-title mb-8 mt-8">⚡ 빠른 작업</div>
       <div class="qa-grid">${qaHtml}</div>
@@ -2148,7 +2191,46 @@ Screens.dashboard = async () => {
       document.body.appendChild(popupOverlay);
     }
   }
+
+  hsLoadHomeDocAlert();   // Drive 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
 };
+
+/** 홈 「챙겨야 할 서류」 — Drive 에 원본이 없는 성적서·검교정 성적서를 실무자에게 알린다.
+    실패해도 홈은 그대로여야 하므로 조용히 접는다. */
+async function hsLoadHomeDocAlert() {
+  const el = $id('home-doc-alert');
+  if (!el) return;
+  try {
+    const [scan, certs, equip] = await Promise.all([
+      DriveDocs.scan(),
+      SheetsAPI.getAll('시험성적서').catch(() => []),
+      SheetsAPI.getAll('기기관리').catch(() => []),
+    ]);
+    const findings = HaccpStd.docFindings({ scan, certs, equip });
+    if (!findings.length) return;
+    const errN = findings.filter(f => f.sev === 'err').length;
+    const top = findings.slice(0, 5);
+    el.innerHTML = `
+      <div class="fs-14 fw-7 mb-8 mt-8">📂 챙겨야 할 서류 (${findings.length}건)</div>
+      ${top.map(f => `
+        <div class="card clickable" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})"
+             style="border-left:3px solid ${f.sev === 'err' ? 'var(--err,#c62828)' : 'var(--warn,#e65100)'}">
+          <div class="row between">
+            <div style="flex:1">
+              <div class="fs-14 fw-6" style="color:${f.sev === 'err' ? 'var(--err,#c62828)' : 'var(--warn,#e65100)'}">${HS_ESC(f.title)}</div>
+              <div class="fs-12 c-txt-l">${HS_ESC(f.detail)}</div>
+            </div>
+            <span class="badge badge-${f.sev}">${f.kind}</span>
+          </div>
+        </div>`).join('')}
+      ${findings.length > top.length
+        ? `<div class="card clickable" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})"><div class="fs-12 c-txt-l" style="text-align:center">외 ${findings.length - top.length}건 모두 보기 ›</div></div>`
+        : ''}`;
+    if (errN > 0) toast(`📂 서류 미보관 ${errN}건 — 성적서 탭에서 확인하세요`, 'err', 6000);
+  } catch (e) {
+    console.warn('[홈] Drive 문서 현황 조회 실패:', e);
+  }
+}
 
 // ─── PRODUCTION ───
 Screens.production = async () => {
@@ -4889,6 +4971,14 @@ Screens.settings = () => {
           <input type="text" id="set-drive-folder" value="${driveId}" placeholder="폴더 ID 입력 (선택)" style="font-size:12px">
         </div>
         <button class="btn btn-pri btn-full" onclick="saveSettings()">설정 저장</button>
+        <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:8px">
+          <div class="fw-7 mb-4">연결된 Drive 폴더 — 공유드라이브 <b>07_공장</b></div>
+          ${[['공장 루트', DRIVE.ROOT], ['완제품 문서', DRIVE.FG], ['기계 검교정', DRIVE.CALIB], ['기준서 최신본', DRIVE.STD]]
+            .map(([n, id]) => `<div>· ${n} — <a href="https://drive.google.com/drive/folders/${id}" target="_blank" rel="noopener" style="color:var(--info);text-decoration:underline">열기</a></div>`).join('')}
+          <div>· 생산기록 PDF — ${CONFIG.PDF_FOLDER_ID
+            ? `<a href="https://drive.google.com/drive/folders/${CONFIG.PDF_FOLDER_ID}" target="_blank" rel="noopener" style="color:var(--info);text-decoration:underline">열기</a>`
+            : '첫 PDF 저장 때 자동 생성'}</div>
+        </div>
       </div>
       <div class="card">
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
@@ -4905,7 +4995,7 @@ function saveSettings() {
   CONFIG.SHEET_ID = $id('set-sheet-id')?.value?.trim() || '';
   CONFIG.DRIVE_FOLDER_ID = $id('set-drive-folder')?.value?.trim() || '';
   localStorage.setItem('mt_sheet_id', CONFIG.SHEET_ID);
-  localStorage.setItem('mt_drive_folder', CONFIG.DRIVE_FOLDER_ID);
+  localStorage.setItem('mt_drive_folder_v2', CONFIG.DRIVE_FOLDER_ID);
   toast('설정이 저장되었습니다', 'suc');
 }
 
@@ -6658,7 +6748,7 @@ const HACCP_DOC = {
   revisedAt: '2026-08-05',
   teamLeader: '이상현',
   // Drive 공유드라이브 ANGHODU_KR/07_공장/HACCP/기준서_최신본
-  driveFolderId: '1ju8-_yqUyWieSWONXD9aGwwy4dxR0wbG',
+  driveFolderId: DRIVE.STD,
   recheckDays: 30,   // 개정 확인 주기(일)
 };
 
@@ -8268,6 +8358,124 @@ Screens.haccp = async () => {
 
    직무분리: 등록·작성 = 실무자 / 기준 반영·편차 완료 = 관리자
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   Drive 문서 현황 (DriveDocs) — 07_공장 트리를 읽어 「챙겨야 할 서류」의 보유 여부를 본다.
+
+     ① 제품별 : 완제품/{제품}/{품목제조보고서 · 원재료 성적서 · 부재료 성적서 · 완제품 성적서}
+     ② 기기별 : 기계 검교정/{기기}/검교정 성적서
+
+   ⚠️ 유효기한의 SSOT 는 시트(`시험성적서`·`기기관리`)다. **파일명에서 날짜를 추측하지 않는다** —
+      이 화면이 뽑는 지적이 그대로 HACCP 감사 대응 근거가 되므로 추정값을 기한으로 쓰면 안 된다.
+      여기서 보는 것은 "원본이 Drive 에 실제로 있느냐" 하나뿐이다.
+   ═══════════════════════════════════════════════════════════════════════ */
+const DOC_SLOTS = [   // 위에서부터 first-match-wins — `2.원재료 시험성적서` 가 fg 로 새지 않게 순서 고정
+  { key: 'report', label: '품목제조보고서',   match: /품목\s*(제조)?\s*보고/, sev: 'err'  },
+  { key: 'rm',     label: '원재료 시험성적서', match: /원\s*재료/,            sev: 'warn' },
+  { key: 'sub',    label: '부재료 시험성적서', match: /부\s*재료/,            sev: 'warn' },
+  { key: 'fg',     label: '완제품 시험성적서', match: /성적서|검사/,          sev: 'err'  },
+];
+
+const DriveDocs = {
+  _cache: null, _at: 0,
+  TTL: 10 * 60 * 1000,
+  FOLDER: 'application/vnd.google-apps.folder',
+  folderUrl: id => `https://drive.google.com/drive/folders/${id}`,
+
+  /** 부모 여러 개를 한 번에 조회. 폴더마다 1회씩 돌면 20회 왕복이라 20개씩 묶는다. */
+  async _children(parentIds) {
+    const out = [];
+    for (let i = 0; i < parentIds.length; i += 20) {
+      const q = '(' + parentIds.slice(i, i + 20).map(p => `'${p}' in parents`).join(' or ') + ') and trashed=false';
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`
+        + '&fields=files(id,name,mimeType,modifiedTime,webViewLink,parents)'
+        + '&orderBy=modifiedTime%20desc&pageSize=200'
+        + '&supportsAllDrives=true&includeItemsFromAllDrives=true';
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${State.token}` } });
+      if (!res.ok) throw new Error(`Drive ${res.status}`);
+      out.push(...((await res.json()).files || []));
+    }
+    return out;
+  },
+
+  /** `1.물반죽`·`13.타이머4` 의 앞 번호로 정렬 — 문자열 정렬이면 10 이 2 앞에 온다. */
+  _byNum(a, b) {
+    const n = s => { const m = /^\s*(\d+)/.exec(s || ''); return m ? +m[1] : 9999; };
+    return (n(a.name) - n(b.name)) || String(a.name).localeCompare(String(b.name), 'ko');
+  },
+
+  /** roots 아래 maxDepth 단계까지 훑어, 각 파일·폴더가 **어느 root 소속인지**까지 돌려준다.
+      폴더마다 조회하지 않고 레벨마다 한 번(배치)이라 깊이가 늘어도 왕복은 maxDepth 번뿐.
+      중간에 폴더가 한 겹 더 껴도(예: 기기 > 검교정 회차 > 파일) 파일을 놓치지 않게 하는 것이 목적. */
+  async _tree(rootIds, maxDepth) {
+    const isDir = f => f.mimeType === this.FOLDER;
+    const owner = new Map(rootIds.map(id => [id, id]));
+    const files = [], dirs = [];
+    let frontier = rootIds.slice();
+    for (let d = 0; d < maxDepth && frontier.length; d++) {
+      const kids = await this._children(frontier);
+      kids.forEach(k => {
+        const p = (k.parents || []).find(x => owner.has(x));
+        owner.set(k.id, p ? owner.get(p) : null);
+      });
+      files.push(...kids.filter(f => !isDir(f)));
+      const sub = kids.filter(isDir);
+      dirs.push(...sub);
+      frontier = sub.map(f => f.id);
+    }
+    return { files, dirs, owner };
+  },
+
+  /** 「2.차기 검/교정 예정 일자 27.03.31」 처럼 **폴더명에 사람이 적어둔** 예정일을 읽는다.
+      ⚠️ 추정이 아니다 — 적혀 있는 값을 그대로 읽을 뿐이고, 시트에 값이 있으면 시트가 우선한다. */
+  _nextDue(roundNames) {
+    const hit = (roundNames || []).find(n => /차기|예정/.test(n));
+    const m = hit && /(\d{2})\s*\.\s*(\d{2})\s*\.\s*(\d{2})/.exec(hit);
+    return m ? `20${m[1]}-${m[2]}-${m[3]}` : '';
+  },
+
+  async scan(force = false) {
+    if (!force && this._cache && Date.now() - this._at < this.TTL) return this._cache;
+    const isDir  = f => f.mimeType === this.FOLDER;
+    const under  = (list, pid) => list.filter(f => (f.parents || []).includes(pid));
+
+    // ① 제품 트리 — 완제품 > 제품 > 슬롯 > (자재) > 파일
+    const prodDirs = (await this._children([DRIVE.FG])).filter(isDir).sort(this._byNum);
+    const slotDirs = prodDirs.length ? (await this._children(prodDirs.map(f => f.id))).filter(isDir) : [];
+    const pt = slotDirs.length ? await this._tree(slotDirs.map(f => f.id), 2) : { files: [], dirs: [], owner: new Map() };
+
+    const products = prodDirs.map(p => {
+      const mine = under(slotDirs, p.id).sort(this._byNum);
+      const taken = new Set();
+      const slots = DOC_SLOTS.map(slot => {
+        const dir = mine.find(d => !taken.has(d.id) && slot.match.test(d.name));
+        if (!dir) return { key: slot.key, label: slot.label, sev: slot.sev, dir: null, files: [], emptySubs: [], state: 'missing' };
+        taken.add(dir.id);
+        const files = pt.files.filter(f => pt.owner.get(f.id) === dir.id);
+        const subs  = under(pt.dirs, dir.id).sort(this._byNum);
+        const emptySubs = subs.filter(s => !pt.files.some(f => (f.parents || []).includes(s.id))).map(s => s.name);
+        return { key: slot.key, label: slot.label, sev: slot.sev, dir, files, emptySubs,
+                 state: files.length ? 'ok' : 'empty' };
+      });
+      return { id: p.id, name: p.name, url: this.folderUrl(p.id), slots };
+    });
+
+    // ② 기기 트리 — 기계 검교정 > 기기 > (검교정 회차 폴더) > 파일
+    //    회차 폴더가 한 겹 더 있다: `1.표준온도계/1.공인기관 검·교정 일자 26.03.25/…`
+    const devDirs = (await this._children([DRIVE.CALIB])).filter(isDir).sort(this._byNum);
+    const dt = devDirs.length ? await this._tree(devDirs.map(f => f.id), 2) : { files: [], dirs: [], owner: new Map() };
+    const devices = devDirs.map(d => {
+      const files  = dt.files.filter(f => dt.owner.get(f.id) === d.id);
+      const rounds = under(dt.dirs, d.id).sort(this._byNum).map(r => r.name);
+      return { id: d.id, name: d.name, url: this.folderUrl(d.id), files, rounds,
+               nextDue: this._nextDue(rounds), state: files.length ? 'ok' : 'empty' };
+    });
+
+    this._cache = { products, devices, scannedAt: new Date().toISOString() };
+    this._at = Date.now();
+    return this._cache;
+  },
+};
+
 const HS_ESC = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const HS_TABS = ['기준', '성적서', '편차'];
 
@@ -8336,6 +8544,59 @@ const HaccpStd = {
     if (d < 0) return { badge: 'err', label: `만료 ${-d}일 경과`, days: d };
     if (d <= CERT_WARN_DAYS) return { badge: 'warn', label: d === 0 ? '오늘 만료' : `${d}일 남음`, days: d };
     return { badge: 'suc', label: '유효', days: d };
+  },
+
+  /** Drive 스캔 + 시트 → 실무자가 볼 「부족한 서류」 목록.
+      유효기한은 시트가 판정하고(certStatus · 기기관리 nextCalibDt), 여기서는 **원본 보관 여부**만 본다.
+      순수 함수 — Drive·시트를 직접 타지 않으므로 tests/haccp-std.test.js 에서 그대로 돌린다. */
+  docFindings({ scan, certs = [], equip = [] }) {
+    const out = [];
+    const add = (sev, kind, title, detail, url) => out.push({ sev, kind, title, detail, url: url || null });
+    if (!scan) return out;
+
+    (scan.products || []).forEach(p => {
+      (p.slots || []).forEach(s => {
+        const sev = s.sev || 'warn';
+        const url = s.dir ? DriveDocs.folderUrl(s.dir.id) : p.url;
+        if (s.state === 'missing')
+          add(sev, '폴더없음', `${p.name} · ${s.label} 폴더 없음`,
+              `Drive 「완제품/${p.name}」 아래에 ${s.label} 폴더가 없습니다.`, url);
+        else if (s.state === 'empty')
+          add(sev, '서류없음', `${p.name} · ${s.label} 없음`,
+              '폴더는 있으나 파일이 없습니다 — 원본이 있어야 입고검사·심사 근거가 됩니다.', url);
+        // 슬롯에 파일이 있어도 자재 하위폴더가 비어 있으면 그 자재는 근거가 없다
+        (s.emptySubs || []).forEach(n =>
+          add('warn', '서류없음', `${p.name} · ${s.label} — ${n} 비어 있음`,
+              `자재 「${n}」 폴더에 성적서 파일이 없습니다.`, url));
+      });
+    });
+
+    const key = s => String(s || '').replace(/\s/g, '');
+    const byKey = new Map((equip || []).map(e => [key(e[1]), e]));
+    (scan.devices || []).forEach(d => {
+      const bare = String(d.name).replace(/^\s*\d+\s*\.\s*/, '').trim();
+      const due  = d.nextDue ? ` Drive 폴더 기준 차기 예정 ${d.nextDue}.` : '';
+      if (d.state === 'empty')
+        add('err', '검교정성적서', `${bare} 검교정 성적서 미보관`,
+            `기준서 「온도계·타이머 검·교정 1회/년」 · 기록 보관 2년. Drive 폴더가 비어 있습니다.${due}`, d.url);
+
+      const row = byKey.get(key(bare));
+      if (!row)
+        add('warn', '기기미등록', `${bare} 기기 미등록`,
+            `Drive 에 검교정 폴더는 있으나 「기기관리」 시트에 없어 만료 알람이 울리지 않습니다.${due}`, d.url);
+      else if (!row[6] && d.nextDue)
+        // 시트에 차기 검교정일이 비면 알람 자체가 안 뜬다 — Drive 에 적힌 값을 옮겨 넣으라고 짚어준다
+        add('warn', '검교정일미등록', `${bare} 차기 검교정일 미등록`,
+            `「기기관리」 시트의 다음 검교정일이 비어 알람이 울리지 않습니다. Drive 폴더에는 ${d.nextDue} 로 적혀 있습니다.`, d.url);
+    });
+
+    // 시트에는 있는데 원본 링크가 빈 성적서 — 보관 근거가 앱 안에만 있는 상태
+    (certs || []).forEach(c => {
+      if ((c[12] || '유효') === '폐기') return;
+      if (!c[9]) add('warn', '원본없음', `${c[3] || c[2] || '-'} 성적서 원본 링크 없음`,
+        '시트에는 등록됐으나 Drive 파일 링크가 비어 있습니다.', null);
+    });
+    return out;
   },
 
   /** 기준서 개정 감지 — Drive 「기준서_최신본」 폴더의 최신 수정시각을 본다 */
@@ -8430,7 +8691,7 @@ Screens['haccp-std'] = async (params = {}) => {
   renderHeader('HACCP 기준 관리', `${HACCP_DOC.title} · ${tab}`, { back: 'haccp' });
   showLoading();
 
-  let std = [], certs = [], devs = [], fgItems = [], rmItems = [];
+  let std = [], certs = [], devs = [], fgItems = [], rmItems = [], equip = [];
   try {
     await Promise.all([
       HaccpStd.ensureSheet('HACCP기준', HACCP_STD_HEADER),
@@ -8439,13 +8700,14 @@ Screens['haccp-std'] = async (params = {}) => {
     ]);
     await HaccpStd.seedIfEmpty();
     let sops;
-    [std, certs, devs, fgItems, rmItems, sops] = await Promise.all([
+    [std, certs, devs, fgItems, rmItems, sops, equip] = await Promise.all([
       SheetsAPI.getAll('HACCP기준').catch(() => []),
       SheetsAPI.getAll('시험성적서').catch(() => []),
       SheetsAPI.getAll('기준편차').catch(() => []),
       SheetsAPI.getAll('완제품품목').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
       SheetsAPI.getAll('SOP').catch(() => []),
+      SheetsAPI.getAll('기기관리').catch(() => []),
     ]);
     window._hsSops = sops;
   } catch (e) {
@@ -8456,7 +8718,7 @@ Screens['haccp-std'] = async (params = {}) => {
   hideLoading();
 
   const stdObjs = HaccpStd.parse(std);
-  window._hsCache = { std: stdObjs, certs, devs, fgItems, rmItems, sops: window._hsSops || [] };
+  window._hsCache = { std: stdObjs, certs, devs, fgItems, rmItems, equip, sops: window._hsSops || [] };
   const findings = HaccpStd.compliance({ std: stdObjs, certs, fgItems, rmItems, devs });
   const openDevs = devs.filter(d => d[7] !== '완료');
   const errN = findings.filter(f => f.sev === 'err').length;
@@ -8468,7 +8730,7 @@ Screens['haccp-std'] = async (params = {}) => {
 
   let body = '';
   if (tab === '기준') body = hsStandardTab(stdObjs, findings);
-  else if (tab === '성적서') body = hsCertTab(certs, rmItems, fgItems);
+  else if (tab === '성적서') body = hsCertTab(certs, rmItems, fgItems);   // 문서 현황은 렌더 후 비동기 주입
   else body = hsDevTab(devs);
 
   $id('content').innerHTML = `
@@ -8485,6 +8747,8 @@ Screens['haccp-std'] = async (params = {}) => {
       ${body}
     </div>
   `;
+  // Drive 조회는 느릴 수 있다 — 화면을 먼저 그리고 문서 현황만 뒤에 채운다
+  if (tab === '성적서') hsRenderDocStatus();
 };
 
 function hsStandardTab(std, findings) {
@@ -8564,6 +8828,8 @@ function hsCertTab(certs, rmItems, fgItems) {
   ];
   const inp = 'width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px';
   return `
+    <div id="hs-docs" class="mt-12"><div class="card"><div class="fs-12 c-txt-l" style="text-align:center">📂 Drive 문서 현황 확인 중…</div></div></div>
+
     <details class="card mt-12" style="border-left:3px solid var(--pri)">
       <summary class="fs-13 fw-7" style="cursor:pointer">➕ 시험성적서 등록 · 갱신</summary>
       <div class="fs-11 c-txt-l mt-4 mb-8">갱신은 <b>새 행으로 등록</b>합니다 — 이전 성적서는 이력으로 남습니다.</div>
@@ -8609,6 +8875,94 @@ function hsCertTab(certs, rmItems, fgItems) {
           </div>`;
         }).join('')}
   `;
+}
+
+/* ── Drive 문서 현황 (성적서 탭 상단) ──────────────────────────────────
+   실무자용 화면이다. "무엇이 없는지 · 어디에 올리면 되는지"가 한 눈에 보여야 한다.
+   Drive 가 안 열려도 성적서 목록은 그대로 보여야 하므로 렌더 후 비동기로 주입한다. */
+async function hsRenderDocStatus(force = false) {
+  const el = $id('hs-docs');
+  if (!el) return;
+  if (force) el.innerHTML = '<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">📂 Drive 다시 읽는 중…</div></div>';
+
+  let scan;
+  try {
+    scan = await DriveDocs.scan(force);
+  } catch (e) {
+    el.innerHTML = `<div class="card bl-warn">
+      <div class="fs-13 fw-7">📂 Drive 문서 현황을 읽지 못했습니다</div>
+      <div class="fs-11 c-txt-l mt-4">${HS_ESC(e.message)} — 성적서 목록은 아래에서 그대로 확인·등록할 수 있습니다.</div>
+      <button class="btn btn-sm btn-outline btn-gray mt-8" onclick="hsRenderDocStatus(true)">다시 시도</button></div>`;
+    return;
+  }
+
+  const cache = window._hsCache || {};
+  const findings = HaccpStd.docFindings({ scan, certs: cache.certs || [], equip: cache.equip || [] });
+  window._hsDocFindings = findings;
+  const errN = findings.filter(f => f.sev === 'err').length;
+
+  const dot = st => st === 'ok' ? '<span class="badge badge-suc">보유</span>'
+                  : st === 'missing' ? '<span class="badge badge-err">폴더없음</span>'
+                  : '<span class="badge badge-err">없음</span>';
+
+  const productCards = (scan.products || []).map(p => `
+    <div class="card" style="border-left:3px solid ${p.slots.every(s => s.state === 'ok' && !s.emptySubs.length) ? 'var(--suc,#2e7d32)' : 'var(--warn,#e65100)'}">
+      <div class="row between" style="align-items:center">
+        <div class="fs-13 fw-7">${HS_ESC(p.name)}</div>
+        <a href="${HS_ESC(p.url)}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">폴더 열기 ›</a>
+      </div>
+      ${p.slots.map(s => `
+        <div class="row between mt-4" style="align-items:center">
+          <div style="flex:1">
+            <div class="fs-12">${HS_ESC(s.label)}${s.files.length ? ` <span class="fs-11 c-txt-l">${s.files.length}건</span>` : ''}</div>
+            ${s.emptySubs.length ? `<div class="fs-11" style="color:var(--warn,#e65100)">↳ 비어 있음: ${HS_ESC(s.emptySubs.join(', '))}</div>` : ''}
+          </div>
+          ${dot(s.state)}
+        </div>`).join('')}
+    </div>`).join('');
+
+  const devOk = (scan.devices || []).filter(d => d.state === 'ok').length;
+  const devBad = (scan.devices || []).filter(d => d.state !== 'ok');
+  const deviceCard = `
+    <div class="card" style="border-left:3px solid ${devBad.length ? 'var(--err,#c62828)' : 'var(--suc,#2e7d32)'}">
+      <div class="row between" style="align-items:center">
+        <div class="fs-13 fw-7">🔧 기기 검교정 성적서</div>
+        <span class="fs-11 c-txt-l">${devOk}/${(scan.devices || []).length} 보유</span>
+      </div>
+      <div class="fs-11 c-txt-l mt-2">기준서: 온도계·타이머 검·교정 <b>1회/년</b> · 기록 보관 2년</div>
+      ${devBad.length === 0
+        ? '<div class="fs-12 mt-4" style="color:var(--suc,#2e7d32)">전 기기 성적서 보관됨</div>'
+        : devBad.map(d => `<div class="row between mt-4" style="align-items:center">
+             <a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" class="fs-12" style="color:var(--pri)">${HS_ESC(d.name)}</a>
+             <span class="badge badge-err">없음</span></div>`).join('')}
+    </div>`;
+
+  el.innerHTML = `
+    <div class="card" style="border-left:3px solid ${errN ? 'var(--err,#c62828)' : 'var(--suc,#2e7d32)'}">
+      <div class="row between" style="align-items:center">
+        <div style="flex:1">
+          <div class="fs-13 fw-7">📂 Drive 문서 현황 ${errN ? `<span class="c-err">· 부족 ${errN}건</span>` : '· 이상 없음'}</div>
+          <div class="fs-11 c-txt-l mt-2">07_공장 기준 · ${HS_ESC((scan.scannedAt || '').replace('T', ' ').substring(0, 16))} 확인</div>
+        </div>
+        <button class="btn btn-sm btn-outline btn-info" onclick="hsRenderDocStatus(true)">새로고침</button>
+      </div>
+    </div>
+    ${findings.length ? `
+    <details class="card" style="border-left:3px solid var(--warn,#e65100)" open>
+      <summary class="fs-13 fw-7" style="cursor:pointer">⚠️ 챙겨야 할 서류 (${findings.length}건)</summary>
+      ${findings.map(f => `
+        <div class="mt-8" style="border-top:1px solid var(--gray-l);padding-top:8px">
+          <div class="row between">
+            <div style="flex:1">
+              <div class="fs-12 fw-7" style="color:${f.sev === 'err' ? 'var(--err,#c62828)' : 'var(--warn,#e65100)'}">${HS_ESC(f.title)}</div>
+              <div class="fs-11 c-txt-l mt-2">${HS_ESC(f.detail)}</div>
+            </div>
+            ${f.url ? `<a href="${HS_ESC(f.url)}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri);white-space:nowrap">열기 ›</a>` : ''}
+          </div>
+        </div>`).join('')}
+    </details>` : ''}
+    ${productCards}
+    ${deviceCard}`;
 }
 
 function hsDevTab(devs) {
@@ -9325,28 +9679,51 @@ Screens.equip = async () => {
   try { State.equipment = await SheetsAPI.getAll('기기관리').catch(() => []); } catch(e) {}
 
   $id('content').innerHTML = `
-    <div class="tab-filter">
-      <div class="tab active">기기목록</div>
-      <div class="tab">점검예정</div>
-      <div class="tab">점검이력</div>
-    </div>
     <div style="padding:16px">
       ${State.equipment.length === 0 ?
         `<div class="empty-state"><div class="es-icon">🔩</div><div class="es-title">등록된 기기 없음</div></div>` :
-        State.equipment.map(e => `
-          <div class="card">
+        State.equipment.map(e => {
+          const st = HaccpStd.certStatus(e[6]);   // 다음 검교정일 — 성적서와 같은 30일 정책
+          const key = String(e[1]||'').replace(/\s/g,'');
+          return `
+          <div class="card" data-eq="${HS_ESC(key)}">
             <div class="row between">
-              <div>
+              <div style="flex:1">
                 <div class="fs-14 fw-6">${e[1]||''} <span class="fs-11 c-txt-l">${e[0]||''}</span></div>
-                <div class="fs-12 c-txt-l">${e[2]||''} · 다음점검: ${(e[6]||'').substring(0,10)}</div>
+                <div class="fs-12 c-txt-l">${e[2]||''} · 다음 검교정: ${(e[6]||'-').substring(0,10)}</div>
+                <div class="fs-11 c-txt-l eq-doc">성적서 확인 중…</div>
               </div>
-              <span class="badge badge-${e[4]==='정상'?'suc':'warn'}">${e[4]||''}</span>
+              <div style="text-align:right">
+                <span class="badge badge-${st.badge}">${e[6] ? st.label : '기한없음'}</span>
+                <div class="fs-11 c-txt-l mt-4">${e[7]||''}</div>
+              </div>
             </div>
-          </div>
-        `).join('')
+          </div>`;
+        }).join('')
       }
     </div>
   `;
+  // 검교정 성적서 원본이 Drive 에 실제로 있는지 — 화면을 먼저 그리고 뒤에 채운다
+  if (!State.equipment.length) return;
+  try {
+    const scan = await DriveDocs.scan();
+    const byName = new Map((scan.devices || []).map(d =>
+      [String(d.name).replace(/^\s*\d+\s*\.\s*/, '').trim().replace(/\s/g, ''), d]));
+    document.querySelectorAll('[data-eq]').forEach(card => {
+      const d = byName.get(card.getAttribute('data-eq'));
+      const line = card.querySelector('.eq-doc');
+      if (!line) return;
+      if (!d) { line.textContent = '⚠ Drive 검교정 폴더 없음'; line.style.color = 'var(--warn,#e65100)'; return; }
+      if (d.state === 'ok') {
+        line.innerHTML = `<a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" style="color:var(--pri)">성적서 ${d.files.length}건 열기 ›</a>`;
+      } else {
+        line.innerHTML = `<a href="${HS_ESC(d.url)}" target="_blank" rel="noopener" style="color:var(--err,#c62828)">⚠ 성적서 미보관 — 올리기 ›</a>`;
+      }
+    });
+  } catch (e) {
+    document.querySelectorAll('.eq-doc').forEach(l => { l.textContent = ''; });
+    console.warn('[기기관리] Drive 성적서 조회 실패:', e);
+  }
 };
 
 /* ═══════════════════════════════════════════════
@@ -14476,7 +14853,10 @@ async function printFGLabels(itemCode, itemName) {
 async function initApp() {
   // Load settings
   CONFIG.SHEET_ID = localStorage.getItem('mt_sheet_id') || CONFIG.SHEET_ID;
-  CONFIG.DRIVE_FOLDER_ID = localStorage.getItem('mt_drive_folder') || CONFIG.DRIVE_FOLDER_ID;
+  // ⚠️ 키에 _v2 — 구 `mt_drive_folder` 에 저장된 Maynager 폴더 ID 가 07_공장 기본값을 덮어쓰면
+  //    이미 설정을 저장한 기기만 계속 옛 위치에 업로드한다. 새 키로 갈아 그 경로를 끊는다.
+  CONFIG.DRIVE_FOLDER_ID = localStorage.getItem('mt_drive_folder_v2') || CONFIG.DRIVE_FOLDER_ID;
+  CONFIG.PDF_FOLDER_ID = localStorage.getItem('mt_pdf_folder_v2') || CONFIG.PDF_FOLDER_ID;
 
   // Check auth FIRST (before replaceState, to preserve OAuth callback hash)
   let hasToken = Auth.init();
