@@ -120,9 +120,27 @@ const fixture = {
   ],
   rmLots: [['RM-003-A', 'RM003'], ['RM-001-A', 'RM001']],
   manual: [
-    ['2026-06', '노무비', 9525688, '4인'],
-    ['2026-06', '제조경비', '3,135,250', '임차료+관리비'],   // 콤마 포함도 읽힌다
-    ['2026-06', '기타', 100000, ''],
+    ['2026-06', '노무비', 9525688, '2인'],
+    ['2026-06', '임차료·관리비', '2,135,250', ''],       // 콤마 포함도 읽힌다
+    ['2026-06', '공과금(전기·가스·수도)', 1000000, ''],   // 둘이 합쳐 제조경비
+    ['2026-06', '알수없는항목', 999999, ''],              // 정의 밖 항목은 무시
+    ['2026-07', '노무비', '', '지웠음'],                  // 빈 칸 = 수기 해제 → ERP 값으로 되돌아간다
+  ],
+  // 마켓봄 반죽 실매출 — supply = 공급가(VAT 제외)
+  mbRows: [
+    { date: '2026-06-03', code: 'ANG00266', name: '앙호두 전용반죽',           qty: 100, supply: 8636400, total: 9500000 },
+    { date: '2026-06-20', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)',  qty: 50,  supply: 3272750, total: 3600025 },
+    { date: '2026-06-25', code: 'ANG00223', name: '앙붕어빵 반죽',             qty: 10,  supply:  800000, total:  880000 }, // 공장 생산품 아님
+    { date: '2026-06-28', code: 'ANG00031', name: '앙호두 카라티 (반팔/긴팔)', qty: 5,   supply:  100000, total:  110000 }, // 굿즈
+  ],
+  // ERP 재무DB Closing_Line — 매출원가 계정만 쓴다
+  erpLines: [
+    { period: '2026-06', 섹션: '매출원가', 관리계정: '인건비(공장)', 표준계정: '노무비',   실현액: 8000000, 예정액: '',      손익포함: 'Y' },
+    { period: '2026-06', 섹션: '매출원가', 관리계정: '공장경비',     표준계정: '제조경비', 실현액: 3135250, 예정액: '',      손익포함: 'Y' },
+    { period: '2026-07', 섹션: '매출원가', 관리계정: '인건비(공장)', 표준계정: '노무비',   실현액: 7000000, 예정액: 500000,  손익포함: 'Y' },
+    { period: '2026-07', 섹션: '매출원가', 관리계정: '재료비',       표준계정: '재료비',   실현액: 5000000, 예정액: '',      손익포함: 'Y' }, // 재료비는 공장 시트가 정본
+    { period: '2026-07', 섹션: '판관비',   관리계정: '인건비(본사)', 표준계정: '급여',     실현액: 8441431, 예정액: '',      손익포함: 'Y' }, // 판관비 제외
+    { period: '2026-07', 섹션: '매출원가', 관리계정: '공장경비',     표준계정: '제조경비', 실현액: 9999999, 예정액: '',      손익포함: 'N' }, // 손익 제외 플래그
   ],
 };
 
@@ -140,11 +158,29 @@ t('생산량 = 유효 LOT(폐기·삭제 제외), kg 은 봉 환산', () => {
   assert.strictEqual(jul.prodPacks, 60);           // 출하완료도 '그 달에 만든 것'
 });
 
-t('매출 = 출하봉수 × 공급단가 · 단가 없는 물량은 매출에서 빠지고 경고로 남는다', () => {
-  assert.strictEqual(jun.shipPacks, 80);           // 40 + 30 + 10
-  assert.strictEqual(jun.revenue, 70 * PRICE);     // 미등록 LOT 10봉은 제외
+t('매출 = 마켓봄 실매출 우선 · 우리 완제품 품명과 맞는 행만', () => {
+  assert.strictEqual(jun.shipPacks, 80);                       // 40 + 30 + 10
+  assert.strictEqual(jun.estRevenue, 70 * PRICE);              // 추정치는 그대로 계산해 둔다
   assert.strictEqual(jun.noPricePacks, 10);
-  assert.strictEqual(Math.round(jun.unitPrice), Math.round(70 * PRICE / 80));
+  assert.strictEqual(jun.mbRevenue, 8636400 + 3272750);        // 붕어빵반죽·카라티 제외
+  assert.strictEqual(jun.revenue, jun.mbRevenue, '실적이 있으면 추정을 쓰지 않는다');
+  assert.strictEqual(jun.revenueSrc, 'marketbom');
+});
+
+t('마켓봄 실적이 없는 달은 출하 × 공급단가 추정으로 떨어진다', () => {
+  assert.strictEqual(jul.mbRevenue, 0);
+  assert.strictEqual(jul.revenueSrc, 'none');                  // 7월은 출하도 없다
+  assert.strictEqual(jul.revenue, 0);
+});
+
+t('isOurProduct: 규격 붙은 품명은 같은 상품, 다른 반죽은 남이다', () => {
+  const names = ['앙호두전용반죽'];
+  assert.ok(FactoryPnl.isOurProduct('앙호두 전용반죽', names));
+  assert.ok(FactoryPnl.isOurProduct('앙호두 전용반죽(5kg*3ea)', names));
+  assert.ok(FactoryPnl.isOurProduct('앙호두 전용반죽 [5kg*4ea/box]', names));
+  assert.ok(!FactoryPnl.isOurProduct('앙붕어빵 반죽', names));
+  assert.ok(!FactoryPnl.isOurProduct('', names));
+  assert.ok(!FactoryPnl.isOurProduct('앙호두 전용반죽', []));   // 등록 품목이 없으면 아무것도 안 잡는다
 });
 
 t('재료비 = 실투입 kg × 매입단가 · 미해석/비-input/깨진JSON 제외', () => {
@@ -161,15 +197,23 @@ t('실매입 = 구매주문 totalAmt · 귀속은 수령일 우선 · 삭제 제
   assert.strictEqual(rows.find(r => r.ym === '2026-05'), undefined);   // 주문일 5/28 은 수령일에 밀렸다
 });
 
-t('노무비·제조경비·기타 = 수기 시트, 원가·이익 합산', () => {
-  assert.strictEqual(jun.labor, 9525688);
-  assert.strictEqual(jun.overhead, 3135250);
-  assert.strictEqual(jun.other, 100000);
-  const cost = 600000 + 9525688 + 3135250 + 100000;
+t('수기가 ERP 결산을 이긴다 · 제조경비 2항목은 합산', () => {
+  assert.strictEqual(jun.labor, 9525688);           // ERP 8,000,000 이 아니라 수기값
+  assert.strictEqual(jun.laborSrc, 'manual');
+  assert.strictEqual(jun.overhead, 2135250 + 1000000);
+  assert.strictEqual(jun.overheadSrc, 'manual');
+  const cost = 600000 + 9525688 + 3135250;
   assert.strictEqual(jun.cost, cost);
-  assert.strictEqual(jun.profit, 70 * PRICE - cost);
+  assert.strictEqual(jun.profit, jun.mbRevenue - cost);
   assert.strictEqual(Math.round(jun.marginPct * 10) / 10, Math.round(jun.profit / jun.revenue * 1000) / 10);
   assert.strictEqual(Math.round(jun.unitCost), Math.round(cost / 104));
+});
+
+t('수기가 없거나 비면 ERP 결산 매출원가를 쓴다 (판관비·손익제외는 안 쓴다)', () => {
+  assert.strictEqual(jul.labor, 7000000 + 500000, '실현액 + 예정액');
+  assert.strictEqual(jul.laborSrc, 'erp', "빈 칸으로 지운 수기값은 ERP 로 되돌아간다");
+  assert.strictEqual(jul.overhead, 0, "손익포함='N' 인 공장경비는 빼야 한다");
+  assert.strictEqual(jul.overheadSrc, 'none');
 });
 
 t('매출 0인 달은 이익률 null (0으로 나누지 않는다)', () => {
@@ -182,7 +226,7 @@ t('매출 0인 달은 이익률 null (0으로 나누지 않는다)', () => {
 t('빈 입력·null 행에도 안 터진다', () => {
   assert.deepStrictEqual(FactoryPnl.build({}), []);
   assert.deepStrictEqual(FactoryPnl.build(), []);
-  assert.deepStrictEqual(FactoryPnl.build({ fgLots: [null, [], ['x']], ships: [null], procs: [null], pos: [null], manual: [null] }), []);
+  assert.deepStrictEqual(FactoryPnl.build({ fgLots: [null, [], ['x']], ships: [null], procs: [null], pos: [null], manual: [null], mbRows: [null], erpLines: [null] }), []);
 });
 
 t('recent: 최근 N개월 절단, 0 이면 전체', () => {
@@ -199,7 +243,8 @@ t('renderPnlBody: 데이터 있을 때 예외 없이 그려지고 핵심 숫자�
   assert.ok(html.includes('2026.06'), '선택 월 라벨');
   assert.ok(html.includes('제조손익'), '요약 카드');
   assert.ok(html.includes('마미만쥬믹스'), '자재별 재료비');
-  assert.ok(html.includes('공급단가 미입력'), '단가 미입력 경고');
+  assert.ok(html.includes('ERP 실매출'), '매출 출처 배지');
+  assert.ok(html.includes('수기'), '노무비 출처 배지');
   assert.ok(html.includes('이 숫자는 어디서 왔나'), '출처 각주');
   assert.ok(!/undefined|NaN/.test(html), 'undefined·NaN 이 화면에 새어나오면 안 된다');
 });
