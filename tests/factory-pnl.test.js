@@ -296,10 +296,13 @@ t('recent: 최근 N개월 절단, 0 이면 전체', () => {
 
 /* ── 화면 렌더 스모크 — 렌더 중 예외는 '버튼이 안 눌린다'로만 보여서 잡기 어렵다 ── */
 t('renderPnlBody: 데이터 있을 때 예외 없이 그려지고 핵심 숫자가 찍힌다', () => {
-  State._pnl = { fgItems: fixture.fgItems, rows };
+  State._pnl = { fgItems: fixture.fgItems, rows,
+                 inv: FactoryPnl.inventory(fixture.rmItems, fixture.rmLots) };
   window._pnlSel = '2026-06'; window._pnlRange = 12;
   renderPnlBody();
   const html = $id('content').innerHTML;
+  assert.ok(html.includes('원재료·부재료 재고'), '재고 카드');
+  assert.ok(html.includes('부재료·포장재'), '재고 원/부재료 소계');
   assert.ok(html.includes('2026.06'), '선택 월 라벨');
   assert.ok(html.includes('제조손익'), '요약 카드');
   assert.ok(html.includes('마미만쥬믹스'), '자재별 재료비');
@@ -321,6 +324,43 @@ t('관리자 전용 게이트 — 작업자는 홈으로 튕긴다', async () =>
   Screens['pnl']();                       // 게이트는 await 전에 동기로 걸린다
   assert.strictEqual(_dom._went, 'home');
   State.user = { email: 'admin@anghodu.biz', role: 'admin' };
+});
+
+/* ── 재고(현재 시점) — 원재료 / 부재료 ── */
+t('재고 = 유효 LOT 잔량 × 매입단가 · 원재료와 부재료를 분류로 가른다', () => {
+  const iv = FactoryPnl.inventory(fixture.rmItems, fixture.rmLots);
+  const by = Object.fromEntries(iv.rows.map(r => [r.code, r]));
+  assert.strictEqual(by.RM003.qty, 200);                 // LOT 잔량[8]
+  assert.strictEqual(by.RM003.kind, '원재료');
+  assert.strictEqual(by.RM003.amount, 200 * 2000);
+  assert.strictEqual(by.PK001.kind, '부재료');           // category '포장재'
+  assert.strictEqual(by.PK001.amount, 4500 * 150);
+  assert.strictEqual(by.RM001.noPrice, true, '계란은 단가 미입력');
+  assert.strictEqual(by.RM001.amount, 0);
+  assert.strictEqual(iv.rawAmt, 200 * 2000);
+  assert.strictEqual(iv.subAmt, 4500 * 150);
+  assert.strictEqual(iv.total, iv.rawAmt + iv.subAmt);
+  assert.deepStrictEqual(iv.noPrice.map(r => r.code), ['RM001']);
+});
+
+t('재고: 폐기·소진·입고취소 LOT 은 뺀다 (ERP 재고평가와 같은 기준)', () => {
+  const lots = [
+    ['L1', 'RM003', '', '', 100, 'kg', '', '', 50, '사용중', 10],
+    ['L2', 'RM003', '', '', 100, 'kg', '', '', 30, '폐기', 10],
+    ['L3', 'RM003', '', '', 100, 'kg', '', '', 20, '소진', 10],
+    ['L4', 'RM003', '', '', 100, 'kg', '', '', 10, '입고취소', 10],
+    ['L5', 'RM003', '', '', 100, 'kg', '', '', 5, '미사용', 10],
+  ];
+  const iv = FactoryPnl.inventory(fixture.rmItems, lots);
+  assert.strictEqual(iv.rows[0].qty, 55, '사용중 50 + 미사용 5 만 남는다');
+});
+
+t('재고: 발주점 미달을 짚어 준다 · 빈 입력에도 안 터진다', () => {
+  const items = [['RM003', '마미만쥬믹스', '', '', 'kg', '식자재', '', '', '', 300, '', '', '', 2000]];
+  const iv = FactoryPnl.inventory(items, [['L1', 'RM003', '', '', 500, 'kg', '', '', 120, '사용중', 50]]);
+  assert.strictEqual(iv.rows[0].low, true, '잔량 120 < 발주점 300');
+  assert.deepStrictEqual(iv.low.map(r => r.code), ['RM003']);
+  assert.deepStrictEqual(FactoryPnl.inventory(null, null), { rows: [], rawAmt: 0, subAmt: 0, total: 0, noPrice: [], low: [] });
 });
 
 /* ── 사업주 부담 4대보험 가산 — 돈이 걸린 버튼이라 실제로 눌러 본다 ── */

@@ -7395,6 +7395,37 @@ const FactoryPnl = {
     });
   },
 
+  /** 현재 재고 — `원재료LOT[8]` 잔량 × `원재료품목[13]` 매입단가.
+      ⚠️ 날짜별 재고원장이 없어 **시점 스냅샷**만 낼 수 있다(월별 기말재고가 아니다).
+      제외 상태는 ERP `rawInventory()` 와 같게 맞춘다 — 갈리면 두 시스템 재고금액이 어긋난다. */
+  inventory(rmItems, rmLots) {
+    const DEAD = new Set(['폐기', '입고취소', '소진']);
+    const meta = new Map((rmItems || []).filter(r => r && r[0]).map(r => [r[0], {
+      name: r[1] || r[0], unit: r[4] || 'kg', price: this._num(r[13]),
+      sub: PNL_SUBMAT_RE.test(String(r[5] || '')),
+      reorder: this._num(r[9]), inactive: r[12] === '비활성',
+    }]));
+    const byCode = new Map();
+    for (const l of (rmLots || [])) {
+      if (!l || !l[0] || DEAD.has(l[9])) continue;
+      const c = l[1] || '(미지정)';
+      byCode.set(c, (byCode.get(c) || 0) + this._num(l[8]));
+    }
+    const rows = [];
+    for (const [code, qty] of byCode) {
+      if (!(qty > 0)) continue;
+      const m = meta.get(code) || {};
+      rows.push({ code, name: m.name || code, unit: m.unit || 'kg', kind: m.sub ? '부재료' : '원재료',
+        qty: Math.round(qty * 100) / 100, price: m.price || 0, amount: qty * (m.price || 0),
+        reorder: m.reorder || 0, low: m.reorder > 0 && qty < m.reorder, noPrice: !(m.price > 0) });
+    }
+    rows.sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name, 'ko'));
+    const sum = k => rows.filter(r => r.kind === k).reduce((s, r) => s + r.amount, 0);
+    return { rows, rawAmt: sum('원재료'), subAmt: sum('부재료'),
+             total: rows.reduce((s, r) => s + r.amount, 0),
+             noPrice: rows.filter(r => r.noPrice), low: rows.filter(r => r.low) };
+  },
+
   /** 화면 표시용 — 최근 n개월만(데이터 없는 달은 애초에 버킷이 없다) */
   recent(rows, n) { return n > 0 ? rows.slice(-n) : rows; },
 
@@ -7476,6 +7507,7 @@ Screens['pnl'] = async () => {
     State._pnl = {
       fgItems, manualRows: manual, mbErr: mb.err, mbUpdated: mb.updated, erpErr: erp.err,
       match: FactoryPnl.matchReport(mb.rows, fgItems),
+      inv: FactoryPnl.inventory(rmItems, rmLots),
       rows: FactoryPnl.build({ fgItems, fgLots, ships, pos, procs, rmItems, rmLots, rmIndiv, spItems,
                                manual, mbRows: mb.rows, mbDelivery: mb.delivery, erpLines: erp.lines }),
     };
@@ -7541,6 +7573,8 @@ function renderPnlBody() {
   else if (s.freightSrc === 'perbox') warns.push(`택배비는 <b>출고 ${_pq(s.mbQty)}박스 × ${PNL_FREIGHT_PER_BOX.toLocaleString()}원 추정</b>입니다 — 실제 청구서가 있으면 수기로 넣으세요`);
   if (s.subMatSrc === 'perbox') warns.push(`부자재비는 <b>출고 ${_pq(s.mbQty)}박스 × ${PNL_SUBMAT_PER_BOX.toLocaleString()}원 표준원가</b>입니다 — 아이스박스·아이스팩·봉지·보냉팩. 실투입·매입 기록이 잡히면 그쪽이 우선합니다`);
   if (s.rawMatSrc === 'purchase') warns.push(`원재료비가 <b>매입 기준</b>입니다 — 그 달 공정 투입기록이 없어 산 금액으로 대신했습니다(재고 증감이 섞입니다)`);
+  if (st.inv && st.inv.noPrice.length) warns.push(`재고 <b>${st.inv.noPrice.length}품목이 매입단가 미입력</b>(${st.inv.noPrice.slice(0, 3).map(r => r.name).join(', ')}${st.inv.noPrice.length > 3 ? ' 외' : ''}) — 재고 금액에서 빠져 있습니다`);
+  if (st.inv && st.inv.low.length) warns.push(`재고 <b>${st.inv.low.length}품목이 발주점 미달</b>(${st.inv.low.slice(0, 3).map(r => r.name).join(', ')}${st.inv.low.length > 3 ? ' 외' : ''})`);
   if (s.unknownBuy > 0) warns.push(`품목 마스터에 없는 매입 <b>${_pw(s.unknownBuy)}원</b> — 원재료·소모품 어느 쪽에도 안 잡혔습니다`);
   if (s.revenueSrc !== 'marketbom' && s.shipPacks > 0 && s.prodPacks > 0 && s.shipPacks < s.prodPacks * 0.5) {
     warns.push(`출하량이 생산량의 절반 미만 — 출하기록 누락이면 매출이 실제보다 작게 나옵니다`);
@@ -7626,6 +7660,30 @@ function renderPnlBody() {
         </div>`).join('')}
     </div>` : '';
 
+  // ── 재고(현재 시점) ──
+  const iv = st.inv || { rows: [], rawAmt: 0, subAmt: 0, total: 0, noPrice: [], low: [] };
+  const invCard = iv.rows.length ? `
+    <div class="card mt-8" style="padding:0;overflow:hidden">
+      <div class="row between" style="padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--gray-l)">
+        <span class="fs-13 fw-7">📦 원재료·부재료 재고 <span class="fs-10 c-txt-l">현재 시점</span></span>
+        <span class="fs-13 fw-7">${_pw(iv.total)}원</span>
+      </div>
+      <div class="row between fs-12" style="padding:8px 12px;border-bottom:1px solid var(--gray-l)">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3d85c6;margin-right:5px"></span>원재료 <b>${_pw(iv.rawAmt)}</b></span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#6aa84f;margin-right:5px"></span>부재료·포장재 <b>${_pw(iv.subAmt)}</b></span>
+      </div>
+      ${iv.rows.map(r => `
+        <div style="padding:8px 12px;border-bottom:1px solid var(--gray-l)${r.low ? ';background:#fff8e1' : ''}">
+          <div class="row between">
+            <span class="fs-13 fw-6">${r.name} <span class="fs-10 c-txt-l">${r.kind}</span></span>
+            <span class="fs-13 fw-7">${r.noPrice ? '<span style="color:var(--warn)">단가 미입력</span>' : _pw(r.amount) + '원'}</span>
+          </div>
+          <div class="fs-11 c-txt-l mt-2">${r.code} · 잔량 <b>${_pq(r.qty)}${r.unit}</b>${r.price > 0 ? ` × ${r.price.toLocaleString()}원/${r.unit}` : ''}${r.low ? ` · <span style="color:var(--warn)">발주점 ${_pq(r.reorder)}${r.unit} 미달</span>` : ''}</div>
+        </div>`).join('')}
+      <div class="fs-10 c-txt-l" style="padding:8px 12px">날짜별 재고원장이 없어 <b>지금 이 순간</b>의 재고입니다 — 월별 기말재고가 아닙니다.
+        상태가 폐기·소진·입고취소인 LOT 은 뺐습니다(ERP 재고평가와 같은 기준).</div>
+    </div>` : '';
+
   // ── 입력 버튼(관리자 액션) ──
   const actions = `
     <div class="row mt-12" style="gap:8px">
@@ -7639,7 +7697,7 @@ function renderPnlBody() {
     ${ranges.map(([v, lb]) => `<button class="btn btn-sm ${range === v ? 'btn-pri' : 'btn-outline btn-gray'}" onclick="window._pnlRange=${v};renderPnlBody()">${lb}</button>`).join('')}
   </div>`;
 
-  $id('content').innerHTML = `<div style="padding:16px">${rangeBar}${summary}${warnCard}${tbl}${costCard}${matCard}${actions}${pnlFootnote()}</div>`;
+  $id('content').innerHTML = `<div style="padding:16px">${rangeBar}${summary}${warnCard}${tbl}${costCard}${matCard}${invCard}${actions}${pnlFootnote()}</div>`;
 }
 
 /** 출처·계산식 각주 — 이 화면의 숫자가 어디서 왔는지 한 곳에 적어 둔다. */
