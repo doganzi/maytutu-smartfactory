@@ -4880,6 +4880,7 @@ Screens.more = () => {
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
     { icon: '📄', label: '작업지시서 PDF', desc: '저장된 HACCP 생산기록 PDF 모음', target: 'wo-pdfs' },
     { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
+    { icon: '💰', label: '공장 손익', desc: '월별 매출·재료비·노무비·제조경비 → 제조이익', target: 'pnl', adminOnly: true },
     { icon: '📋', label: 'SOP 관리', desc: '표준작업절차서 생성/수정/조회', target: 'sop-list' },
     { icon: '🎁', label: '완제품 품목', desc: '완제품 마스터 데이터 관리', target: 'items-fg' },
     { icon: '📦', label: '원재료 품목', desc: '원재료 마스터 데이터 · 발주점 설정', target: 'items-rm' },
@@ -6784,9 +6785,9 @@ const HACCP_STD_HEADER = ['stdId','구분','항목','대상품목','위해요소
 const CERT_SHEET_HEADER = ['certId','구분','itemCode','itemName','발행기관','성적서번호','발행일','유효기한','판정','파일링크','등록자','등록일시','상태','비고'];
 const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근거','심각도','상태','담당','조치내용','조치일','등록자','등록일시','audit_note'];
 /** 완제품품목 확장 컬럼 — 기존 [0]~[9] 뒤에 append (기존 인덱스 절대 변경 금지) */
-const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17 };
+const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18 };
 const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
-                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격'];
+                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가'];
 /** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
 const CERT_WARN_DAYS = 30;
 
@@ -7050,6 +7051,649 @@ Screens['wo-pdfs'] = async () => {
     toast('로드 실패: ' + e.message, 'err');
   }
 };
+
+/* ═══════════════════════════════════════════════
+   FACTORY P&L — 공장 손익 (관리자 전용) · Router.go('pnl')
+   ─────────────────────────────────────────────
+   제조이익 = 매출 − (재료비 + 노무비 + 제조경비)
+
+   ⚠ 단위 — 완제품 물량은 전부 **봉(1봉 5kg)** 으로 정규화한다. 시트마다 kg·박스가 섞여 있어
+     그대로 더하면 배수로 틀린다(ERP 재고평가에서 실제로 3배 과대평가 사고가 났었다).
+
+   ⚠ VAT — 매출·원가 **둘 다 공급가(VAT 제외)** 기준이다. 매출만 부가세 포함으로 잡으면
+     이익이 10% 부풀려진다. 마켓봄 판매가 23,750원/봉(VAT 포함) = 공급가 21,591원/봉으로,
+     같은 가격을 어느 기준으로 적느냐의 문제일 뿐이다.
+
+   출처 — 값마다 어디서 왔는지 화면에 배지로 찍는다. 추정을 실적처럼 보이게 하지 않는다.
+     매출     ① 마켓봄 반죽 실매출(ERP /api/logistics) = 실적
+              ② 없는 달만 출하기록 × 완제품품목[18] 공급단가 = 추정
+     재료비   = 공정기록 실투입량(kg) × 원재료품목[13] 매입단가 — 발생 기준
+     (참고)   구매주문 totalAmt 합 = 실매입(현금) 기준. 나란히 보여주되 손익에는 안 넣는다
+     노무비·제조경비 ① '공장손익' 시트 수기(있으면 우선 — 사람이 고친 값이 이긴다)
+              ② 없으면 ERP 재무DB Closing_Line 의 매출원가 › 인건비(공장)·공장경비
+     ⚠ 급여대장(Payroll) 직접 읽기는 불가 — erp-secrets 키가 개인 브라우저 localStorage 에만
+       있어서 서버도 이 앱도 복호화할 수 없다. 결산 계정을 읽는 게 유일한 자동 경로다.
+   ═══════════════════════════════════════════════ */
+const PNL_SHEET = '공장손익';
+const PNL_HEADER = ['period', '항목', '금액', '메모', '등록자', '등록일시'];
+/** 수기 입력 항목 — 노무비 1 + 제조경비 2(사용자 확정 2026-08-12: 임차료·관리비 / 공과금) */
+const PNL_MANUAL_ITEMS = ['노무비', '임차료·관리비', '공과금(전기·가스·수도)'];
+const PNL_OVERHEAD_ITEMS = ['임차료·관리비', '공과금(전기·가스·수도)', '제조경비'];   // '제조경비' = 구 단일항목 호환
+const PNL_KG_PER_PACK = 5;         // 1봉 = 5kg (포장 단위 고정 — CLAUDE.md 표준 배치)
+const PNL_DEFAULT_PRICE = 21591;   // 원/봉 공급가(VAT 제외) = 마켓봄 판매가 23,750 ÷ 1.1
+
+/** ERP 재무 DB(회계·재무 05) — 결산 라인. 읽기 전용. */
+const ERP_FIN_SID = '1FbqWXusA6KCpJThwZ6f4tNSMw19kSjL7hL19byTrOVE';
+const ERP_CLOSING_TAB = 'Closing_Line';
+/** ERP 물류 API — 마켓봄 반죽 실매출. 인증 = 이 앱이 이미 가진 구글 토큰(hd=anghodu.biz). */
+const ERP_LOGI_API = 'https://maytutu-erp.vercel.app/api/logistics?only=marketbom';
+
+const FactoryPnl = {
+  _num(v) { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; },
+
+  /** 'YYYY-MM' 추출 — 날짜/일시 문자열과 구글 시트 날짜 시리얼 모두 대응. 못 읽으면 '' */
+  ym(v) {
+    if (v == null || v === '') return '';
+    if (typeof v === 'number' || /^\d+(\.\d+)?$/.test(String(v).trim())) {
+      const n = parseFloat(v);
+      if (n > 20000 && n < 90000) {                                  // 시트 날짜 시리얼(1900 기준)
+        return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 7);
+      }
+    }
+    const m = String(v).match(/(\d{4})[-./](\d{1,2})/);
+    return m ? m[1] + '-' + String(+m[2]).padStart(2, '0') : '';
+  },
+
+  /** 완제품 수량 → 봉. 시트 unit 이 kg 이면 5로 나누고, 박스면 packsPerBox 를 곱한다. */
+  toPacks(qty, unit, packsPerBox) {
+    const q = this._num(qty); if (!q) return 0;
+    const u = String(unit || '').trim().toLowerCase();
+    if (u === 'kg') return q / PNL_KG_PER_PACK;
+    if (u === 'box' || u === '박스') return q * (this._num(packsPerBox) || 1);
+    return q;                                                        // 봉·개·pack·공란 = 이미 봉
+  },
+
+  /** usedLotIds → 원재료 코드. QR 개별ID(RM-…-01)는 뒤 -NN 을 떼고 LOT 로 맞춘다.
+      한 스텝에 여러 LOT 이 섞이면 첫 해석 LOT 의 자재로 전량 귀속(ERP rawMaterialFlow 와 같은 근사). */
+  matOf(usedLotIds, codeByRmLot) {
+    for (const raw of String(usedLotIds || '').split(/[,\s]+/)) {
+      const id = raw.trim(); if (!id) continue;
+      const c = codeByRmLot.get(id) || codeByRmLot.get(id.replace(/-\d+$/, ''));
+      if (c) return c;
+    }
+    return '';
+  },
+
+  /** 품명 정규화 — 괄호 안 규격을 떼고 공백을 없앤다.
+      ⚠ 반죽은 SKU 를 바꿀 때 품명에만 규격이 붙어 다른 상품으로 갈린다
+      ("앙호두 전용반죽" vs "앙호두 전용반죽(5kg*3ea)"). 코드로 맞추면 SKU 교체 때마다 끊긴다. */
+  normName(s) {
+    return String(s || '').replace(/[（(\[【].*?[)\]）】]/g, '').replace(/\s+/g, '').trim();
+  },
+
+  /** 이 마켓봄 판매행이 우리 공장 생산품인가 — 완제품품목에 등록된 품명과 **정확히** 같을 때만.
+      완제품을 새로 등록하면(예: 앙버터 호두과자) 코드 수정 없이 자동으로 잡힌다.
+      ⚠️ 앞글자 일치(startsWith)로 하면 안 된다 — 실데이터로 확인한 사고:
+         완제품 품명이 "앙호두" 나 "앙호두(호두과자 전용반죽)"(괄호를 떼면 "앙호두") 이면
+         앞치마·모자·거울·명함·도장·카라티·쿠폰까지 **굿즈 7종이 공장 매출로 딸려 온다**(3종 → 10종).
+         품명이 안 맞으면 매출 0 + 경고로 드러나는 편이, 조용히 부풀려지는 것보다 낫다. */
+  isOurProduct(name, fgNames) {
+    const n = this.normName(name); if (!n) return false;
+    return fgNames.includes(n);
+  },
+
+  /** 매칭 진단 — 마켓봄 품목 중 몇 개가 우리 완제품으로 잡혔나. 0 이면 품명이 어긋난 것이다. */
+  matchReport(mbRows, fgItems) {
+    const fgNames = (fgItems || []).filter(r => r && r[0] && r[7] !== '비활성')
+      .map(r => this.normName(r[1] || r[0])).filter(Boolean);
+    const all = new Map(), hit = new Map();
+    for (const r of (mbRows || [])) {
+      if (!r || !r.name) continue;
+      all.set(r.code || r.name, r.name);
+      if (this.isOurProduct(r.name, fgNames)) hit.set(r.code || r.name, r.name);
+    }
+    return { total: all.size, matched: [...hit.values()], fgNames };
+  },
+
+  /** 월별 손익 집계 — 시트 rows 만 받는 순수 함수. 테스트가 이 함수를 그대로 돌린다. */
+  build(src) {
+    const S = src || {};
+    const fgItems = S.fgItems || [], fgLots = S.fgLots || [], ships = S.ships || [],
+          pos = S.pos || [], procs = S.procs || [], rmItems = S.rmItems || [],
+          rmLots = S.rmLots || [], manual = S.manual || [],
+          mbRows = S.mbRows || [], erpLines = S.erpLines || [];
+
+    const fgActive = fgItems.filter(r => r && r[0] && r[7] !== '비활성');
+    const fgNames = fgActive.map(r => this.normName(r[1] || r[0])).filter(Boolean);
+    const fgMeta = new Map(fgItems.filter(r => r && r[0]).map(r => [r[0], {
+      name: r[1] || r[0],
+      packsPerBox: this._num(r[8]) || 1,
+      price: this._num(r[FG_EXT.supplyPrice]),                       // 원/봉 · VAT 제외 공급가
+    }]));
+    const rmMeta = new Map(rmItems.filter(r => r && r[0]).map(r => [r[0], {
+      name: r[1] || r[0], unit: r[4] || 'kg', price: this._num(r[13]),
+    }]));
+    const codeByFgLot = new Map(fgLots.filter(l => l && l[0]).map(l => [l[0], l[1]]));
+    const codeByRmLot = new Map(rmLots.filter(l => l && l[0]).map(l => [l[0], l[1]]));
+
+    const M = {};
+    const at = ym => (M[ym] = M[ym] || { ym, prodPacks: 0, shipPacks: 0, estRevenue: 0, mbRevenue: 0,
+      mbQty: 0, matUsed: 0, matBuy: 0, manLabor: null, manOh: null, erpLabor: null, erpOh: null,
+      noPricePacks: 0, noCostKg: 0, byMat: {} });
+
+    // 1) 생산량 — 완제품LOT [3]qty·[4]unit·[5]prodDate. 폐기·삭제·채번예약만 제외
+    //    (출하완료·소진은 '그 달에 만든 것'이므로 생산량에 남는다)
+    const PROD_DEAD = new Set(['폐기', '삭제', '채번예약']);
+    for (const l of fgLots) {
+      if (!l || !l[0] || PROD_DEAD.has(l[9])) continue;
+      const ym = this.ym(l[5]); if (!ym) continue;
+      at(ym).prodPacks += this.toPacks(l[3], l[4], (fgMeta.get(l[1]) || {}).packsPerBox);
+    }
+
+    // 2) 출하량 + 매출 추정치 — 출하기록 [1]lotId→품목, [4]qty, [5]unit, [6]shipDt
+    for (const s of ships) {
+      if (!s || !s[0]) continue;
+      const ym = this.ym(s[6]); if (!ym) continue;
+      const meta = fgMeta.get(codeByFgLot.get(s[1])) || {};
+      const packs = this.toPacks(s[4], s[5], meta.packsPerBox);
+      const b = at(ym);
+      b.shipPacks += packs;
+      if (meta.price > 0) b.estRevenue += packs * meta.price;
+      else b.noPricePacks += packs;                                  // 단가 미입력 → 추정 매출에서 빠진 물량
+    }
+
+    // 3) 마켓봄 반죽 실매출 — supply = 공급가(VAT 제외). 우리 완제품 품명과 맞는 행만.
+    for (const r of mbRows) {
+      if (!r || !this.isOurProduct(r.name, fgNames)) continue;
+      const ym = this.ym(r.date); if (!ym) continue;
+      const b = at(ym);
+      b.mbRevenue += this._num(r.supply);
+      b.mbQty += this._num(r.qty);
+    }
+
+    // 4) 재료비(발생) — 공정기록 stepType='input' 의 stepData.inputQty(kg) × 매입단가
+    for (const p of procs) {
+      if (!p || p[3] !== 'input') continue;
+      const ym = this.ym(p[11]); if (!ym) continue;
+      let qty = 0;
+      try { qty = this._num(JSON.parse(p[5] || '{}').inputQty); } catch (e) { qty = 0; }
+      if (qty <= 0) continue;
+      const code = this.matOf(p[4], codeByRmLot);
+      if (!code) continue;                                           // 미해석 LOT 제외(ERP 와 동일)
+      const m = rmMeta.get(code) || {}, b = at(ym), amt = qty * (m.price || 0);
+      b.matUsed += amt;
+      if (!(m.price > 0)) b.noCostKg += qty;                         // 단가 미입력 자재 투입량(kg)
+      const g = (b.byMat[code] = b.byMat[code] || { code, name: m.name || code, unit: m.unit || 'kg', qty: 0, price: m.price || 0, amount: 0 });
+      g.qty += qty; g.amount += amt;
+    }
+
+    // 5) 실매입(현금·참고) — 구매주문 [9]totalAmt, 귀속 = 수령일[10] 없으면 주문일[1]
+    for (const o of pos) {
+      if (!o || !o[0] || o[18] === '삭제') continue;
+      const ym = this.ym(o[10]) || this.ym(o[1]); if (!ym) continue;
+      at(ym).matBuy += this._num(o[9]) || (this._num(o[6]) * this._num(o[8]));
+    }
+
+    // 6) 노무비·제조경비 — 수기('공장손익' 시트). 같은 달·같은 항목이 여러 행이면 합산.
+    for (const r of manual) {
+      if (!r) continue;
+      const ym = this.ym(r[0]); if (!ym) continue;
+      if (String(r[2] ?? '').trim() === '') continue;   // 빈 칸 = 수기값 없음(0 이 ERP 결산을 이기지 않게)
+      const b = at(ym), amt = this._num(r[2]), item = String(r[1] || '').trim();
+      if (item === '노무비') b.manLabor = (b.manLabor || 0) + amt;
+      else if (PNL_OVERHEAD_ITEMS.includes(item)) b.manOh = (b.manOh || 0) + amt;
+    }
+
+    // 7) 노무비·제조경비 — ERP 재무DB Closing_Line(매출원가). 수기가 없는 달만 쓴다.
+    //    손익포함='N'(자산·채권채무·자금제외)은 제외. 금액 = 실현액 + 예정액(ERP 결산 화면과 동일).
+    for (const l of erpLines) {
+      if (!l || String(l['손익포함'] || '').toUpperCase() === 'N') continue;
+      if (String(l['섹션'] || '') !== '매출원가') continue;
+      const ym = this.ym(l['귀속월']) || this.ym(l['period']); if (!ym) continue;
+      const nm = String(l['관리계정'] || '') + ' ' + String(l['표준계정'] || '');
+      const amt = this._num(l['실현액']) + this._num(l['예정액']);
+      if (!amt) continue;
+      const b = at(ym);
+      if (/노무|공장\s*인건/.test(nm)) b.erpLabor = (b.erpLabor || 0) + amt;
+      else if (/제조경비|공장\s*경비/.test(nm)) b.erpOh = (b.erpOh || 0) + amt;
+    }
+
+    return Object.values(M).sort((a, b) => a.ym < b.ym ? -1 : 1).map(b => {
+      // 매출 — 마켓봄 실적이 있으면 실적, 없으면 출하 × 단가 추정
+      if (b.mbRevenue > 0) { b.revenue = b.mbRevenue; b.revenueSrc = 'marketbom'; }
+      else { b.revenue = b.estRevenue; b.revenueSrc = b.estRevenue > 0 ? 'estimate' : 'none'; }
+      // 노무비·제조경비 — 수기가 이긴다(사람이 고친 값). 없으면 ERP 결산.
+      if (b.manLabor != null) { b.labor = b.manLabor; b.laborSrc = 'manual'; }
+      else if (b.erpLabor != null) { b.labor = b.erpLabor; b.laborSrc = 'erp'; }
+      else { b.labor = 0; b.laborSrc = 'none'; }
+      if (b.manOh != null) { b.overhead = b.manOh; b.overheadSrc = 'manual'; }
+      else if (b.erpOh != null) { b.overhead = b.erpOh; b.overheadSrc = 'erp'; }
+      else { b.overhead = 0; b.overheadSrc = 'none'; }
+
+      const cost = b.matUsed + b.labor + b.overhead;
+      b.prodKg = Math.round(b.prodPacks * PNL_KG_PER_PACK * 10) / 10;
+      b.cost = cost;
+      b.profit = b.revenue - cost;
+      b.marginPct = b.revenue > 0 ? b.profit / b.revenue * 100 : null;
+      b.unitPrice = b.shipPacks > 0 ? b.revenue / b.shipPacks : null;   // 봉당 매출(출하 기준)
+      b.unitCost = b.prodPacks > 0 ? cost / b.prodPacks : null;         // 봉당 제조원가(생산 기준)
+      b.mats = Object.values(b.byMat).sort((x, y) => y.amount - x.amount);
+      return b;
+    });
+  },
+
+  /** 화면 표시용 — 최근 n개월만(데이터 없는 달은 애초에 버킷이 없다) */
+  recent(rows, n) { return n > 0 ? rows.slice(-n) : rows; },
+
+  /** ERP 마켓봄 실매출 — 이 앱의 구글 토큰을 그대로 쓴다. 실패하면 [](추정으로 폴백). */
+  async fetchMarketbom() {
+    try {
+      const r = await fetch(ERP_LOGI_API, { headers: { Authorization: `Bearer ${State.token}` } });
+      if (!r.ok) return { rows: [], err: `ERP ${r.status}` };
+      const j = await r.json();
+      return { rows: (j.marketbom && j.marketbom.rows) || [], updated: j.marketbom && j.marketbom.updated_at };
+    } catch (e) {
+      return { rows: [], err: e.message };   // CORS·오프라인 — 화면에서 '추정' 배지로 드러난다
+    }
+  },
+
+  /** ERP 재무DB Closing_Line — 결산의 매출원가 계정. 시트 API 라 CORS 무관. 권한 없으면 []. */
+  async fetchErpClosing() {
+    try {
+      const r = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${ERP_FIN_SID}/values/${encodeURIComponent(ERP_CLOSING_TAB)}?valueRenderOption=UNFORMATTED_VALUE`,
+        { headers: { Authorization: `Bearer ${State.token}` } });
+      if (!r.ok) return { lines: [], err: `결산 ${r.status}` };
+      const vals = (await r.json()).values || [];
+      if (vals.length < 2) return { lines: [] };
+      const hdr = vals[0].map(h => String(h || '').trim());
+      const lines = vals.slice(1).filter(row => row && row.length).map(row => {
+        const o = {}; hdr.forEach((h, i) => { o[h] = row[i] ?? ''; }); return o;
+      });
+      return { lines };
+    } catch (e) {
+      return { lines: [], err: e.message };
+    }
+  },
+};
+
+/* ─── 공장 손익 화면 (관리자 전용) ─── */
+const _pw = (n) => (n == null || !isFinite(n)) ? '-' : Math.round(n).toLocaleString();
+const _pm = (n) => (n == null || !isFinite(n)) ? '-' : Math.round(n / 10000).toLocaleString();   // 만원
+const _pq = (n) => (n == null || !isFinite(n)) ? '-' : (Math.round(n * 10) / 10).toLocaleString();
+const _pymLabel = (ym) => String(ym || '').replace(/^(\d{4})-(\d{2})$/, '$1.$2');
+/** 값의 출처 배지 — 실적과 추정을 눈으로 구분하게 한다. 이 화면의 핵심 장치. */
+const PNL_SRC = {
+  marketbom: ['ERP 실매출', 'var(--suc)'],
+  sheet:     ['공장 시트',  'var(--suc)'],
+  erp:       ['ERP 결산',   'var(--suc)'],
+  manual:    ['수기',       'var(--info)'],
+  estimate:  ['추정',       'var(--warn)'],
+  none:      ['없음',       'var(--err)'],
+};
+function _pnlSrc(src) {
+  const m = PNL_SRC[src]; if (!m) return '';
+  return `<span class="fs-10" style="color:${m[1]};border:1px solid ${m[1]};border-radius:3px;padding:0 3px;white-space:nowrap;opacity:.85">${m[0]}</span>`;
+}
+
+Screens['pnl'] = async () => {
+  if (State.user?.role !== 'admin') { toast('관리자 전용 화면입니다', 'err'); Router.go('home'); return; }
+  renderHeader('💰 공장 손익', '관리자 전용 · 제조이익 = 매출 − (재료비+노무비+제조경비)', { back: 'more' });
+  $id('content').innerHTML = '<div style="padding:16px"><div class="fs-13 c-txt-l">손익 집계 중…</div></div>';
+  try {
+    showLoading();
+    const [fgItems, fgLots, ships, pos, procs, rmItems, rmLots, manual, mb, erp] = await Promise.all([
+      SheetsAPI.getAll('완제품품목').catch(() => []),
+      SheetsAPI.getAll('완제품LOT').catch(() => []),
+      SheetsAPI.getAll('출하기록').catch(() => []),
+      SheetsAPI.getAll('구매주문').catch(() => []),
+      SheetsAPI.getAll('공정기록').catch(() => []),
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('원재료LOT').catch(() => []),
+      SheetsAPI.getAll(PNL_SHEET).catch(() => []),          // 없으면 [] — 첫 입력 때 자동 생성
+      FactoryPnl.fetchMarketbom(),                          // ERP 물류 API — 반죽 실매출
+      FactoryPnl.fetchErpClosing(),                         // ERP 재무DB — 인건비(공장)·공장경비
+    ]);
+    State._pnl = {
+      fgItems, manualRows: manual, mbErr: mb.err, mbUpdated: mb.updated, erpErr: erp.err,
+      match: FactoryPnl.matchReport(mb.rows, fgItems),
+      rows: FactoryPnl.build({ fgItems, fgLots, ships, pos, procs, rmItems, rmLots, manual,
+                               mbRows: mb.rows, erpLines: erp.lines }),
+    };
+    renderPnlBody();
+  } catch (e) {
+    $id('content').innerHTML = `<div style="padding:16px"><div class="card bl-err"><div class="fs-13 c-err">불러오기 실패: ${e.message}</div></div></div>`;
+  } finally { hideLoading(); }
+};
+
+function renderPnlBody() {
+  const st = State._pnl; if (!st) return;
+  const all = st.rows;
+  const range = window._pnlRange || 12;
+  const rows = FactoryPnl.recent(all, range);
+  const sel = rows.find(r => r.ym === window._pnlSel) || rows[rows.length - 1];
+  if (sel) window._pnlSel = sel.ym;
+
+  if (!rows.length) {
+    $id('content').innerHTML = `<div style="padding:16px">
+      <div class="empty-state"><div class="es-icon">💰</div><div class="es-title">집계할 데이터가 없습니다</div>
+      <div class="es-desc">생산·출하·구매 기록이 쌓이면 월별 손익이 여기에 나옵니다</div></div>
+      ${pnlFootnote()}</div>`;
+    return;
+  }
+
+  // ── 요약(선택 월) ──
+  const s = sel || {};
+  const profitColor = (s.profit || 0) >= 0 ? 'var(--suc)' : 'var(--err)';
+  const summary = `
+    <div class="card" style="border-left:3px solid ${profitColor}">
+      <div class="row between" style="align-items:baseline">
+        <div class="fs-14 fw-7">${_pymLabel(s.ym)} 제조손익</div>
+        <div class="fs-20 fw-8" style="color:${profitColor}">${_pw(s.profit)}원</div>
+      </div>
+      <div class="row between fs-12 c-txt-l mt-4">
+        <span>매출 <b>${_pw(s.revenue)}</b> ${_pnlSrc(s.revenueSrc)}</span>
+        <span>원가 <b>${_pw(s.cost)}</b></span>
+        <span>이익률 <b>${s.marginPct == null ? '-' : s.marginPct.toFixed(1) + '%'}</b></span>
+      </div>
+      <div class="row between fs-11 c-txt-l mt-4" style="border-top:1px solid var(--gray-l);padding-top:6px">
+        <span>생산 ${_pq(s.prodPacks)}봉 (${_pq(s.prodKg)}kg)</span>
+        <span>출하 ${_pq(s.shipPacks)}봉</span>
+        <span>봉당 원가 ${_pw(s.unitCost)}원</span>
+      </div>
+    </div>`;
+
+  // ── 경고 (믿을 수 없는 값은 먼저 말한다) ──
+  const warns = [];
+  if (st.mbErr) warns.push(`<b>ERP 실매출을 못 읽었습니다</b> (${st.mbErr}) — 매출이 '출하량 × 단가' 추정으로 계산됩니다`);
+  if (st.erpErr) warns.push(`<b>ERP 결산을 못 읽었습니다</b> (${st.erpErr}) — 노무비·제조경비는 수기 입력분만 반영됩니다`);
+  if (!st.mbErr && st.match && st.match.total > 0 && st.match.matched.length === 0) {
+    warns.push(`ERP 마켓봄 ${st.match.total}품목 중 <b>우리 완제품과 품명이 맞는 게 하나도 없습니다</b> —
+      완제품품목의 품명(<span class="m">${(st.match.fgNames || []).join(', ') || '없음'}</span>)을
+      마켓봄 품명과 <b>똑같이</b> 맞춰야 실매출이 잡힙니다`);
+  }
+  if (s.revenueSrc === 'estimate') warns.push(`이 달 매출은 <b>마켓봄 실적이 없어 추정</b>입니다 — 출하량 × 공급단가`);
+  if (s.revenueSrc === 'none') warns.push(`<b>매출 0</b> — 마켓봄 판매도 출하기록도 없는 달입니다`);
+  if (s.revenueSrc !== 'marketbom' && s.noPricePacks > 0) warns.push(`출하 ${_pq(s.noPricePacks)}봉이 <b>공급단가 미입력</b> — 그만큼 매출이 빠져 있습니다`);
+  if (s.noCostKg > 0) warns.push(`투입 ${_pq(s.noCostKg)}kg 자재가 <b>매입단가 미입력</b> — 재료비가 과소 산정됩니다`);
+  if (!(s.labor > 0)) warns.push(`<b>노무비 없음</b> — ERP 결산에도 수기에도 공장 인건비가 없습니다`);
+  if (!(s.overhead > 0)) warns.push(`<b>제조경비 없음</b> — 임차료·관리비, 전기·가스·수도가 원가에 안 들어갔습니다`);
+  if (s.revenueSrc !== 'marketbom' && s.shipPacks > 0 && s.prodPacks > 0 && s.shipPacks < s.prodPacks * 0.5) {
+    warns.push(`출하량이 생산량의 절반 미만 — 출하기록 누락이면 매출이 실제보다 작게 나옵니다`);
+  }
+  const warnCard = warns.length ? `
+    <div class="card bl-warn mt-8" style="background:#fff8e1">
+      <div class="fs-13 fw-7 c-warn mb-6">⚠ 이 달 숫자를 그대로 믿으면 안 되는 이유</div>
+      ${warns.map(w => `<div class="fs-11 c-txt-l" style="margin-top:3px">· ${w}</div>`).join('')}
+    </div>` : '';
+
+  // ── 월별 표 ──
+  const tbl = `
+    <div class="card mt-8" style="padding:0;overflow:hidden">
+      <div class="row between" style="padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--gray-l)">
+        <span class="fs-13 fw-7">월별 제조손익</span>
+        <span class="fs-10 c-txt-l">단위: 만원 · 행을 누르면 상세</span>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:340px">
+        <thead><tr style="background:var(--bg)">
+          ${['월', '생산<br>(봉)', '출하<br>(봉)', '매출', '원가', '제조이익', '이익률'].map((h, i) =>
+            `<th style="padding:6px 6px;text-align:${i === 0 ? 'left' : 'right'};font-size:10px;color:var(--txt-l);font-weight:600">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+        ${rows.slice().reverse().map(r => {
+          const on = r.ym === window._pnlSel;
+          const pc = r.profit >= 0 ? 'var(--suc)' : 'var(--err)';
+          return `<tr onclick="window._pnlSel='${r.ym}';renderPnlBody()" style="cursor:pointer;border-top:1px solid var(--gray-l);${on ? 'background:rgba(61,133,198,.10)' : ''}">
+            <td style="padding:7px 6px;font-weight:${on ? 700 : 500}">${_pymLabel(r.ym)}</td>
+            <td style="padding:7px 6px;text-align:right">${_pq(r.prodPacks)}</td>
+            <td style="padding:7px 6px;text-align:right">${_pq(r.shipPacks)}</td>
+            <td style="padding:7px 6px;text-align:right">${_pm(r.revenue)}</td>
+            <td style="padding:7px 6px;text-align:right">${_pm(r.cost)}</td>
+            <td style="padding:7px 6px;text-align:right;font-weight:700;color:${pc}">${_pm(r.profit)}</td>
+            <td style="padding:7px 6px;text-align:right;color:${pc}">${r.marginPct == null ? '-' : r.marginPct.toFixed(0) + '%'}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>`;
+
+  // ── 원가 구성(선택 월) ──
+  const parts = [
+    { lb: '재료비', v: s.matUsed, c: '#3d85c6', src: 'sheet' },
+    { lb: '노무비', v: s.labor, c: '#e69138', src: s.laborSrc },
+    { lb: '제조경비', v: s.overhead, c: '#8e7cc3', src: s.overheadSrc },
+  ].filter(p => p.v > 0);
+  const totCost = s.cost || 0;
+  const costCard = `
+    <div class="card mt-8">
+      <div class="row between mb-6"><span class="fs-13 fw-7">${_pymLabel(s.ym)} 원가 구성</span><span class="fs-12 fw-7">${_pw(totCost)}원</span></div>
+      ${totCost > 0 ? `<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--gray-l)">
+        ${parts.map(p => `<div style="width:${p.v / totCost * 100}%;background:${p.c}" title="${p.lb}"></div>`).join('')}
+      </div>` : ''}
+      ${parts.map(p => `<div class="row between fs-12" style="margin-top:5px">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.c};margin-right:5px"></span>${p.lb} ${_pnlSrc(p.src)}</span>
+        <span><b>${_pw(p.v)}</b> <span class="fs-10 c-txt-l">${totCost > 0 ? Math.round(p.v / totCost * 100) + '%' : ''}</span></span>
+      </div>`).join('') || '<div class="fs-12 c-txt-l">원가 데이터 없음</div>'}
+      <div class="row between fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">
+        <span>실매입(구매주문) <b>${_pw(s.matBuy)}원</b></span>
+        <span>vs 실투입 재료비 <b>${_pw(s.matUsed)}원</b></span>
+      </div>
+      <div class="fs-10 c-txt-l mt-2">실매입=그 달 산 돈(현금) · 실투입=그 달 쓴 자재(발생). 차이는 재고 증감입니다 — 손익에는 실투입만 넣습니다.</div>
+    </div>`;
+
+  // ── 자재별 재료비 ──
+  const matCard = (s.mats && s.mats.length) ? `
+    <div class="card mt-8" style="padding:0;overflow:hidden">
+      <div class="fs-13 fw-7" style="padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--gray-l)">자재별 재료비 · ${_pymLabel(s.ym)}</div>
+      ${s.mats.map(m => `
+        <div style="padding:8px 12px;border-bottom:1px solid var(--gray-l)">
+          <div class="row between">
+            <span class="fs-13 fw-6">${m.name}</span>
+            <span class="fs-13 fw-7">${_pw(m.amount)}원</span>
+          </div>
+          <div class="fs-11 c-txt-l mt-2">${m.code} · 투입 ${_pq(m.qty)}${m.unit} × ${m.price > 0 ? m.price.toLocaleString() + '원/' + m.unit : '<span style="color:var(--warn)">단가 미입력</span>'}</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  // ── 입력 버튼(관리자 액션) ──
+  const actions = `
+    <div class="row mt-12" style="gap:8px">
+      <button class="btn btn-outline btn-pri flex-1" onclick="openPnlPriceEditor()">💵 공급단가</button>
+      <button class="btn btn-pri flex-1" onclick="openPnlCostEditor('${s.ym}')">🧾 노무비·경비 입력</button>
+    </div>`;
+
+  // ── 기간 필터 ──
+  const ranges = [[6, '6개월'], [12, '12개월'], [0, '전체']];
+  const rangeBar = `<div class="row mb-8" style="gap:6px">
+    ${ranges.map(([v, lb]) => `<button class="btn btn-sm ${range === v ? 'btn-pri' : 'btn-outline btn-gray'}" onclick="window._pnlRange=${v};renderPnlBody()">${lb}</button>`).join('')}
+  </div>`;
+
+  $id('content').innerHTML = `<div style="padding:16px">${rangeBar}${summary}${warnCard}${tbl}${costCard}${matCard}${actions}${pnlFootnote()}</div>`;
+}
+
+/** 출처·계산식 각주 — 이 화면의 숫자가 어디서 왔는지 한 곳에 적어 둔다. */
+function pnlFootnote() {
+  const m = State._pnl && State._pnl.match;
+  return `
+    <div class="card mt-12" style="background:var(--bg)">
+      <div class="fs-12 fw-7 mb-6">📌 이 숫자는 어디서 왔나</div>
+      <div class="fs-11 c-txt-l" style="line-height:1.65">
+        · <b>매출</b> ① <span style="color:var(--suc)">ERP 실매출</span> = 마켓봄 반죽 판매 <b>공급가</b> 실적(ERP 물류 원장).
+          ② 실적이 없는 달만 <span style="color:var(--warn)">추정</span> = 출하기록 × 완제품 공급단가.<br>
+        · <b>재료비</b> = 공정기록의 실투입량(kg) × 원재료 <b>매입단가</b>(원/kg). 그 달에 실제로 쓴 자재만.<br>
+        · <b>노무비·제조경비</b> ① <span style="color:var(--info)">수기</span>가 있으면 그게 이깁니다.
+          ② 없으면 <span style="color:var(--suc)">ERP 결산</span>의 매출원가 › 인건비(공장)·공장경비.<br>
+        · ⚠️ <b>매출·원가 모두 공급가(VAT 제외)</b> 기준입니다. 매출만 부가세를 포함하면 이익이 10% 부풀려집니다 —
+          마켓봄 판매가 23,750원/봉(VAT 포함)이 곧 공급가 ${PNL_DEFAULT_PRICE.toLocaleString()}원/봉입니다.<br>
+        · <b>물량 단위</b>는 전부 봉(1봉 ${PNL_KG_PER_PACK}kg)으로 환산합니다.<br>
+        · 감가상각은 <b>넣지 않습니다</b>(사용자 확정). 판관비·이자도 제외 — 여기 이익은 <b>제조이익</b>이지 순이익이 아닙니다.<br>
+        · 대상 품목 = <b>완제품품목에 등록된 활성 품목과 품명이 정확히 같은</b> 마켓봄 판매행.
+          앞글자만 맞으면 안 잡습니다 — 그렇게 하면 앙호두 앞치마·모자·쿠폰까지 공장 매출이 됩니다.
+          ${m ? `현재 마켓봄 ${m.total}품목 중 <b>${[...new Set(m.matched)].length}품목</b>을 셉니다:
+            <b>${[...new Set(m.matched)].join(' · ') || '없음'}</b>` : ''}
+      </div>
+    </div>`;
+}
+
+/* 완제품 공급단가 편집 — 원/봉(VAT 제외 공급가). 완제품품목[18]. 매출 계산의 유일한 단가 소스. */
+function openPnlPriceEditor() {
+  const items = (State._pnl?.fgItems || []).filter(r => r && r[0] && r[7] !== '비활성');
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:380px">
+      <div class="fs-16 fw-7 mb-4">💵 완제품 공급단가</div>
+      <div class="fs-11 c-txt-l mb-8">1봉(${PNL_KG_PER_PACK}kg)당 <b>공급가 · VAT 제외</b>.
+        마켓봄 실매출이 있는 달은 실적을 쓰고, <b>없는 달만</b> 이 단가로 추정합니다.<br>
+        <span style="color:var(--info)">기본값 ${PNL_DEFAULT_PRICE.toLocaleString()}원 = 마켓봄 판매가 23,750원(VAT 포함) ÷ 1.1</span></div>
+      <div style="max-height:46vh;overflow-y:auto">
+      ${items.length ? items.map((it, i) => {
+        const p = FactoryPnl._num(it[FG_EXT.supplyPrice]);
+        const ppb = FactoryPnl._num(it[8]) || 1;
+        return `<div class="input-group" style="margin-bottom:10px">
+          <label>${it[1] || it[0]} <span class="fs-10 c-txt-l">(${it[0]} · 박스당 ${ppb}봉)</span></label>
+          <input type="number" id="pnlp-${i}" value="${p || ''}" min="0" step="1" inputmode="numeric" placeholder="${PNL_DEFAULT_PRICE}"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          <div class="fs-10 c-txt-l mt-2">박스 환산 ≈ <span id="pnlpc-${i}">${p > 0 ? (p * ppb).toLocaleString() + '원/박스' : '-'}</span></div>
+        </div>`;
+      }).join('') : '<div class="fs-12 c-txt-l">활성 완제품이 없습니다</div>'}
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="pnlp-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="pnlp-save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#pnlp-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  items.forEach((it, i) => {
+    const ppb = FactoryPnl._num(it[8]) || 1;
+    const inp = overlay.querySelector(`#pnlp-${i}`), out = overlay.querySelector(`#pnlpc-${i}`);
+    if (inp && out) inp.addEventListener('input', e => {
+      const v = parseFloat(e.target.value) || 0;
+      out.textContent = v > 0 ? (v * ppb).toLocaleString() + '원/박스' : '-';
+    });
+  });
+  overlay.querySelector('#pnlp-save').onclick = async () => {
+    if (!acquireLock('pnlPrice')) return;
+    try {
+      showLoading();
+      // 시트를 사람이 열어 볼 때 이름 없는 S열이 되지 않게 헤더부터 맞춘다(1회·멱등)
+      try {
+        const hdr = (await SheetsAPI.getRange('완제품품목!A1:Z1', false))[0] || [];
+        if (hdr[FG_EXT.supplyPrice] !== '공급단가') await SheetsAPI.updateRowByIndex('완제품품목', 1, { [FG_EXT.supplyPrice]: '공급단가' });
+      } catch (e) { /* 헤더 보정 실패는 저장을 막지 않는다 */ }
+      let n = 0;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const el = overlay.querySelector(`#pnlp-${i}`);
+        const v = el ? el.value.trim() : '';
+        const cur = String(it[FG_EXT.supplyPrice] ?? '').trim();
+        if (v === cur) continue;
+        if (v !== '' && !(parseFloat(v) >= 0)) { toast(`${it[1] || it[0]}: 0 이상의 숫자를 입력하세요`, 'err'); return; }
+        await SheetsAPI.updateCell('완제품품목', 0, it[0], FG_EXT.supplyPrice, v === '' ? '' : String(Math.round(parseFloat(v))));
+        n++;
+      }
+      SheetsAPI.invalidateCache('완제품품목');
+      toast(n ? `공급단가 ${n}건 저장` : '변경 없음', n ? 'suc' : 'info');
+      close();
+      if (n) await Screens['pnl']();
+    } catch (e) {
+      const grid = /grid|range|exceed/i.test(e.message || '');
+      toast(grid ? '완제품품목 시트에 S열(공급단가)이 없습니다 — 시트에서 열을 하나 추가한 뒤 다시 저장하세요' : '저장 실패: ' + e.message, 'err', 6000);
+    }
+    finally { hideLoading(); releaseLock('pnlPrice'); }
+  };
+}
+
+/* 월별 노무비·제조경비 입력 — '공장손익' 시트. 같은 달·항목 행이 있으면 갱신, 없으면 추가(멱등).
+   ERP 결산에서 자동으로 잡히는 달은 비워 두면 된다 — 여기 넣은 값이 있으면 그게 ERP 를 이긴다. */
+function openPnlCostEditor(period) {
+  const ym = /^\d{4}-\d{2}$/.test(period || '') ? period : new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 7);
+  const row = (State._pnl?.rows || []).find(r => r.ym === ym) || {};
+  const cur = { '노무비': row.manLabor, '임차료·관리비': null, '공과금(전기·가스·수도)': null };
+  (State._pnl?.manualRows || []).forEach(r => {
+    if (!r || FactoryPnl.ym(r[0]) !== ym) return;
+    if (cur[r[1]] !== undefined) cur[r[1]] = FactoryPnl._num(r[2]);
+  });
+  const erpNote = [
+    row.laborSrc === 'erp' ? `노무비 ${_pw(row.labor)}원` : '',
+    row.overheadSrc === 'erp' ? `제조경비 ${_pw(row.overhead)}원` : '',
+  ].filter(Boolean).join(' · ');
+  const fields = [
+    ['pnlc-labor', '노무비', '공장 인건비 (이상현·김수영)', cur['노무비']],
+    ['pnlc-rent', '임차료·관리비', '공장 임대료 + 건물 관리비', cur['임차료·관리비']],
+    ['pnlc-util', '공과금(전기·가스·수도)', '생산량에 따라 움직입니다', cur['공과금(전기·가스·수도)']],
+  ];
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog" style="max-width:340px">
+      <div class="fs-16 fw-7 mb-4">🧾 노무비 · 제조경비</div>
+      <div class="fs-11 c-txt-l mb-8">공장 시트에 없는 비용입니다. <b>비워 두면 ERP 결산 값</b>을 그대로 쓰고,
+        넣으면 그게 이깁니다.</div>
+      ${erpNote ? `<div class="card bl-info" style="background:#e3f2fd;padding:7px 9px;margin-bottom:10px">
+        <div class="fs-11 c-info">이 달 ERP 결산에서 잡힌 값: ${erpNote}</div></div>` : ''}
+      <div class="input-group" style="margin-bottom:8px">
+        <label>귀속월</label>
+        <input type="month" id="pnlc-ym" value="${ym}" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      ${fields.map(([id, lb, hint, v]) => `
+        <div class="input-group" style="margin-bottom:8px">
+          <label>${lb} <span class="fs-10 c-txt-l">· ${hint}</span></label>
+          <input type="number" id="${id}" value="${v == null ? '' : v}" min="0" step="1" inputmode="numeric" placeholder="원"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+        </div>`).join('')}
+      <div class="input-group" style="margin-bottom:12px">
+        <label>메모 (선택)</label>
+        <input type="text" id="pnlc-memo" placeholder="예: 4대보험 포함" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+      </div>
+      <div class="d-actions">
+        <button class="btn btn-sm btn-outline btn-gray" id="pnlc-cancel">취소</button>
+        <button class="btn btn-sm btn-pri" id="pnlc-save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#pnlc-cancel').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#pnlc-save').onclick = async () => {
+    const p = $id('pnlc-ym')?.value, memo = $id('pnlc-memo')?.value || '';
+    if (!/^\d{4}-\d{2}$/.test(p || '')) { toast('귀속월을 선택하세요', 'err'); return; }
+    const vals = {};
+    fields.forEach(([id, lb]) => { vals[lb] = $id(id)?.value; });
+    if (!acquireLock('pnlCost')) return;
+    try {
+      showLoading();
+      let cur = [];
+      try { cur = await SheetsAPI.getAll(PNL_SHEET, false); }
+      catch (e) { await SheetsAPI.createSheet(PNL_SHEET, PNL_HEADER); cur = []; }
+      const who = State.user?.email || '', now = formatDateTime();
+      for (const item of PNL_MANUAL_ITEMS) {
+        const raw = String(vals[item] ?? '').trim();
+        const i = cur.findIndex(r => r && FactoryPnl.ym(r[0]) === p && r[1] === item);
+        if (raw === '') {
+          // 비워서 저장 = 수기 해제 → 그 달은 다시 ERP 결산 값을 쓴다. 행이 없으면 만들 것도 없다.
+          if (i >= 0) await SheetsAPI.updateRowByIndex(PNL_SHEET, i + 2, { 2: '', 3: memo, 4: who, 5: now });
+          continue;
+        }
+        const amt = parseFloat(raw);
+        if (!(amt >= 0)) { toast(`${item}: 0 이상의 숫자를 입력하세요`, 'err'); return; }
+        if (i >= 0) await SheetsAPI.updateRowByIndex(PNL_SHEET, i + 2, { 0: p, 1: item, 2: String(Math.round(amt)), 3: memo, 4: who, 5: now });
+        else await SheetsAPI.append(PNL_SHEET, [[p, item, String(Math.round(amt)), memo, who, now]]);
+      }
+      SheetsAPI.invalidateCache(PNL_SHEET);
+      toast(`${p} 노무비·제조경비 저장`, 'suc');
+      close();
+      window._pnlSel = p;
+      await Screens['pnl']();
+    } catch (e) { toast('저장 실패: ' + e.message, 'err', 5000); }
+    finally { hideLoading(); releaseLock('pnlCost'); }
+  };
+}
 
 Screens['bom-calc'] = async () => {
   renderHeader('BOM 계산기', '봉수/kg 입력 → 자재 필요량 자동 계산', { back: 'more' });
