@@ -8030,8 +8030,9 @@ function renderBomResult() {
 
   // ─── 권장 배치 사이즈 (200~350kg, 정수 포대) — 입력 바로 아래에 표시 ───
   if (recEl) {
-    const mainRecipe = sopRecipes.find(r => r[1]==='RM003')
-                    || sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
+    // 주 자재 = **배합비가 가장 큰 자재**. 믹스 코드를 박아 두면 공급사가 바뀔 때 조용히 어긋난다
+    // (실제로 RM003 마미만쥬 → RM011 앙브레드로 교체됐다). 믹스는 어느 공급사든 늘 최대 비중이다.
+    const mainRecipe = sopRecipes.reduce((max, r) => (parseFloat(r[3])||0) > (parseFloat(max[3])||0) ? r : max, sopRecipes[0]);
     const mainItem = rmItems.find(i => i[0] === mainRecipe[1]);
     const mainSkuP = parseSkuUnit(mainItem?.[3] || '');
     const mainRatio = parseFloat(mainRecipe[3]) || 0;
@@ -11023,9 +11024,9 @@ function updateWOCalc() {
   updateWOBomCheck();
 }
 
-/* ─── BOM 검증 + 권장 배치 사이즈 (200~350kg, 마미만쥬믹스 정수 포대) ───
+/* ─── BOM 검증 + 권장 배치 사이즈 (200~350kg, 프리믹스 정수 포대) ───
    - 자재 부족 자재 빨간 카드로 경고 (작업 시작 차단 X — 정보 제공만)
-   - 주 자재(마미만쥬믹스 RM003 또는 최대 비중) 기준 정수 ${포대} 단위로 가능한
+   - 주 자재(배합비 최대 = 프리믹스) 기준 정수 ${포대} 단위로 가능한
      봉수 후보 중 200~350kg 범위 + 잔여 자재 최소 순 상위 3개 표시
    - "적용" 버튼으로 wo-qty input 갱신 → updateWOCalc 재호출 */
 function updateWOBomCheck() {
@@ -11058,9 +11059,8 @@ function updateWOBomCheck() {
   });
   const shortItems = checks.filter(c => c.isShort);
 
-  // 주 자재 = 마미만쥬믹스 우선, 없으면 비중 최대
-  const main = recipes.find(r => r[1] === 'RM003')
-            || recipes.reduce((a, b) => parseFloat(a[3]||0) > parseFloat(b[3]||0) ? a : b, recipes[0]);
+  // 주 자재 = 배합비 최대인 자재(= 프리믹스). 코드를 박지 않는다 — 공급사가 바뀌면 코드도 바뀐다.
+  const main = recipes.reduce((a, b) => parseFloat(a[3]||0) > parseFloat(b[3]||0) ? a : b, recipes[0]);
   const mainItem = rmItems.find(i => i[0] === main[1]);
   const mainSkuP = parseSkuUnit(mainItem?.[3] || '');
   const mainRatio = parseFloat(main[3]) || 0;
