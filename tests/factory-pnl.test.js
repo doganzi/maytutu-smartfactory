@@ -440,15 +440,38 @@ t('택배비 — 수기 > ERP 운반비 > 박스수×단가 > 마켓봄 배송�
   assert.strictEqual(aug.mbDelivery, 7000, '마켓봄 배송비는 참고로만 들고 있는다');
 });
 
-t('부자재도 실투입·매입이 없으면 박스수 × 표준원가로 떨어진다', () => {
-  assert.strictEqual(PNL_SUBMAT_PER_BOX, 3864, '아이스박스 1,640 + 아이스팩 210x4 + 봉지 180x3 + 보냉팩 281.5x3');
+/* ── 박스 규격이 SKU 마다 다르다 — 여기가 틀리면 원가가 25% 어긋난다 ── */
+t('packsPerBoxOf: 규격 표기 우선, 없으면 단가로 역산', () => {
+  const f = r => FactoryPnl.packsPerBoxOf(r);
+  assert.strictEqual(f({ name: '앙호두 전용반죽(5kg*3ea)', qty: 3, supply: 196364 }), 3, '품명 규격');
+  assert.strictEqual(f({ name: '앙호두 전용반죽 [5kg x 4ea]', qty: 1, supply: 0 }), 4);
+  assert.strictEqual(f({ name: '앙호두 전용반죽', qty: 1, supply: 86364 }), 4, 'ANG00266 = 4봉 20kg (역산)');
+  assert.strictEqual(f({ name: '앙호두 전용반죽', qty: 1, supply: 65455 }), 3, '역산 3봉');
+  assert.strictEqual(f({}), 1, '알 수 없으면 1 — 과대계상보다 과소가 낫다');
+  assert.strictEqual(f({ name: '', qty: 1, supply: 999999999 }), 1, '터무니없는 역산값은 버린다');
+});
+
+t('표준원가는 박스 고정분 + 봉당 변동분 — 3봉/4봉이 섞여도 맞는다', () => {
+  assert.strictEqual(PNL_SUBMAT_PER_BOX + 3 * PNL_SUBMAT_PER_PACK, 3864.5, '시트의 15kg 박스 부자재비');
+  assert.strictEqual(PNL_SUBMAT_PER_BOX + 4 * PNL_SUBMAT_PER_PACK, 4326, '20kg 박스는 봉지·보냉팩이 하나씩 더');
+  assert.strictEqual(PNL_RAW_PER_PACK * 3, 37164, '시트의 15kg 박스 원재료비');
   assert.strictEqual(jun.subMatSrc, 'sheet', '6월은 PE봉투 실투입이 있어 그쪽이 이긴다');
-  const one = FactoryPnl.build({
-    fgItems: fixture.fgItems,
-    mbRows: [{ date: '2026-09-03', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 120, supply: 7854600 }],
-  })[0];
-  assert.strictEqual(one.subMat, 120 * 3864);
-  assert.strictEqual(one.subMatSrc, 'perbox');
+
+  const box4 = FactoryPnl.build({ fgItems: fixture.fgItems,
+    mbRows: [{ date: '2026-09-03', code: 'ANG00266', name: '앙호두 전용반죽', qty: 100, supply: 8636400 }] })[0];
+  assert.strictEqual(box4.mbQty, 100);
+  assert.strictEqual(box4.mbPacks, 400, '4봉 × 100박스');
+  assert.strictEqual(box4.subMat, 100 * 2480 + 400 * 461.5);
+  assert.strictEqual(box4.rawMat, 400 * PNL_RAW_PER_PACK);
+  assert.strictEqual(box4.rawMatSrc, 'perbox');
+  assert.strictEqual(box4.freight, 100 * PNL_FREIGHT_PER_BOX, '택배비만 규격 무관 박스당 정액');
+
+  const box3 = FactoryPnl.build({ fgItems: fixture.fgItems,
+    mbRows: [{ date: '2026-09-03', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 100, supply: 6545500 }] })[0];
+  assert.strictEqual(box3.mbPacks, 300);
+  assert.strictEqual(box3.subMat, 100 * 2480 + 300 * 461.5);
+  assert.ok(box4.rawMat > box3.rawMat, '같은 박스수라도 4봉이 원재료를 더 쓴다');
+  assert.strictEqual(box4.freight, box3.freight, '택배비는 같다');
 });
 
 t('출고가 있으면 박스수 × 단가로 떨어진다 (마켓봄 배송비보다 우선)', () => {
