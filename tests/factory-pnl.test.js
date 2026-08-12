@@ -118,6 +118,10 @@ const fixture = {
     ['PO-1', '2026-05-28', 'a@b', 'V1', 'RM003', '믹스', 500, 'kg', 2000, 1000000, '2026-06-02', '', '', '', '', '', '', '', '수령완료'],
     ['PO-2', '2026-06-15', 'a@b', 'V1', 'RM001', '계란', 100, 'kg', 5000, 500000, '', '', '', '', '', '', '', '', '주문완료'],
     ['PO-3', '2026-06-18', 'a@b', 'V1', 'RM003', '믹스', 999, 'kg', 2000, 9999999, '2026-06-19', '', '', '', '', '', '', '', '삭제'],
+    ['PO-4', '2026-06-04', 'a@b', 'V2', 'PK001', 'PE봉투', 2000, 'ea', 150, 300000, '2026-06-05', '', '', '', '', '', '', '', '수령완료'],
+    ['PO-5', '2026-06-06', 'a@b', 'V3', 'SP001', '위생장갑', 20, 'box', 6000, 120000, '2026-06-07', '', '', '', '', '', '', '', '수령완료'],
+    ['PO-6', '2026-06-08', 'a@b', 'V9', 'ZZZ999', '정체불명', 1, 'ea', 50000, 50000, '2026-06-08', '', '', '', '', '', '', '', '수령완료'],
+    ['PO-7', '2026-07-09', 'a@b', 'V1', 'RM003', '믹스', 400, 'kg', 2000, 800000, '2026-07-10', '', '', '', '', '', '', '', '수령완료'],
   ],
   procs: [
     // [3]stepType [4]usedLotIds [5]stepData [11]completedAt
@@ -126,19 +130,35 @@ const fixture = {
     ['WO1', '3', '가열', 'heat', '', '{"temp":180}', '', '', '', '', '완료', '2026-06-08', 'w@a'],       // input 아님
     ['WO1', '4', '계량', 'input', 'LOT-없음', '{"inputQty":50}', '', '', '', '', '완료', '2026-06-08', 'w@a'], // 미해석
     ['WO1', '5', '계량', 'input', 'RM-003-A', '깨진JSON{', '', '', '', '', '완료', '2026-06-08', 'w@a'],   // 파싱 실패
+    ['WO1', '6', '포장', 'input', 'PK-001-A', '{"inputQty":500}', '', '', '', '', '완료', '2026-06-09', 'w@a'], // 부재료
   ],
   rmItems: [
-    // [0]code [1]name [4]unit [13]매입단가
+    // [0]code [1]name [4]unit [5]category [13]매입단가
     ['RM003', '마미만쥬믹스', '', '10kg/포대', 'kg', '식자재', '', '', '', '', '', '', '', 2000],
     ['RM001', '계란', '', '30알/판', 'kg', '식자재', '', '', '', '', '', '', '', ''],                     // 단가 미입력
+    ['PK001', 'PE 봉투', '', '', 'ea', '포장재', '', '', '', '', '', '', '', 150],                        // 부재료
   ],
-  rmLots: [['RM-003-A', 'RM003'], ['RM-001-A', 'RM001']],
+  // [0]lotId [1]itemCode [4]총량 [10]개별수 — 폐기 1개당 수량 = 총량 / 개별수
+  rmLots: [
+    ['RM-003-A', 'RM003', '마미만쥬믹스', '곰표', 500, 'kg', '2026-05-01', '2027-05-01', 200, '사용중', 50],
+    ['RM-001-A', 'RM001', '계란', '', 60, 'kg', '', '', 60, '사용중', 40],
+    ['PK-001-A', 'PK001', 'PE 봉투', '', 5000, 'ea', '', '', 4500, '사용중', 5000],
+  ],
+  // [0]indivId [1]lotId [2]itemCode [3]status [4]qty/dt — 폐기되면 [4]가 폐기일시로 덮인다
+  rmIndiv: [
+    ['RM-003-A-01', 'RM-003-A', 'RM003', '폐기', '2026-06-15 10:00:00', '폐기:곰팡이'],
+    ['RM-003-A-02', 'RM-003-A', 'RM003', '사용중', 10, ''],
+    ['RM-003-A-03', 'RM-003-A', 'RM003', '폐기', '', '날짜 없음 → 제외'],
+  ],
+  spItems: [['SP001', '위생장갑', '', 'ea', '']],
+  mbDelivery: { '2026-06': 130000, '2026-07': 94500, '2026-08': 7000 },
   manual: [
     ['2026-06', '노무비', 9525688, '2인'],
     ['2026-06', '임차료·관리비', '2,135,250', ''],       // 콤마 포함도 읽힌다
     ['2026-06', '공과금(전기·가스·수도)', 1000000, ''],   // 둘이 합쳐 제조경비
     ['2026-06', '알수없는항목', 999999, ''],              // 정의 밖 항목은 무시
     ['2026-07', '노무비', '', '지웠음'],                  // 빈 칸 = 수기 해제 → ERP 값으로 되돌아간다
+    ['2026-06', '택배비', 200000, '냉동택배'],
   ],
   // 마켓봄 반죽 실매출 — supply = 공급가(VAT 제외)
   mbRows: [
@@ -155,6 +175,7 @@ const fixture = {
     { period: '2026-07', 섹션: '매출원가', 관리계정: '재료비',       표준계정: '재료비',   실현액: 5000000, 예정액: '',      손익포함: 'Y' }, // 재료비는 공장 시트가 정본
     { period: '2026-07', 섹션: '판관비',   관리계정: '인건비(본사)', 표준계정: '급여',     실현액: 8441431, 예정액: '',      손익포함: 'Y' }, // 판관비 제외
     { period: '2026-07', 섹션: '매출원가', 관리계정: '공장경비',     표준계정: '제조경비', 실현액: 9999999, 예정액: '',      손익포함: 'N' }, // 손익 제외 플래그
+    { period: '2026-07', 섹션: '매출원가', 관리계정: '택배비',       표준계정: '지급수수료(물류)', 실현액: 450000, 예정액: '', 손익포함: 'Y' },
   ],
 };
 
@@ -163,7 +184,9 @@ const jun = rows.find(r => r.ym === '2026-06');
 const jul = rows.find(r => r.ym === '2026-07');
 
 t('월 버킷은 오름차순, 데이터 있는 달만', () => {
-  assert.deepStrictEqual(rows.map(r => r.ym), ['2026-06', '2026-07']);
+  assert.deepStrictEqual(rows.map(r => r.ym), ['2026-06', '2026-07', '2026-08']);
+  // 08월은 마켓봄 배송비만 있는 달 — 값이 하나라도 있으면 버킷이 생긴다
+  assert.strictEqual(rows[2].prodPacks, 0);
 });
 
 t('생산량 = 유효 LOT(폐기·삭제 제외), kg 은 봉 환산', () => {
@@ -224,16 +247,16 @@ t('matchReport: 무엇을 공장 매출로 세는지 화면에 내보낼 수 있
 });
 
 t('재료비 = 실투입 kg × 매입단가 · 미해석/비-input/깨진JSON 제외', () => {
-  assert.strictEqual(jun.matUsed, 300 * 2000);     // 계란 90kg 은 단가 0 → 0원
+  assert.strictEqual(jun.rawUsed, 300 * 2000);     // 계란 90kg 은 단가 0 → 0원
   assert.strictEqual(jun.noCostKg, 90);
-  assert.strictEqual(jun.mats.length, 2);
+  assert.strictEqual(jun.mats.length, 3);          // 믹스·계란·PE봉투
   const mix = jun.mats.find(m => m.code === 'RM003');
   assert.strictEqual(mix.qty, 300);                // 깨진 JSON 행은 안 더해졌다
   assert.strictEqual(mix.amount, 600000);
 });
 
 t('실매입 = 구매주문 totalAmt · 귀속은 수령일 우선 · 삭제 제외', () => {
-  assert.strictEqual(jun.matBuy, 1500000);         // PO-1(수령 6/2) + PO-2(주문 6/15), PO-3 삭제
+  assert.strictEqual(jun.rawBuy, 1500000);         // PO-1(수령 6/2) + PO-2(주문 6/15), PO-3 삭제
   assert.strictEqual(rows.find(r => r.ym === '2026-05'), undefined);   // 주문일 5/28 은 수령일에 밀렸다
 });
 
@@ -242,11 +265,8 @@ t('수기가 ERP 결산을 이긴다 · 제조경비 2항목은 합산', () => {
   assert.strictEqual(jun.laborSrc, 'manual');
   assert.strictEqual(jun.overhead, 2135250 + 1000000);
   assert.strictEqual(jun.overheadSrc, 'manual');
-  const cost = 600000 + 9525688 + 3135250;
-  assert.strictEqual(jun.cost, cost);
-  assert.strictEqual(jun.profit, jun.mbRevenue - cost);
   assert.strictEqual(Math.round(jun.marginPct * 10) / 10, Math.round(jun.profit / jun.revenue * 1000) / 10);
-  assert.strictEqual(Math.round(jun.unitCost), Math.round(cost / 104));
+  assert.strictEqual(Math.round(jun.unitCost), Math.round(jun.cost / 104));
 });
 
 t('수기가 없거나 비면 ERP 결산 매출원가를 쓴다 (판관비·손익제외는 안 쓴다)', () => {
@@ -266,12 +286,12 @@ t('매출 0인 달은 이익률 null (0으로 나누지 않는다)', () => {
 t('빈 입력·null 행에도 안 터진다', () => {
   assert.deepStrictEqual(FactoryPnl.build({}), []);
   assert.deepStrictEqual(FactoryPnl.build(), []);
-  assert.deepStrictEqual(FactoryPnl.build({ fgLots: [null, [], ['x']], ships: [null], procs: [null], pos: [null], manual: [null], mbRows: [null], erpLines: [null] }), []);
+  assert.deepStrictEqual(FactoryPnl.build({ fgLots: [null, [], ['x']], ships: [null], procs: [null], pos: [null], manual: [null], mbRows: [null], erpLines: [null], rmIndiv: [null], spItems: [null], mbDelivery: null }), []);
 });
 
 t('recent: 최근 N개월 절단, 0 이면 전체', () => {
-  assert.deepStrictEqual(FactoryPnl.recent(rows, 1).map(r => r.ym), ['2026-07']);
-  assert.deepStrictEqual(FactoryPnl.recent(rows, 0).map(r => r.ym), ['2026-06', '2026-07']);
+  assert.deepStrictEqual(FactoryPnl.recent(rows, 1).map(r => r.ym), ['2026-08']);
+  assert.deepStrictEqual(FactoryPnl.recent(rows, 0).map(r => r.ym), ['2026-06', '2026-07', '2026-08']);
 });
 
 /* ── 화면 렌더 스모크 — 렌더 중 예외는 '버튼이 안 눌린다'로만 보여서 잡기 어렵다 ── */
@@ -335,6 +355,70 @@ t('가산율이 급여대장 실측(2026-05~07)과 어긋나지 않는다', () =
   const measured = [0.1025, 0.1022, 0.1001];
   measured.forEach(r => assert.ok(Math.abs(r - PNL_EMPLOYER_INS_RATE) < 0.005,
     `실측 ${(r * 100).toFixed(2)}% 와 상수 ${(PNL_EMPLOYER_INS_RATE * 100).toFixed(1)}% 가 0.5%p 넘게 벌어졌다`));
+});
+
+/* ── 원가 세분화 — 원재료 / 부재료 / 소모품 / 폐기 / 택배비 ── */
+t('원재료와 부재료는 품목 분류(category)로 갈린다', () => {
+  assert.strictEqual(jun.rawMat, 300 * 2000, '믹스만 원재료 — 계란은 단가 미입력이라 0');
+  assert.strictEqual(jun.rawMatSrc, 'sheet');
+  assert.strictEqual(jun.subMat, 500 * 150, 'PE봉투 = 포장재 → 부재료');
+  assert.strictEqual(jun.subMatSrc, 'sheet');
+  const kinds = Object.fromEntries(jun.mats.map(m => [m.code, m.kind]));
+  assert.strictEqual(kinds.RM003, '원재료');
+  assert.strictEqual(kinds.PK001, '부재료');
+});
+
+t('소모품비 = 구매주문 중 소모품품목 (투입기록이 없으니 산 달에 잡힌다)', () => {
+  assert.strictEqual(jun.supplies, 120000);
+  assert.strictEqual(jun.suppliesSrc, 'purchase');
+});
+
+t('품목 마스터에 없는 매입은 어느 원가에도 안 들어가고 따로 남는다', () => {
+  assert.strictEqual(jun.unknownBuy, 50000);
+  assert.strictEqual(jun.matBuy, 1500000 + 300000 + 120000 + 50000, '실매입 총액은 전부 합산');
+});
+
+t('폐기손실 = 원재료 폐기분만 (완제품 폐기는 이중계상이라 제외)', () => {
+  assert.strictEqual(jun.scrapQty, 10, 'LOT 총량 500kg ÷ 개별 50개 = 개당 10kg');
+  assert.strictEqual(jun.scrap, 10 * 2000);
+  assert.strictEqual(jun.scrapSrc, 'sheet');
+  assert.strictEqual(jun.fgScrapPacks, 50, '완제품 폐기는 물량 지표로만 남는다');
+  assert.ok(!FactoryPnl.LINES.some(L => L.key === 'fgScrapPacks'), '완제품 폐기는 원가 줄이 아니다');
+});
+
+t('택배비 — 수기 > ERP 운반비 > 마켓봄 배송비', () => {
+  assert.strictEqual(jun.freight, 200000);
+  assert.strictEqual(jun.freightSrc, 'manual', '수기가 마켓봄 배송비를 이긴다');
+  assert.strictEqual(jun.mbDelivery, 130000, '마켓봄 배송비는 따로 들고만 있는다');
+  assert.strictEqual(jul.freight, 450000);
+  assert.strictEqual(jul.freightSrc, 'erp', "수기가 없으면 ERP 결산의 '택배비' 계정");
+  const aug = rows.find(r => r.ym === '2026-08');
+  assert.strictEqual(aug.freight, 7000);
+  assert.strictEqual(aug.freightSrc, 'marketbom', '둘 다 없으면 마켓봄 배송비');
+});
+
+t('투입기록이 없는 달은 매입 기준으로 떨어지고 그렇다고 표시한다', () => {
+  assert.strictEqual(jul.rawMat, 800000);
+  assert.strictEqual(jul.rawMatSrc, 'purchase');
+  assert.strictEqual(jul.subMat, 0);
+  assert.strictEqual(jul.subMatSrc, 'none');
+});
+
+t('원가 합계 = LINES 7줄의 합 (빠뜨린 줄이 없다)', () => {
+  const byHand = 600000 + 75000 + 120000 + 20000 + 200000 + 9525688 + 3135250;
+  assert.strictEqual(jun.cost, byHand);
+  assert.strictEqual(jun.cost, FactoryPnl.LINES.reduce((s, L) => s + (jun[L.key] || 0), 0));
+  assert.strictEqual(jun.profit, jun.revenue - byHand);
+  assert.strictEqual(jun.matUsed, 675000, '재료비 소계 = 원재료 + 부재료');
+});
+
+t('LINES 정의가 온전하다 — 키·라벨·색이 다 있고 중복이 없다', () => {
+  const keys = FactoryPnl.LINES.map(L => L.key);
+  assert.strictEqual(new Set(keys).size, keys.length, '키 중복');
+  FactoryPnl.LINES.forEach(L => {
+    assert.ok(L.label && /^#[0-9a-f]{6}$/i.test(L.color), `${L.key} 라벨·색 누락`);
+  });
+  assert.deepStrictEqual(keys, ['rawMat', 'subMat', 'supplies', 'scrap', 'freight', 'labor', 'overhead']);
 });
 
 console.log(ok.map(n => '  ✓ ' + n).join('\n'));

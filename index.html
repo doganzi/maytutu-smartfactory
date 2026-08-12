@@ -7077,8 +7077,12 @@ Screens['wo-pdfs'] = async () => {
 const PNL_SHEET = '공장손익';
 const PNL_HEADER = ['period', '항목', '금액', '메모', '등록자', '등록일시'];
 /** 수기 입력 항목 — 노무비 1 + 제조경비 2(사용자 확정 2026-08-12: 임차료·관리비 / 공과금) */
-const PNL_MANUAL_ITEMS = ['노무비', '임차료·관리비', '공과금(전기·가스·수도)'];
+const PNL_MANUAL_ITEMS = ['노무비', '임차료·관리비', '공과금(전기·가스·수도)', '택배비'];
 const PNL_OVERHEAD_ITEMS = ['임차료·관리비', '공과금(전기·가스·수도)', '제조경비'];   // '제조경비' = 구 단일항목 호환
+/** 부재료·포장재 판정 — `원재료품목[5] category`. ERP rawInventory 와 같은 규칙을 쓴다(분류가 갈리면 안 된다). */
+const PNL_SUBMAT_RE = /포장|부자재|용기|박스|봉투|라벨|스티커|테이프|필름|캡|뚜껑|아이스|보냉/;
+/** 택배·운반비 계정 — ERP 결산 매출원가에서 이 이름이면 택배비로 본다. */
+const PNL_FREIGHT_RE = /택배|운반|운송|배송|물류/;
 const PNL_KG_PER_PACK = 5;         // 1봉 = 5kg (포장 단위 고정 — CLAUDE.md 표준 배치)
 const PNL_DEFAULT_PRICE = 21591;   // 원/봉 공급가(VAT 제외) = 마켓봄 판매가 23,750 ÷ 1.1
 /** 사업주 부담 4대보험 추정 가산율 — 급여대장 '지급합계' 에 곱해 노무비를 만든다.
@@ -7162,13 +7166,25 @@ const FactoryPnl = {
     return { total: all.size, matched: [...hit.values()], fgNames };
   },
 
+  /** 원가 구성 — 화면 표시 순서·색. 여기 한 줄 추가하면 표·막대·합계가 같이 따라온다. */
+  LINES: [
+    { key: 'rawMat',   label: '원재료비',        color: '#3d85c6' },
+    { key: 'subMat',   label: '부재료·포장재비', color: '#6aa84f' },
+    { key: 'supplies', label: '소모품비',        color: '#a5b4c2' },
+    { key: 'scrap',    label: '폐기손실',        color: '#cc4125' },
+    { key: 'freight',  label: '택배비',          color: '#e69138' },
+    { key: 'labor',    label: '노무비',          color: '#f1c232' },
+    { key: 'overhead', label: '제조경비',        color: '#8e7cc3' },
+  ],
+
   /** 월별 손익 집계 — 시트 rows 만 받는 순수 함수. 테스트가 이 함수를 그대로 돌린다. */
   build(src) {
     const S = src || {};
     const fgItems = S.fgItems || [], fgLots = S.fgLots || [], ships = S.ships || [],
           pos = S.pos || [], procs = S.procs || [], rmItems = S.rmItems || [],
-          rmLots = S.rmLots || [], manual = S.manual || [],
-          mbRows = S.mbRows || [], erpLines = S.erpLines || [];
+          rmLots = S.rmLots || [], rmIndiv = S.rmIndiv || [], spItems = S.spItems || [],
+          manual = S.manual || [], mbRows = S.mbRows || [], mbDelivery = S.mbDelivery || {},
+          erpLines = S.erpLines || [];
 
     const fgActive = fgItems.filter(r => r && r[0] && r[7] !== '비활성');
     const fgNames = fgActive.map(r => this.normName(r[1] || r[0])).filter(Boolean);
@@ -7179,17 +7195,23 @@ const FactoryPnl = {
     }]));
     const rmMeta = new Map(rmItems.filter(r => r && r[0]).map(r => [r[0], {
       name: r[1] || r[0], unit: r[4] || 'kg', price: this._num(r[13]),
+      sub: PNL_SUBMAT_RE.test(String(r[5] || '')),                   // 부재료·포장재 여부 = category
     }]));
+    const spCodes = new Set(spItems.filter(r => r && r[0]).map(r => r[0]));
     const codeByFgLot = new Map(fgLots.filter(l => l && l[0]).map(l => [l[0], l[1]]));
     const codeByRmLot = new Map(rmLots.filter(l => l && l[0]).map(l => [l[0], l[1]]));
+    // 원재료 LOT 개별 1개당 수량 — 폐기 손실 환산용(개별 시트는 폐기되면 [4]가 날짜로 덮여 수량을 잃는다)
+    const perUnitByLot = new Map(rmLots.filter(l => l && l[0]).map(l =>
+      [l[0], this._num(l[4]) / (parseInt(l[10], 10) || 1)]));
 
     const M = {};
     const at = ym => (M[ym] = M[ym] || { ym, prodPacks: 0, shipPacks: 0, estRevenue: 0, mbRevenue: 0,
-      mbQty: 0, matUsed: 0, matBuy: 0, manLabor: null, manOh: null, erpLabor: null, erpOh: null,
+      mbQty: 0, rawUsed: 0, subUsed: 0, rawBuy: 0, subBuy: 0, supplies: 0, unknownBuy: 0,
+      scrap: 0, scrapQty: 0, fgScrapPacks: 0, mbDelivery: 0, erpFreight: null,
+      manLabor: null, manOh: null, manFreight: null, erpLabor: null, erpOh: null,
       noPricePacks: 0, noCostKg: 0, byMat: {} });
 
     // 1) 생산량 — 완제품LOT [3]qty·[4]unit·[5]prodDate. 폐기·삭제·채번예약만 제외
-    //    (출하완료·소진은 '그 달에 만든 것'이므로 생산량에 남는다)
     const PROD_DEAD = new Set(['폐기', '삭제', '채번예약']);
     for (const l of fgLots) {
       if (!l || !l[0] || PROD_DEAD.has(l[9])) continue;
@@ -7206,7 +7228,7 @@ const FactoryPnl = {
       const b = at(ym);
       b.shipPacks += packs;
       if (meta.price > 0) b.estRevenue += packs * meta.price;
-      else b.noPricePacks += packs;                                  // 단가 미입력 → 추정 매출에서 빠진 물량
+      else b.noPricePacks += packs;
     }
 
     // 3) 마켓봄 반죽 실매출 — supply = 공급가(VAT 제외). 우리 완제품 품명과 맞는 행만.
@@ -7217,8 +7239,12 @@ const FactoryPnl = {
       b.mbRevenue += this._num(r.supply);
       b.mbQty += this._num(r.qty);
     }
+    for (const [ym, v] of Object.entries(mbDelivery || {})) {           // 마켓봄 배송비(월별)
+      if (this.ym(ym)) at(this.ym(ym)).mbDelivery += this._num(v);
+    }
 
-    // 4) 재료비(발생) — 공정기록 stepType='input' 의 stepData.inputQty(kg) × 매입단가
+    // 4) 실투입(발생) — 공정기록 stepType='input' 의 stepData.inputQty(kg) × 매입단가.
+    //    자재의 category 로 원재료 / 부재료·포장재를 가른다.
     for (const p of procs) {
       if (!p || p[3] !== 'input') continue;
       const ym = this.ym(p[11]); if (!ym) continue;
@@ -7226,33 +7252,59 @@ const FactoryPnl = {
       try { qty = this._num(JSON.parse(p[5] || '{}').inputQty); } catch (e) { qty = 0; }
       if (qty <= 0) continue;
       const code = this.matOf(p[4], codeByRmLot);
-      if (!code) continue;                                           // 미해석 LOT 제외(ERP 와 동일)
+      if (!code) continue;
       const m = rmMeta.get(code) || {}, b = at(ym), amt = qty * (m.price || 0);
-      b.matUsed += amt;
-      if (!(m.price > 0)) b.noCostKg += qty;                         // 단가 미입력 자재 투입량(kg)
-      const g = (b.byMat[code] = b.byMat[code] || { code, name: m.name || code, unit: m.unit || 'kg', qty: 0, price: m.price || 0, amount: 0 });
+      if (m.sub) b.subUsed += amt; else b.rawUsed += amt;
+      if (!(m.price > 0)) b.noCostKg += qty;
+      const g = (b.byMat[code] = b.byMat[code] || { code, name: m.name || code, unit: m.unit || 'kg',
+        kind: m.sub ? '부재료' : '원재료', qty: 0, price: m.price || 0, amount: 0 });
       g.qty += qty; g.amount += amt;
     }
 
-    // 5) 실매입(현금·참고) — 구매주문 [9]totalAmt, 귀속 = 수령일[10] 없으면 주문일[1]
+    // 5) 매입(현금) — 구매주문 [4]itemCode 로 원재료/부재료/소모품을 가른다.
+    //    귀속 = 수령일[10] 없으면 주문일[1]. 실투입 기록이 없는 항목(소모품·포장재)의 폴백이 된다.
     for (const o of pos) {
       if (!o || !o[0] || o[18] === '삭제') continue;
       const ym = this.ym(o[10]) || this.ym(o[1]); if (!ym) continue;
-      at(ym).matBuy += this._num(o[9]) || (this._num(o[6]) * this._num(o[8]));
+      const amt = this._num(o[9]) || (this._num(o[6]) * this._num(o[8]));
+      if (!amt) continue;
+      const b = at(ym), code = o[4], m = rmMeta.get(code);
+      if (m) { if (m.sub) b.subBuy += amt; else b.rawBuy += amt; }
+      else if (spCodes.has(code)) b.supplies += amt;
+      else b.unknownBuy += amt;                                        // 품목 마스터에 없는 매입
     }
 
-    // 6) 노무비·제조경비 — 수기('공장손익' 시트). 같은 달·같은 항목이 여러 행이면 합산.
+    // 6) 원재료 폐기 손실 — 원재료개별 [3]status='폐기', [4]=폐기일시(폐기 시 수량이 날짜로 덮인다).
+    //    ⚠️ 버려진 원재료는 공정 input 에 안 잡히므로 재료비에서 통째로 빠져 있다 → 따로 더한다.
+    //    ⚠️ 완제품 폐기는 여기 넣지 않는다 — 그 원재료는 이미 실투입으로 계상됐다(이중계상).
+    for (const iv of rmIndiv) {
+      if (!iv || iv[3] !== '폐기') continue;
+      const ym = this.ym(iv[4]); if (!ym) continue;
+      const code = iv[2] || codeByRmLot.get(iv[1]) || '';
+      const m = rmMeta.get(code) || {};
+      const q = perUnitByLot.get(iv[1]) || 0;
+      const b = at(ym);
+      b.scrapQty += q;
+      b.scrap += q * (m.price || 0);
+    }
+    for (const l of fgLots) {                                          // 완제품 폐기 = 물량 지표만
+      if (!l || !l[0] || l[9] !== '폐기') continue;
+      const ym = this.ym(l[5]); if (!ym) continue;
+      at(ym).fgScrapPacks += this.toPacks(l[3], l[4], (fgMeta.get(l[1]) || {}).packsPerBox);
+    }
+
+    // 7) 수기('공장손익' 시트) — 금액 빈 칸은 '수기값 없음'(0 이 ERP 결산을 이기지 않게)
     for (const r of manual) {
       if (!r) continue;
       const ym = this.ym(r[0]); if (!ym) continue;
-      if (String(r[2] ?? '').trim() === '') continue;   // 빈 칸 = 수기값 없음(0 이 ERP 결산을 이기지 않게)
+      if (String(r[2] ?? '').trim() === '') continue;
       const b = at(ym), amt = this._num(r[2]), item = String(r[1] || '').trim();
       if (item === '노무비') b.manLabor = (b.manLabor || 0) + amt;
+      else if (item === '택배비') b.manFreight = (b.manFreight || 0) + amt;
       else if (PNL_OVERHEAD_ITEMS.includes(item)) b.manOh = (b.manOh || 0) + amt;
     }
 
-    // 7) 노무비·제조경비 — ERP 재무DB Closing_Line(매출원가). 수기가 없는 달만 쓴다.
-    //    손익포함='N'(자산·채권채무·자금제외)은 제외. 금액 = 실현액 + 예정액(ERP 결산 화면과 동일).
+    // 8) ERP 재무DB Closing_Line(매출원가) — 수기가 없는 달만 쓴다. 손익포함='N' 제외.
     for (const l of erpLines) {
       if (!l || String(l['손익포함'] || '').toUpperCase() === 'N') continue;
       if (String(l['섹션'] || '') !== '매출원가') continue;
@@ -7263,12 +7315,28 @@ const FactoryPnl = {
       const b = at(ym);
       if (/노무|공장\s*인건/.test(nm)) b.erpLabor = (b.erpLabor || 0) + amt;
       else if (/제조경비|공장\s*경비/.test(nm)) b.erpOh = (b.erpOh || 0) + amt;
+      else if (PNL_FREIGHT_RE.test(nm)) b.erpFreight = (b.erpFreight || 0) + amt;
     }
 
     return Object.values(M).sort((a, b) => a.ym < b.ym ? -1 : 1).map(b => {
       // 매출 — 마켓봄 실적이 있으면 실적, 없으면 출하 × 단가 추정
       if (b.mbRevenue > 0) { b.revenue = b.mbRevenue; b.revenueSrc = 'marketbom'; }
       else { b.revenue = b.estRevenue; b.revenueSrc = b.estRevenue > 0 ? 'estimate' : 'none'; }
+
+      // 원재료·부재료 — 실투입 기록이 있으면 발생 기준, 없으면 매입(현금) 기준
+      if (b.rawUsed > 0) { b.rawMat = b.rawUsed; b.rawMatSrc = 'sheet'; }
+      else { b.rawMat = b.rawBuy; b.rawMatSrc = b.rawBuy > 0 ? 'purchase' : 'none'; }
+      if (b.subUsed > 0) { b.subMat = b.subUsed; b.subMatSrc = 'sheet'; }
+      else { b.subMat = b.subBuy; b.subMatSrc = b.subBuy > 0 ? 'purchase' : 'none'; }
+      b.suppliesSrc = b.supplies > 0 ? 'purchase' : 'none';            // 소모품은 투입 기록이 없다
+      b.scrapSrc = b.scrap > 0 ? 'sheet' : 'none';
+
+      // 택배비 — 수기 > ERP 결산 운반비 > 마켓봄 배송비
+      if (b.manFreight != null) { b.freight = b.manFreight; b.freightSrc = 'manual'; }
+      else if (b.erpFreight != null) { b.freight = b.erpFreight; b.freightSrc = 'erp'; }
+      else if (b.mbDelivery > 0) { b.freight = b.mbDelivery; b.freightSrc = 'marketbom'; }
+      else { b.freight = 0; b.freightSrc = 'none'; }
+
       // 노무비·제조경비 — 수기가 이긴다(사람이 고친 값). 없으면 ERP 결산.
       if (b.manLabor != null) { b.labor = b.manLabor; b.laborSrc = 'manual'; }
       else if (b.erpLabor != null) { b.labor = b.erpLabor; b.laborSrc = 'erp'; }
@@ -7277,7 +7345,9 @@ const FactoryPnl = {
       else if (b.erpOh != null) { b.overhead = b.erpOh; b.overheadSrc = 'erp'; }
       else { b.overhead = 0; b.overheadSrc = 'none'; }
 
-      const cost = b.matUsed + b.labor + b.overhead;
+      b.matBuy = b.rawBuy + b.subBuy + b.supplies + b.unknownBuy;      // 실매입 총액(참고)
+      b.matUsed = b.rawMat + b.subMat;                                 // 재료비 소계
+      const cost = this.LINES.reduce((s, L) => s + (b[L.key] || 0), 0);
       b.prodKg = Math.round(b.prodPacks * PNL_KG_PER_PACK * 10) / 10;
       b.cost = cost;
       b.profit = b.revenue - cost;
@@ -7298,9 +7368,11 @@ const FactoryPnl = {
       const r = await fetch(ERP_LOGI_API, { headers: { Authorization: `Bearer ${State.token}` } });
       if (!r.ok) return { rows: [], err: `ERP ${r.status}` };
       const j = await r.json();
-      return { rows: (j.marketbom && j.marketbom.rows) || [], updated: j.marketbom && j.marketbom.updated_at };
+      return { rows: (j.marketbom && j.marketbom.rows) || [],
+               delivery: (j.marketbom && j.marketbom.deliveryByMonth) || {},
+               updated: j.marketbom && j.marketbom.updated_at };
     } catch (e) {
-      return { rows: [], err: e.message };   // CORS·오프라인 — 화면에서 '추정' 배지로 드러난다
+      return { rows: [], delivery: {}, err: e.message };   // CORS·오프라인 — 화면에서 '추정' 배지로 드러난다
     }
   },
 
@@ -7335,6 +7407,7 @@ const PNL_SRC = {
   sheet:     ['공장 시트',  'var(--suc)'],
   erp:       ['ERP 결산',   'var(--suc)'],
   manual:    ['수기',       'var(--info)'],
+  purchase:  ['매입 기준',   'var(--warn)'],
   estimate:  ['추정',       'var(--warn)'],
   none:      ['없음',       'var(--err)'],
 };
@@ -7349,7 +7422,7 @@ Screens['pnl'] = async () => {
   $id('content').innerHTML = '<div style="padding:16px"><div class="fs-13 c-txt-l">손익 집계 중…</div></div>';
   try {
     showLoading();
-    const [fgItems, fgLots, ships, pos, procs, rmItems, rmLots, manual, mb, erp] = await Promise.all([
+    const [fgItems, fgLots, ships, pos, procs, rmItems, rmLots, rmIndiv, spItems, manual, mb, erp] = await Promise.all([
       SheetsAPI.getAll('완제품품목').catch(() => []),
       SheetsAPI.getAll('완제품LOT').catch(() => []),
       SheetsAPI.getAll('출하기록').catch(() => []),
@@ -7357,15 +7430,17 @@ Screens['pnl'] = async () => {
       SheetsAPI.getAll('공정기록').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
       SheetsAPI.getAll('원재료LOT').catch(() => []),
+      SheetsAPI.getAll('원재료개별').catch(() => []),        // 폐기 손실(폐기일·수량 환산)
+      SheetsAPI.getAll('소모품품목').catch(() => []),        // 소모품비 = 구매주문에서 가려낸다
       SheetsAPI.getAll(PNL_SHEET).catch(() => []),          // 없으면 [] — 첫 입력 때 자동 생성
-      FactoryPnl.fetchMarketbom(),                          // ERP 물류 API — 반죽 실매출
-      FactoryPnl.fetchErpClosing(),                         // ERP 재무DB — 인건비(공장)·공장경비
+      FactoryPnl.fetchMarketbom(),                          // ERP 물류 API — 반죽 실매출 + 배송비
+      FactoryPnl.fetchErpClosing(),                         // ERP 재무DB — 인건비(공장)·공장경비·운반비
     ]);
     State._pnl = {
       fgItems, manualRows: manual, mbErr: mb.err, mbUpdated: mb.updated, erpErr: erp.err,
       match: FactoryPnl.matchReport(mb.rows, fgItems),
-      rows: FactoryPnl.build({ fgItems, fgLots, ships, pos, procs, rmItems, rmLots, manual,
-                               mbRows: mb.rows, erpLines: erp.lines }),
+      rows: FactoryPnl.build({ fgItems, fgLots, ships, pos, procs, rmItems, rmLots, rmIndiv, spItems,
+                               manual, mbRows: mb.rows, mbDelivery: mb.delivery, erpLines: erp.lines }),
     };
     renderPnlBody();
   } catch (e) {
@@ -7425,6 +7500,10 @@ function renderPnlBody() {
   if (s.noCostKg > 0) warns.push(`투입 ${_pq(s.noCostKg)}kg 자재가 <b>매입단가 미입력</b> — 재료비가 과소 산정됩니다`);
   if (!(s.labor > 0)) warns.push(`<b>노무비 없음</b> — ERP 결산에도 수기에도 공장 인건비가 없습니다`);
   if (!(s.overhead > 0)) warns.push(`<b>제조경비 없음</b> — 임차료·관리비, 전기·가스·수도가 원가에 안 들어갔습니다`);
+  if (!(s.freight > 0)) warns.push(`<b>택배비 없음</b> — 반죽 배송비가 원가에 안 들어갔습니다`);
+  else if (s.freightSrc === 'marketbom') warns.push(`택배비가 <b>마켓봄 배송비(${_pw(s.freight)}원)</b>뿐입니다 — 냉동택배 실비가 따로 있으면 수기로 넣으세요`);
+  if (s.rawMatSrc === 'purchase') warns.push(`원재료비가 <b>매입 기준</b>입니다 — 그 달 공정 투입기록이 없어 산 금액으로 대신했습니다(재고 증감이 섞입니다)`);
+  if (s.unknownBuy > 0) warns.push(`품목 마스터에 없는 매입 <b>${_pw(s.unknownBuy)}원</b> — 원재료·소모품 어느 쪽에도 안 잡혔습니다`);
   if (s.revenueSrc !== 'marketbom' && s.shipPacks > 0 && s.prodPacks > 0 && s.shipPacks < s.prodPacks * 0.5) {
     warns.push(`출하량이 생산량의 절반 미만 — 출하기록 누락이면 매출이 실제보다 작게 나옵니다`);
   }
@@ -7467,11 +7546,9 @@ function renderPnlBody() {
     </div>`;
 
   // ── 원가 구성(선택 월) ──
-  const parts = [
-    { lb: '재료비', v: s.matUsed, c: '#3d85c6', src: 'sheet' },
-    { lb: '노무비', v: s.labor, c: '#e69138', src: s.laborSrc },
-    { lb: '제조경비', v: s.overhead, c: '#8e7cc3', src: s.overheadSrc },
-  ].filter(p => p.v > 0);
+  const parts = FactoryPnl.LINES
+    .map(L => ({ lb: L.label, v: s[L.key] || 0, c: L.color, src: s[L.key + 'Src'] }))
+    .filter(p => p.v > 0);
   const totCost = s.cost || 0;
   const costCard = `
     <div class="card mt-8">
@@ -7484,10 +7561,17 @@ function renderPnlBody() {
         <span><b>${_pw(p.v)}</b> <span class="fs-10 c-txt-l">${totCost > 0 ? Math.round(p.v / totCost * 100) + '%' : ''}</span></span>
       </div>`).join('') || '<div class="fs-12 c-txt-l">원가 데이터 없음</div>'}
       <div class="row between fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:6px">
-        <span>실매입(구매주문) <b>${_pw(s.matBuy)}원</b></span>
-        <span>vs 실투입 재료비 <b>${_pw(s.matUsed)}원</b></span>
+        <span>실매입(구매주문) 전체 <b>${_pw(s.matBuy)}원</b></span>
+        <span>vs 재료비(원+부재료) <b>${_pw(s.matUsed)}원</b></span>
       </div>
-      <div class="fs-10 c-txt-l mt-2">실매입=그 달 산 돈(현금) · 실투입=그 달 쓴 자재(발생). 차이는 재고 증감입니다 — 손익에는 실투입만 넣습니다.</div>
+      <div class="fs-10 c-txt-l mt-2">실매입=그 달 산 돈(현금) · 재료비=그 달 쓴 자재(발생). 차이는 재고 증감입니다.
+        ${s.unknownBuy > 0 ? `<span style="color:var(--warn)">품목 마스터에 없는 매입 ${_pw(s.unknownBuy)}원은 어느 항목에도 안 들어갔습니다.</span>` : ''}</div>
+      ${(s.fgScrapPacks > 0 || s.scrapQty > 0) ? `
+        <div class="row between fs-11 c-txt-l mt-4" style="border-top:1px solid var(--gray-l);padding-top:6px">
+          <span>원재료 폐기 <b>${_pq(s.scrapQty)}kg</b> · ${_pw(s.scrap)}원</span>
+          <span>완제품 폐기 <b>${_pq(s.fgScrapPacks)}봉</b></span>
+        </div>
+        <div class="fs-10 c-txt-l mt-2">완제품 폐기는 <b>원가에 또 넣지 않습니다</b> — 그 반죽을 만든 원재료는 이미 재료비에 잡혀 있습니다(이중계상). 매출로 이어지지 못한 물량으로만 봅니다.</div>` : ''}
     </div>`;
 
   // ── 자재별 재료비 ──
@@ -7500,7 +7584,7 @@ function renderPnlBody() {
             <span class="fs-13 fw-6">${m.name}</span>
             <span class="fs-13 fw-7">${_pw(m.amount)}원</span>
           </div>
-          <div class="fs-11 c-txt-l mt-2">${m.code} · 투입 ${_pq(m.qty)}${m.unit} × ${m.price > 0 ? m.price.toLocaleString() + '원/' + m.unit : '<span style="color:var(--warn)">단가 미입력</span>'}</div>
+          <div class="fs-11 c-txt-l mt-2">${m.code} · <b>${m.kind}</b> · 투입 ${_pq(m.qty)}${m.unit} × ${m.price > 0 ? m.price.toLocaleString() + '원/' + m.unit : '<span style="color:var(--warn)">단가 미입력</span>'}</div>
         </div>`).join('')}
     </div>` : '';
 
@@ -7529,7 +7613,12 @@ function pnlFootnote() {
       <div class="fs-11 c-txt-l" style="line-height:1.65">
         · <b>매출</b> ① <span style="color:var(--suc)">ERP 실매출</span> = 마켓봄 반죽 판매 <b>공급가</b> 실적(ERP 물류 원장).
           ② 실적이 없는 달만 <span style="color:var(--warn)">추정</span> = 출하기록 × 완제품 공급단가.<br>
-        · <b>재료비</b> = 공정기록의 실투입량(kg) × 원재료 <b>매입단가</b>(원/kg). 그 달에 실제로 쓴 자재만.<br>
+        · <b>원재료비 / 부재료·포장재비</b> = 공정기록 실투입량(kg) × 매입단가. 둘의 구분은 <b>원재료품목의 분류(category)</b>입니다.
+          투입기록이 없는 달은 <span style="color:var(--warn)">매입 기준</span>(구매주문)으로 대신합니다.<br>
+        · <b>소모품비</b> = 구매주문 중 소모품품목. 소모품은 공정 투입기록이 없어 <b>산 달에 잡힙니다</b>.<br>
+        · <b>폐기손실</b> = 원재료개별 폐기분 × 매입단가. 버려진 원재료는 공정에 안 들어가 재료비에서 빠지므로 따로 더합니다.
+          <b>완제품 폐기는 넣지 않습니다</b> — 그 원재료는 이미 재료비에 잡혀 있어 이중계상이 됩니다.<br>
+        · <b>택배비</b> ① 수기 ② ERP 결산 운반비 계정 ③ 마켓봄 배송비 순으로 씁니다.<br>
         · <b>노무비·제조경비</b> ① <span style="color:var(--info)">수기</span>가 있으면 그게 이깁니다.
           ② 없으면 <span style="color:var(--suc)">ERP 결산</span>의 매출원가 › 인건비(공장)·공장경비.<br>
         · <b>노무비 = 급여대장 지급합계 + 사업주 부담 4대보험(추정 +${(PNL_EMPLOYER_INS_RATE * 100).toFixed(1)}%)</b> —
@@ -7623,7 +7712,7 @@ function openPnlPriceEditor() {
 function openPnlCostEditor(period) {
   const ym = /^\d{4}-\d{2}$/.test(period || '') ? period : new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 7);
   const row = (State._pnl?.rows || []).find(r => r.ym === ym) || {};
-  const cur = { '노무비': row.manLabor, '임차료·관리비': null, '공과금(전기·가스·수도)': null };
+  const cur = { '노무비': row.manLabor, '임차료·관리비': null, '공과금(전기·가스·수도)': null, '택배비': row.manFreight };
   (State._pnl?.manualRows || []).forEach(r => {
     if (!r || FactoryPnl.ym(r[0]) !== ym) return;
     if (cur[r[1]] !== undefined) cur[r[1]] = FactoryPnl._num(r[2]);
@@ -7631,11 +7720,14 @@ function openPnlCostEditor(period) {
   const erpNote = [
     row.laborSrc === 'erp' ? `노무비 ${_pw(row.labor)}원` : '',
     row.overheadSrc === 'erp' ? `제조경비 ${_pw(row.overhead)}원` : '',
+    row.freightSrc === 'erp' ? `택배비 ${_pw(row.freight)}원` : '',
+    row.freightSrc === 'marketbom' ? `택배비(마켓봄 배송비) ${_pw(row.freight)}원` : '',
   ].filter(Boolean).join(' · ');
   const fields = [
     ['pnlc-labor', '노무비', '공장 인건비 (이상현·김수영)', cur['노무비']],
     ['pnlc-rent', '임차료·관리비', '공장 임대료 + 건물 관리비', cur['임차료·관리비']],
     ['pnlc-util', '공과금(전기·가스·수도)', '생산량에 따라 움직입니다', cur['공과금(전기·가스·수도)']],
+    ['pnlc-frt', '택배비', '반죽 냉동택배 · 운반비', cur['택배비']],
   ];
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
