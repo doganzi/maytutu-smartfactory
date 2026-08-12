@@ -183,6 +183,32 @@ t('isOurProduct: 규격 붙은 품명은 같은 상품, 다른 반죽은 남이�
   assert.ok(!FactoryPnl.isOurProduct('앙호두 전용반죽', []));   // 등록 품목이 없으면 아무것도 안 잡는다
 });
 
+/* 실데이터(마켓봄 78품목)에서 실제로 나온 오탐을 고정한다.
+   완제품 품명이 "앙호두" 거나 "앙호두(호두과자 전용반죽)"(괄호를 떼면 "앙호두") 이면
+   앞글자 일치로는 굿즈 7종이 공장 매출로 딸려 왔다 — 3종 → 10종. 정확 일치라 이제 0 이다. */
+t('앞글자 일치 금지 — 굿즈가 공장 매출로 딸려오면 안 된다', () => {
+  const GOODS = ['[출력]앙호두 명함', '앙호두 도장', '앙호두 카라티 (반팔/긴팔)', '앙호두 앞치마',
+                 '앙호두 모자 (여름용 매쉬소재)', '앙호두 거울', '[출력] 앙호두 종이쿠폰 - 일반지 500매'];
+  for (const fg of ['앙호두', '앙호두(호두과자 전용반죽)']) {
+    const names = [FactoryPnl.normName(fg)];
+    assert.strictEqual(FactoryPnl.normName(fg), '앙호두', '괄호를 떼면 "앙호두" 만 남는다');
+    GOODS.forEach(g => assert.ok(!FactoryPnl.isOurProduct(g, names), `${fg} 로 ${g} 가 잡히면 안 된다`));
+    assert.ok(!FactoryPnl.isOurProduct('앙호두 전용반죽', names),
+      '품명이 어긋나면 매출 0 + 경고로 드러나야 한다 — 조용히 부풀리는 것보다 낫다');
+  }
+});
+
+t('matchReport: 무엇을 공장 매출로 세는지 화면에 내보낼 수 있다', () => {
+  const fgItems = [['FG002', '앙호두 전용반죽', '', '봉', '', 6, '', '', 3]];
+  const rep = FactoryPnl.matchReport(fixture.mbRows, fgItems);
+  assert.strictEqual(rep.total, 4);
+  assert.deepStrictEqual([...new Set(rep.matched)], ['앙호두 전용반죽', '앙호두 전용반죽(5kg*3ea)']);
+  assert.deepStrictEqual(rep.fgNames, ['앙호두전용반죽']);
+  const none = FactoryPnl.matchReport(fixture.mbRows, [['FG002', '앙호두', '', '봉', '', 6, '', '', 3]]);
+  assert.strictEqual(none.matched.length, 0, '품명이 어긋나면 0 — 화면이 경고를 띄우는 신호');
+  assert.deepStrictEqual(FactoryPnl.matchReport(null, null), { total: 0, matched: [], fgNames: [] });
+});
+
 t('재료비 = 실투입 kg × 매입단가 · 미해석/비-input/깨진JSON 제외', () => {
   assert.strictEqual(jun.matUsed, 300 * 2000);     // 계란 90kg 은 단가 0 → 0원
   assert.strictEqual(jun.noCostKg, 90);

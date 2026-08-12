@@ -7131,11 +7131,28 @@ const FactoryPnl = {
     return String(s || '').replace(/[（(\[【].*?[)\]）】]/g, '').replace(/\s+/g, '').trim();
   },
 
-  /** 이 마켓봄 판매행이 우리 공장 생산품인가 — 완제품품목에 등록된 품명과만 맞춘다.
-      완제품을 새로 등록하면(예: 앙버터 호두과자) 코드 수정 없이 자동으로 잡힌다. */
+  /** 이 마켓봄 판매행이 우리 공장 생산품인가 — 완제품품목에 등록된 품명과 **정확히** 같을 때만.
+      완제품을 새로 등록하면(예: 앙버터 호두과자) 코드 수정 없이 자동으로 잡힌다.
+      ⚠️ 앞글자 일치(startsWith)로 하면 안 된다 — 실데이터로 확인한 사고:
+         완제품 품명이 "앙호두" 나 "앙호두(호두과자 전용반죽)"(괄호를 떼면 "앙호두") 이면
+         앞치마·모자·거울·명함·도장·카라티·쿠폰까지 **굿즈 7종이 공장 매출로 딸려 온다**(3종 → 10종).
+         품명이 안 맞으면 매출 0 + 경고로 드러나는 편이, 조용히 부풀려지는 것보다 낫다. */
   isOurProduct(name, fgNames) {
     const n = this.normName(name); if (!n) return false;
-    return fgNames.some(f => f && (n === f || n.startsWith(f)));
+    return fgNames.includes(n);
+  },
+
+  /** 매칭 진단 — 마켓봄 품목 중 몇 개가 우리 완제품으로 잡혔나. 0 이면 품명이 어긋난 것이다. */
+  matchReport(mbRows, fgItems) {
+    const fgNames = (fgItems || []).filter(r => r && r[0] && r[7] !== '비활성')
+      .map(r => this.normName(r[1] || r[0])).filter(Boolean);
+    const all = new Map(), hit = new Map();
+    for (const r of (mbRows || [])) {
+      if (!r || !r.name) continue;
+      all.set(r.code || r.name, r.name);
+      if (this.isOurProduct(r.name, fgNames)) hit.set(r.code || r.name, r.name);
+    }
+    return { total: all.size, matched: [...hit.values()], fgNames };
   },
 
   /** 월별 손익 집계 — 시트 rows 만 받는 순수 함수. 테스트가 이 함수를 그대로 돌린다. */
@@ -7339,6 +7356,7 @@ Screens['pnl'] = async () => {
     ]);
     State._pnl = {
       fgItems, manualRows: manual, mbErr: mb.err, mbUpdated: mb.updated, erpErr: erp.err,
+      match: FactoryPnl.matchReport(mb.rows, fgItems),
       rows: FactoryPnl.build({ fgItems, fgLots, ships, pos, procs, rmItems, rmLots, manual,
                                mbRows: mb.rows, erpLines: erp.lines }),
     };
@@ -7389,6 +7407,11 @@ function renderPnlBody() {
   const warns = [];
   if (st.mbErr) warns.push(`<b>ERP 실매출을 못 읽었습니다</b> (${st.mbErr}) — 매출이 '출하량 × 단가' 추정으로 계산됩니다`);
   if (st.erpErr) warns.push(`<b>ERP 결산을 못 읽었습니다</b> (${st.erpErr}) — 노무비·제조경비는 수기 입력분만 반영됩니다`);
+  if (!st.mbErr && st.match && st.match.total > 0 && st.match.matched.length === 0) {
+    warns.push(`ERP 마켓봄 ${st.match.total}품목 중 <b>우리 완제품과 품명이 맞는 게 하나도 없습니다</b> —
+      완제품품목의 품명(<span class="m">${(st.match.fgNames || []).join(', ') || '없음'}</span>)을
+      마켓봄 품명과 <b>똑같이</b> 맞춰야 실매출이 잡힙니다`);
+  }
   if (s.revenueSrc === 'estimate') warns.push(`이 달 매출은 <b>마켓봄 실적이 없어 추정</b>입니다 — 출하량 × 공급단가`);
   if (s.revenueSrc === 'none') warns.push(`<b>매출 0</b> — 마켓봄 판매도 출하기록도 없는 달입니다`);
   if (s.revenueSrc !== 'marketbom' && s.noPricePacks > 0) warns.push(`출하 ${_pq(s.noPricePacks)}봉이 <b>공급단가 미입력</b> — 그만큼 매출이 빠져 있습니다`);
@@ -7492,6 +7515,7 @@ function renderPnlBody() {
 
 /** 출처·계산식 각주 — 이 화면의 숫자가 어디서 왔는지 한 곳에 적어 둔다. */
 function pnlFootnote() {
+  const m = State._pnl && State._pnl.match;
   return `
     <div class="card mt-12" style="background:var(--bg)">
       <div class="fs-12 fw-7 mb-6">📌 이 숫자는 어디서 왔나</div>
@@ -7505,7 +7529,10 @@ function pnlFootnote() {
           마켓봄 판매가 23,750원/봉(VAT 포함)이 곧 공급가 ${PNL_DEFAULT_PRICE.toLocaleString()}원/봉입니다.<br>
         · <b>물량 단위</b>는 전부 봉(1봉 ${PNL_KG_PER_PACK}kg)으로 환산합니다.<br>
         · 감가상각은 <b>넣지 않습니다</b>(사용자 확정). 판관비·이자도 제외 — 여기 이익은 <b>제조이익</b>이지 순이익이 아닙니다.<br>
-        · 대상 품목 = <b>완제품품목에 등록된 활성 품목</b>(현재 전용반죽). 앙버터 호두과자를 등록하면 자동으로 함께 잡힙니다.
+        · 대상 품목 = <b>완제품품목에 등록된 활성 품목과 품명이 정확히 같은</b> 마켓봄 판매행.
+          앞글자만 맞으면 안 잡습니다 — 그렇게 하면 앙호두 앞치마·모자·쿠폰까지 공장 매출이 됩니다.
+          ${m ? `현재 마켓봄 ${m.total}품목 중 <b>${[...new Set(m.matched)].length}품목</b>을 셉니다:
+            <b>${[...new Set(m.matched)].join(' · ') || '없음'}</b>` : ''}
       </div>
     </div>`;
 }
