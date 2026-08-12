@@ -7081,6 +7081,13 @@ const PNL_MANUAL_ITEMS = ['노무비', '임차료·관리비', '공과금(전기
 const PNL_OVERHEAD_ITEMS = ['임차료·관리비', '공과금(전기·가스·수도)', '제조경비'];   // '제조경비' = 구 단일항목 호환
 const PNL_KG_PER_PACK = 5;         // 1봉 = 5kg (포장 단위 고정 — CLAUDE.md 표준 배치)
 const PNL_DEFAULT_PRICE = 21591;   // 원/봉 공급가(VAT 제외) = 마켓봄 판매가 23,750 ÷ 1.1
+/** 사업주 부담 4대보험 추정 가산율 — 급여대장 '지급합계' 에 곱해 노무비를 만든다.
+    근거(2026-05~07 메이투투 급여대장 공제액 역산, 사용자 확정 2026-08-12):
+      국민연금·건강보험·장기요양·고용보험(실업급여) = 노사 50:50 → 근로자 공제액과 같은 금액을 회사도 낸다
+      + 고용안정·직업능력개발 0.25%(150인 미만 · 사업주 단독) + 산재 약 1.0%(식료품 제조업)
+    실측 가산율 10.25% / 10.22% / 10.01% → 10.2% 로 둔다.
+    ⚠️ 회사 부담분이 다른 계정(복리후생비 등)에 이미 잡혀 있으면 이중계상이다 — 버튼을 안 누르면 된다. */
+const PNL_EMPLOYER_INS_RATE = 0.102;
 
 /** ERP 재무 DB(회계·재무 05) — 결산 라인. 읽기 전용. */
 const ERP_FIN_SID = '1FbqWXusA6KCpJThwZ6f4tNSMw19kSjL7hL19byTrOVE';
@@ -7525,6 +7532,8 @@ function pnlFootnote() {
         · <b>재료비</b> = 공정기록의 실투입량(kg) × 원재료 <b>매입단가</b>(원/kg). 그 달에 실제로 쓴 자재만.<br>
         · <b>노무비·제조경비</b> ① <span style="color:var(--info)">수기</span>가 있으면 그게 이깁니다.
           ② 없으면 <span style="color:var(--suc)">ERP 결산</span>의 매출원가 › 인건비(공장)·공장경비.<br>
+        · <b>노무비 = 급여대장 지급합계 + 사업주 부담 4대보험(추정 +${(PNL_EMPLOYER_INS_RATE * 100).toFixed(1)}%)</b> —
+          국민연금·건강·장기요양·고용(실업급여)은 회사가 근로자와 같은 금액을 내고, 고용안정 0.25%·산재 약 1.0%가 더 붙습니다.<br>
         · ⚠️ <b>매출·원가 모두 공급가(VAT 제외)</b> 기준입니다. 매출만 부가세를 포함하면 이익이 10% 부풀려집니다 —
           마켓봄 판매가 23,750원/봉(VAT 포함)이 곧 공급가 ${PNL_DEFAULT_PRICE.toLocaleString()}원/봉입니다.<br>
         · <b>물량 단위</b>는 전부 봉(1봉 ${PNL_KG_PER_PACK}kg)으로 환산합니다.<br>
@@ -7634,7 +7643,7 @@ function openPnlCostEditor(period) {
     <div class="dialog" style="max-width:340px">
       <div class="fs-16 fw-7 mb-4">🧾 노무비 · 제조경비</div>
       <div class="fs-11 c-txt-l mb-8">공장 시트에 없는 비용입니다. <b>비워 두면 ERP 결산 값</b>을 그대로 쓰고,
-        넣으면 그게 이깁니다.</div>
+        넣으면 그게 이깁니다. 노무비는 <b>급여대장 지급합계</b>를 넣고 <b>＋보험료</b>를 누르세요.</div>
       ${erpNote ? `<div class="card bl-info" style="background:#e3f2fd;padding:7px 9px;margin-bottom:10px">
         <div class="fs-11 c-info">이 달 ERP 결산에서 잡힌 값: ${erpNote}</div></div>` : ''}
       <div class="input-group" style="margin-bottom:8px">
@@ -7646,6 +7655,12 @@ function openPnlCostEditor(period) {
           <label>${lb} <span class="fs-10 c-txt-l">· ${hint}</span></label>
           <input type="number" id="${id}" value="${v == null ? '' : v}" min="0" step="1" inputmode="numeric" placeholder="원"
                  style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
+          ${id === 'pnlc-labor' ? `
+            <div class="row between mt-4" style="gap:6px;align-items:center">
+              <span class="fs-10 c-txt-l" id="pnlc-ins-hint" style="flex:1;min-width:0">급여대장 지급합계를 넣으세요</span>
+              <button type="button" class="btn btn-sm btn-outline btn-info" id="pnlc-ins-apply"
+                      style="padding:2px 8px;font-size:11px;flex-shrink:0">＋보험료</button>
+            </div>` : ''}
         </div>`).join('')}
       <div class="input-group" style="margin-bottom:12px">
         <label>메모 (선택)</label>
@@ -7660,6 +7675,34 @@ function openPnlCostEditor(period) {
   const close = () => overlay.remove();
   overlay.querySelector('#pnlc-cancel').onclick = close;
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  // 사업주 부담 4대보험 가산 — 급여대장 지급합계(세전)를 넣고 한 번 누르면 노무비가 된다.
+  //   두 번 누르면 21% 가 붙어 버리므로 적용 후엔 잠그고, 값을 다시 고치면 풀린다.
+  (() => {
+    const inp = overlay.querySelector('#pnlc-labor'), btn = overlay.querySelector('#pnlc-ins-apply'),
+          hint = overlay.querySelector('#pnlc-ins-hint');
+    if (!inp || !btn || !hint) return;
+    let applied = false;
+    const pct = (PNL_EMPLOYER_INS_RATE * 100).toFixed(1);
+    const sync = () => {
+      const v = parseFloat(inp.value) || 0;
+      btn.disabled = applied || !(v > 0);
+      btn.style.opacity = btn.disabled ? '.45' : '1';
+      if (applied) { hint.innerHTML = '<span style="color:var(--suc)">✓ 사업주 부담 4대보험 포함됨</span>'; return; }
+      hint.innerHTML = v > 0
+        ? `+${pct}% = <b>${Math.round(v * (1 + PNL_EMPLOYER_INS_RATE)).toLocaleString()}원</b>`
+        : '급여대장 지급합계를 넣으세요';
+    };
+    inp.addEventListener('input', () => { applied = false; sync(); });
+    btn.onclick = () => {
+      // disabled 만 믿지 않는다 — 여기서 한 번 더 막아야 두 번째 클릭이 21% 를 붙이지 못한다
+      if (applied) return;
+      const v = parseFloat(inp.value) || 0; if (!(v > 0)) return;
+      inp.value = String(Math.round(v * (1 + PNL_EMPLOYER_INS_RATE)));
+      applied = true; sync();
+    };
+    sync();
+  })();
+
   overlay.querySelector('#pnlc-save').onclick = async () => {
     const p = $id('pnlc-ym')?.value, memo = $id('pnlc-memo')?.value || '';
     if (!/^\d{4}-\d{2}$/.test(p || '')) { toast('귀속월을 선택하세요', 'err'); return; }

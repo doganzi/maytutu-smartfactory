@@ -21,10 +21,24 @@ const _dom = {};
 global.Screens = {};
 global.State = { user: { email: 'admin@anghodu.biz', role: 'admin' } };
 global.$id = (id) => _dom[id] || (_dom[id] = { innerHTML: '', value: '', classList: { add() {}, remove() {} } });
+// 모달 스텁 — id 별로 다른 엘리먼트를 돌려줘야 ＋보험료 버튼 동작을 실제로 눌러 볼 수 있다
+function mkEl() {
+  const h = {};
+  return { value: '', innerHTML: '', textContent: '', disabled: false, style: {}, onclick: null,
+    _h: h, addEventListener(t, fn) { (h[t] = h[t] || []).push(fn); },
+    fire(t) { (h[t] || []).forEach(fn => fn({ target: this })); } };
+}
+global._modal = null;
 global.document = {
-  getElementById: (id) => global.$id(id),
-  createElement: () => ({ className: '', innerHTML: '', appendChild() {}, remove() {},
-    addEventListener() {}, querySelector: () => ({ onclick: null, addEventListener() {}, value: '', textContent: '' }) }),
+  getElementById: (id) => (global._modal && global._modal._els[id]) || global.$id(id),
+  createElement: () => {
+    const els = {};
+    const ov = { className: '', innerHTML: '', _els: els, remove() {}, appendChild() {},
+      addEventListener() {},
+      querySelector: (sel) => { const id = String(sel).replace(/^#/, ''); return (els[id] = els[id] || mkEl()); } };
+    global._modal = ov;
+    return ov;
+  },
   body: { appendChild() {} },
 };
 global.window = global;
@@ -287,6 +301,40 @@ t('관리자 전용 게이트 — 작업자는 홈으로 튕긴다', async () =>
   Screens['pnl']();                       // 게이트는 await 전에 동기로 걸린다
   assert.strictEqual(_dom._went, 'home');
   State.user = { email: 'admin@anghodu.biz', role: 'admin' };
+});
+
+/* ── 사업주 부담 4대보험 가산 — 돈이 걸린 버튼이라 실제로 눌러 본다 ── */
+t('＋보험료: 지급합계 × (1+요율), 두 번 눌러도 이중 가산되지 않는다', () => {
+  assert.strictEqual(PNL_EMPLOYER_INS_RATE, 0.102);
+  State._pnl = { fgItems: fixture.fgItems, rows, manualRows: [] };
+  openPnlCostEditor('2026-07');
+  const el = _modal._els, PAY = 3267409;
+  const inp = el['pnlc-labor'], btn = el['pnlc-ins-apply'], hint = el['pnlc-ins-hint'];
+
+  assert.strictEqual(btn.disabled, true, '값이 없으면 누를 수 없다');
+  inp.value = String(PAY); inp.fire('input');
+  const want = Math.round(PAY * (1 + PNL_EMPLOYER_INS_RATE));   // 3,267,409 → 3,600,685
+  assert.strictEqual(btn.disabled, false);
+  assert.ok(hint.innerHTML.includes(want.toLocaleString()), '누르기 전에 결과를 미리 보여준다');
+
+  btn.onclick();
+  assert.strictEqual(inp.value, String(want));
+  assert.strictEqual(btn.disabled, true, '적용 후에는 잠긴다');
+  assert.ok(hint.innerHTML.includes('포함됨'));
+
+  btn.onclick();                                                // 두 번째 클릭 — 무시돼야 한다
+  assert.strictEqual(inp.value, String(want), '두 번 눌러도 21% 가 붙으면 안 된다');
+
+  inp.value = '3000000'; inp.fire('input');                     // 값을 고치면 다시 풀린다
+  assert.strictEqual(btn.disabled, false);
+  assert.ok(hint.innerHTML.includes(Math.round(3000000 * 1.102).toLocaleString()));
+});
+
+t('가산율이 급여대장 실측(2026-05~07)과 어긋나지 않는다', () => {
+  // 근로자 공제액 역산 + 고용안정 0.25% + 산재 1.0% 로 계산한 실측 가산율
+  const measured = [0.1025, 0.1022, 0.1001];
+  measured.forEach(r => assert.ok(Math.abs(r - PNL_EMPLOYER_INS_RATE) < 0.005,
+    `실측 ${(r * 100).toFixed(2)}% 와 상수 ${(PNL_EMPLOYER_INS_RATE * 100).toFixed(1)}% 가 0.5%p 넘게 벌어졌다`));
 });
 
 console.log(ok.map(n => '  ✓ ' + n).join('\n'));
