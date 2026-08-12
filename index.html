@@ -376,6 +376,7 @@ const DRIVE = {
   STD:      '1ju8-_yqUyWieSWONXD9aGwwy4dxR0wbG', // HACCP/기준서_최신본
   CERT_OLD: '1bKQVu6KuznyIl8D6jFtjq22wI29esVU4', // 시험성적서(구 구조) — 읽기 전용, 이관 잔여 확인용
   PDF_NAME: '생산기록_PDF',                        // 07_공장 아래. 없으면 첫 업로드 때 만든다
+  PHOTO_NAME: '공정사진',                          // 07_공장/공정사진/YYYY-MM. 사진이 공장 루트에 쌓이지 않게 한다
 };
 
 const CONFIG = {
@@ -1327,6 +1328,27 @@ async function driveEnsurePdfFolder() {
   return DRIVE.ROOT;   // 폴더를 못 만들어도 기록은 남겨야 한다 — 공장 루트로 fallback
 }
 
+/** 공정사진 폴더 — 07_공장/공정사진/YYYY-MM(KST). 없으면 만든다.
+    ⚠️ 이게 없던 동안 업로드가 전부 07_공장 **루트**로 떨어져 사진 56개(167MB)가 쌓였다(2026-08-12 정리).
+    설정에서 업로드 폴더를 직접 지정했으면(= ROOT 가 아니면) 그 지정을 존중한다. */
+const _photoFolderCache = {};
+async function driveEnsurePhotoFolder() {
+  if (CONFIG.DRIVE_FOLDER_ID && CONFIG.DRIVE_FOLDER_ID !== DRIVE.ROOT) return CONFIG.DRIVE_FOLDER_ID;
+  const ym = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 7);
+  if (_photoFolderCache[ym]) return _photoFolderCache[ym];
+  const root = await driveEnsureFolder(DRIVE.PHOTO_NAME, DRIVE.ROOT);
+  if (!root) return DRIVE.ROOT;                     // 폴더를 못 만들어도 사진은 남겨야 한다
+  const sub = await driveEnsureFolder(ym, root) || root;
+  _photoFolderCache[ym] = sub;
+  return sub;
+}
+
+/** 업로드 파일명 — `20260812_143000_원본명`. epoch ms 를 쓰면 사람이 못 읽고 정렬도 안 산다. */
+function drivePhotoName(fileName) {
+  const t = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
+  return `${t.slice(0, 10).replace(/-/g, '')}_${t.slice(11, 19).replace(/:/g, '')}_${fileName}`;
+}
+
 const DriveAPI = {
   /** 지정한 폴더에 파일 하나를 올린다. 성적서·검교정 원본처럼 **올릴 자리가 정해진** 업로드용.
       반환 { id, url } — 실패는 throw. (uploadPhoto 는 이 위에 얹힌 사진 전용 래퍼) */
@@ -1354,12 +1376,11 @@ const DriveAPI = {
   async uploadPhoto(file) {
     if (isPreviewing()) { _previewSkipWrite(); return ''; }
     const metadata = {
-      name: `${Date.now()}_${file.name}`,
+      name: drivePhotoName(file.name),
       mimeType: file.type,
     };
-    if (CONFIG.DRIVE_FOLDER_ID) {
-      metadata.parents = [CONFIG.DRIVE_FOLDER_ID];
-    }
+    const parent = await driveEnsurePhotoFolder();
+    if (parent) metadata.parents = [parent];
 
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
