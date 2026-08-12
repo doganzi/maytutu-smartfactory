@@ -9776,8 +9776,16 @@ async function hsUploadDoc(input) {
 
 /** 업로드 직후 「시험성적서」 시트 등록 — 파일링크가 자동으로 붙는다.
     ⚠️ 유효기한은 **사람이 성적서를 보고 넣는다.** 파일명·업로드일에서 추정하지 않는다. */
+/** 파일명에서 품목명을 추정하면 안 되는 이름들 — 클립보드 붙여넣기·카톡 저장은 전부 이렇게 온다.
+    실제로 이걸 그대로 받아 「image」라는 이름의 성적서 3건이 등록됐다(2026-08-07). */
+const CERT_JUNK_NAME = /^(image|img|screenshot|photo|picture|scan|사진|무제|untitled|kakaotalk|talkfile)[\s_()\-.\d]*$/i;
+
 async function hsRegisterCertAfterUpload(slot, product, uploaded, srcFile) {
-  const guessName = (srcFile?.name || '').replace(/\.[^.]+$/, '');
+  const fromFile = (srcFile?.name || '').replace(/\.[^.]+$/, '').trim();
+  // 완제품 성적서는 제품이 곧 품목이다. 원재료·부재료는 어느 자재인지 파일이 알려주지 못하므로
+  // 쓸 만한 파일명일 때만 채우고, 아니면 비워서 사람이 적게 한다.
+  const guessName = slot.key === 'fg' ? String(product.name || '').replace(/^\s*\d+\s*\.\s*/, '').trim()
+                  : (CERT_JUNK_NAME.test(fromFile) ? '' : fromFile);
   const v = await hsPromptFields('성적서 등록',
     `${product.name} · ${slot.label} — 유효기한을 넣어야 만료 알람이 울립니다. 건너뛰면 파일만 저장됩니다.`, [
       { id: 'name',   label: '품목명',  value: guessName, required: true },
