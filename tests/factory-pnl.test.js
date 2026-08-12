@@ -400,6 +400,17 @@ t('택배비 — 수기 > ERP 운반비 > 박스수×단가 > 마켓봄 배송�
   assert.strictEqual(aug.mbDelivery, 7000, '마켓봄 배송비는 참고로만 들고 있는다');
 });
 
+t('부자재도 실투입·매입이 없으면 박스수 × 표준원가로 떨어진다', () => {
+  assert.strictEqual(PNL_SUBMAT_PER_BOX, 3864, '아이스박스 1,640 + 아이스팩 210x4 + 봉지 180x3 + 보냉팩 281.5x3');
+  assert.strictEqual(jun.subMatSrc, 'sheet', '6월은 PE봉투 실투입이 있어 그쪽이 이긴다');
+  const one = FactoryPnl.build({
+    fgItems: fixture.fgItems,
+    mbRows: [{ date: '2026-09-03', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 120, supply: 7854600 }],
+  })[0];
+  assert.strictEqual(one.subMat, 120 * 3864);
+  assert.strictEqual(one.subMatSrc, 'perbox');
+});
+
 t('출고가 있으면 박스수 × 단가로 떨어진다 (마켓봄 배송비보다 우선)', () => {
   const one = FactoryPnl.build({
     fgItems: fixture.fgItems,

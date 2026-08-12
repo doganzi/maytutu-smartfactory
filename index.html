@@ -7108,6 +7108,11 @@ const PNL_FREIGHT_RE = /택배|운반|운송|배송|물류/;
     마켓봄 `deliveryByMonth` 는 월 7~13만원뿐이라 반죽 물량의 냉동택배 실비가 아니다(굿즈 소량 배송분).
     출고 박스수 × 이 단가가 실제에 훨씬 가깝다. */
 const PNL_FREIGHT_PER_BOX = 3700;
+/** 박스당 부자재비 — 「물반죽 공장 프로젝트」 시트 `손익 계산 (26.06.29)` 의 표준원가.
+      아이스박스(20kg) 1,640 + 아이스팩 210×4 + 봉지(5kg) 180×3 + 보냉팩(5kg) 281.5×3 = 3,864.5
+    포장재는 공정기록의 input 스텝에 안 잡히는 경우가 많아 실투입으로는 0 이 된다 →
+    출고 박스수 × 이 단가를 마지막 폴백으로 쓴다(택배비와 같은 방식). */
+const PNL_SUBMAT_PER_BOX = 3864;
 const PNL_KG_PER_PACK = 5;         // 1봉 = 5kg (포장 단위 고정 — CLAUDE.md 표준 배치)
 const PNL_DEFAULT_PRICE = 21591;   // 원/봉 공급가(VAT 제외) = 마켓봄 판매가 23,750 ÷ 1.1
 /** 사업주 부담 4대보험 추정 가산율 — 급여대장 '지급합계' 에 곱해 노무비를 만든다.
@@ -7351,8 +7356,11 @@ const FactoryPnl = {
       // 원재료·부재료 — 실투입 기록이 있으면 발생 기준, 없으면 매입(현금) 기준
       if (b.rawUsed > 0) { b.rawMat = b.rawUsed; b.rawMatSrc = 'sheet'; }
       else { b.rawMat = b.rawBuy; b.rawMatSrc = b.rawBuy > 0 ? 'purchase' : 'none'; }
+      b.subMatBox = b.mbQty * PNL_SUBMAT_PER_BOX;
       if (b.subUsed > 0) { b.subMat = b.subUsed; b.subMatSrc = 'sheet'; }
-      else { b.subMat = b.subBuy; b.subMatSrc = b.subBuy > 0 ? 'purchase' : 'none'; }
+      else if (b.subBuy > 0) { b.subMat = b.subBuy; b.subMatSrc = 'purchase'; }
+      else if (b.subMatBox > 0) { b.subMat = b.subMatBox; b.subMatSrc = 'perbox'; }
+      else { b.subMat = 0; b.subMatSrc = 'none'; }
       b.suppliesSrc = b.supplies > 0 ? 'purchase' : 'none';            // 소모품은 투입 기록이 없다
       b.scrapSrc = b.scrap > 0 ? 'sheet' : 'none';
 
@@ -7531,6 +7539,7 @@ function renderPnlBody() {
   if (!(s.overhead > 0)) warns.push(`<b>제조경비 없음</b> — 임차료·관리비, 전기·가스·수도가 원가에 안 들어갔습니다`);
   if (!(s.freight > 0)) warns.push(`<b>택배비 없음</b> — 반죽 배송비가 원가에 안 들어갔습니다`);
   else if (s.freightSrc === 'perbox') warns.push(`택배비는 <b>출고 ${_pq(s.mbQty)}박스 × ${PNL_FREIGHT_PER_BOX.toLocaleString()}원 추정</b>입니다 — 실제 청구서가 있으면 수기로 넣으세요`);
+  if (s.subMatSrc === 'perbox') warns.push(`부자재비는 <b>출고 ${_pq(s.mbQty)}박스 × ${PNL_SUBMAT_PER_BOX.toLocaleString()}원 표준원가</b>입니다 — 아이스박스·아이스팩·봉지·보냉팩. 실투입·매입 기록이 잡히면 그쪽이 우선합니다`);
   if (s.rawMatSrc === 'purchase') warns.push(`원재료비가 <b>매입 기준</b>입니다 — 그 달 공정 투입기록이 없어 산 금액으로 대신했습니다(재고 증감이 섞입니다)`);
   if (s.unknownBuy > 0) warns.push(`품목 마스터에 없는 매입 <b>${_pw(s.unknownBuy)}원</b> — 원재료·소모품 어느 쪽에도 안 잡혔습니다`);
   if (s.revenueSrc !== 'marketbom' && s.shipPacks > 0 && s.prodPacks > 0 && s.shipPacks < s.prodPacks * 0.5) {
@@ -7644,6 +7653,7 @@ function pnlFootnote() {
           ② 실적이 없는 달만 <span style="color:var(--warn)">추정</span> = 출하기록 × 완제품 공급단가.<br>
         · <b>원재료비 / 부재료·포장재비</b> = 공정기록 실투입량(kg) × 매입단가. 둘의 구분은 <b>원재료품목의 분류(category)</b>입니다.
           투입기록이 없는 달은 <span style="color:var(--warn)">매입 기준</span>(구매주문)으로 대신합니다.<br>
+        · <b>부자재</b>는 실투입·매입 기록이 없으면 <b>출고 박스수 × ${PNL_SUBMAT_PER_BOX.toLocaleString()}원</b>(아이스박스·아이스팩·봉지·보냉팩 표준원가)으로 잡습니다.<br>
         · <b>소모품비</b> = 구매주문 중 소모품품목. 소모품은 공정 투입기록이 없어 <b>산 달에 잡힙니다</b>.<br>
         · <b>폐기손실</b> = 원재료개별 폐기분 × 매입단가. 버려진 원재료는 공정에 안 들어가 재료비에서 빠지므로 따로 더합니다.
           <b>완제품 폐기는 넣지 않습니다</b> — 그 원재료는 이미 재료비에 잡혀 있어 이중계상이 됩니다.<br>
