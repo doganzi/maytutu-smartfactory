@@ -7104,6 +7104,10 @@ const PNL_OVERHEAD_ITEMS = ['임차료·관리비', '공과금(전기·가스·�
 const PNL_SUBMAT_RE = /포장|부자재|용기|박스|봉투|라벨|스티커|테이프|필름|캡|뚜껑|아이스|보냉/;
 /** 택배·운반비 계정 — ERP 결산 매출원가에서 이 이름이면 택배비로 본다. */
 const PNL_FREIGHT_RE = /택배|운반|운송|배송|물류/;
+/** 박스당 택배비 — 3봉×5kg(15kg) 냉동택배 건당 3,700원 (사용자 확정 2026-08-12).
+    마켓봄 `deliveryByMonth` 는 월 7~13만원뿐이라 반죽 물량의 냉동택배 실비가 아니다(굿즈 소량 배송분).
+    출고 박스수 × 이 단가가 실제에 훨씬 가깝다. */
+const PNL_FREIGHT_PER_BOX = 3700;
 const PNL_KG_PER_PACK = 5;         // 1봉 = 5kg (포장 단위 고정 — CLAUDE.md 표준 배치)
 const PNL_DEFAULT_PRICE = 21591;   // 원/봉 공급가(VAT 제외) = 마켓봄 판매가 23,750 ÷ 1.1
 /** 사업주 부담 4대보험 추정 가산율 — 급여대장 '지급합계' 에 곱해 노무비를 만든다.
@@ -7352,10 +7356,13 @@ const FactoryPnl = {
       b.suppliesSrc = b.supplies > 0 ? 'purchase' : 'none';            // 소모품은 투입 기록이 없다
       b.scrapSrc = b.scrap > 0 ? 'sheet' : 'none';
 
-      // 택배비 — 수기 > ERP 결산 운반비 > 마켓봄 배송비
+      // 택배비 — 수기 > ERP 결산 운반비 > 출고 박스수 × 박스당 단가.
+      // ⚠️ 마켓봄 `deliveryByMonth`(월 7~13만)는 **굿즈 소량 배송분**이라 반죽 냉동택배가 아니다.
+      //    폴백으로 쓰면 원가가 1/8 로 깎인다 → 쓰지 않고 참고 표시만 한다.
+      b.freightBox = b.mbQty * PNL_FREIGHT_PER_BOX;
       if (b.manFreight != null) { b.freight = b.manFreight; b.freightSrc = 'manual'; }
       else if (b.erpFreight != null) { b.freight = b.erpFreight; b.freightSrc = 'erp'; }
-      else if (b.mbDelivery > 0) { b.freight = b.mbDelivery; b.freightSrc = 'marketbom'; }
+      else if (b.freightBox > 0) { b.freight = b.freightBox; b.freightSrc = 'perbox'; }
       else { b.freight = 0; b.freightSrc = 'none'; }
 
       // 노무비·제조경비 — 수기가 이긴다(사람이 고친 값). 없으면 ERP 결산.
@@ -7429,6 +7436,7 @@ const PNL_SRC = {
   erp:       ['ERP 결산',   'var(--suc)'],
   manual:    ['수기',       'var(--info)'],
   purchase:  ['매입 기준',   'var(--warn)'],
+  perbox:    ['박스×단가',   'var(--suc)'],
   estimate:  ['추정',       'var(--warn)'],
   none:      ['없음',       'var(--err)'],
 };
@@ -7522,7 +7530,7 @@ function renderPnlBody() {
   if (!(s.labor > 0)) warns.push(`<b>노무비 없음</b> — ERP 결산에도 수기에도 공장 인건비가 없습니다`);
   if (!(s.overhead > 0)) warns.push(`<b>제조경비 없음</b> — 임차료·관리비, 전기·가스·수도가 원가에 안 들어갔습니다`);
   if (!(s.freight > 0)) warns.push(`<b>택배비 없음</b> — 반죽 배송비가 원가에 안 들어갔습니다`);
-  else if (s.freightSrc === 'marketbom') warns.push(`택배비가 <b>마켓봄 배송비(${_pw(s.freight)}원)</b>뿐입니다 — 냉동택배 실비가 따로 있으면 수기로 넣으세요`);
+  else if (s.freightSrc === 'perbox') warns.push(`택배비는 <b>출고 ${_pq(s.mbQty)}박스 × ${PNL_FREIGHT_PER_BOX.toLocaleString()}원 추정</b>입니다 — 실제 청구서가 있으면 수기로 넣으세요`);
   if (s.rawMatSrc === 'purchase') warns.push(`원재료비가 <b>매입 기준</b>입니다 — 그 달 공정 투입기록이 없어 산 금액으로 대신했습니다(재고 증감이 섞입니다)`);
   if (s.unknownBuy > 0) warns.push(`품목 마스터에 없는 매입 <b>${_pw(s.unknownBuy)}원</b> — 원재료·소모품 어느 쪽에도 안 잡혔습니다`);
   if (s.revenueSrc !== 'marketbom' && s.shipPacks > 0 && s.prodPacks > 0 && s.shipPacks < s.prodPacks * 0.5) {
@@ -7639,7 +7647,8 @@ function pnlFootnote() {
         · <b>소모품비</b> = 구매주문 중 소모품품목. 소모품은 공정 투입기록이 없어 <b>산 달에 잡힙니다</b>.<br>
         · <b>폐기손실</b> = 원재료개별 폐기분 × 매입단가. 버려진 원재료는 공정에 안 들어가 재료비에서 빠지므로 따로 더합니다.
           <b>완제품 폐기는 넣지 않습니다</b> — 그 원재료는 이미 재료비에 잡혀 있어 이중계상이 됩니다.<br>
-        · <b>택배비</b> ① 수기 ② ERP 결산 운반비 계정 ③ 마켓봄 배송비 순으로 씁니다.<br>
+        · <b>택배비</b> ① 수기 ② ERP 결산 운반비 계정 ③ <b>출고 박스수 × ${PNL_FREIGHT_PER_BOX.toLocaleString()}원</b>(3봉×5kg 냉동택배 건당) 순.
+          마켓봄 배송비(월 7~13만)는 <b>굿즈 소량 배송분</b>이라 반죽 택배비로 쓰지 않습니다.<br>
         · <b>노무비·제조경비</b> ① <span style="color:var(--info)">수기</span>가 있으면 그게 이깁니다.
           ② 없으면 <span style="color:var(--suc)">ERP 결산</span>의 매출원가 › 인건비(공장)·공장경비.<br>
         · <b>노무비 = 급여대장 지급합계 + 사업주 부담 4대보험(추정 +${(PNL_EMPLOYER_INS_RATE * 100).toFixed(1)}%)</b> —
@@ -7742,13 +7751,13 @@ function openPnlCostEditor(period) {
     row.laborSrc === 'erp' ? `노무비 ${_pw(row.labor)}원` : '',
     row.overheadSrc === 'erp' ? `제조경비 ${_pw(row.overhead)}원` : '',
     row.freightSrc === 'erp' ? `택배비 ${_pw(row.freight)}원` : '',
-    row.freightSrc === 'marketbom' ? `택배비(마켓봄 배송비) ${_pw(row.freight)}원` : '',
+    row.freightSrc === 'perbox' ? `택배비 ${_pw(row.freight)}원(출고 ${_pq(row.mbQty)}박스 추정)` : '',
   ].filter(Boolean).join(' · ');
   const fields = [
     ['pnlc-labor', '노무비', '공장 인건비 (이상현·김수영)', cur['노무비']],
     ['pnlc-rent', '임차료·관리비', '공장 임대료 + 건물 관리비', cur['임차료·관리비']],
     ['pnlc-util', '공과금(전기·가스·수도)', '생산량에 따라 움직입니다', cur['공과금(전기·가스·수도)']],
-    ['pnlc-frt', '택배비', '반죽 냉동택배 · 운반비', cur['택배비']],
+    ['pnlc-frt', '택배비', `반죽 냉동택배 · 박스당 ${PNL_FREIGHT_PER_BOX.toLocaleString()}원 기준`, cur['택배비']],
   ];
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
