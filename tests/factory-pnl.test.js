@@ -386,15 +386,29 @@ t('폐기손실 = 원재료 폐기분만 (완제품 폐기는 이중계상이라
   assert.ok(!FactoryPnl.LINES.some(L => L.key === 'fgScrapPacks'), '완제품 폐기는 원가 줄이 아니다');
 });
 
-t('택배비 — 수기 > ERP 운반비 > 마켓봄 배송비', () => {
+t('택배비 — 수기 > ERP 운반비 > 박스수×단가 > 마켓봄 배송비', () => {
+  assert.strictEqual(PNL_FREIGHT_PER_BOX, 3700, '3봉×5kg 냉동택배 건당');
   assert.strictEqual(jun.freight, 200000);
-  assert.strictEqual(jun.freightSrc, 'manual', '수기가 마켓봄 배송비를 이긴다');
+  assert.strictEqual(jun.freightSrc, 'manual', '수기가 전부를 이긴다');
   assert.strictEqual(jun.mbDelivery, 130000, '마켓봄 배송비는 따로 들고만 있는다');
+  assert.strictEqual(jun.freightBox, 150 * 3700, '박스 추정치도 계산은 해 둔다(150박스)');
   assert.strictEqual(jul.freight, 450000);
   assert.strictEqual(jul.freightSrc, 'erp', "수기가 없으면 ERP 결산의 '택배비' 계정");
   const aug = rows.find(r => r.ym === '2026-08');
-  assert.strictEqual(aug.freight, 7000);
-  assert.strictEqual(aug.freightSrc, 'marketbom', '둘 다 없으면 마켓봄 배송비');
+  assert.strictEqual(aug.freight, 0);
+  assert.strictEqual(aug.freightSrc, 'none', '출고도 계정도 없으면 0 — 마켓봄 배송비(굿즈분)로 메우지 않는다');
+  assert.strictEqual(aug.mbDelivery, 7000, '마켓봄 배송비는 참고로만 들고 있는다');
+});
+
+t('출고가 있으면 박스수 × 단가로 떨어진다 (마켓봄 배송비보다 우선)', () => {
+  const one = FactoryPnl.build({
+    fgItems: fixture.fgItems,
+    mbRows: [{ date: '2026-09-03', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 120, supply: 7854600 }],
+    mbDelivery: { '2026-09': 90000 },
+  })[0];
+  assert.strictEqual(one.mbQty, 120);
+  assert.strictEqual(one.freight, 120 * 3700);   // 444,000 — 마켓봄 배송비 90,000 이 아니다
+  assert.strictEqual(one.freightSrc, 'perbox');
 });
 
 t('투입기록이 없는 달은 매입 기준으로 떨어지고 그렇다고 표시한다', () => {
