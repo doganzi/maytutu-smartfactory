@@ -67,13 +67,47 @@ assert.ok(SRC.includes('${certAlerts.length > 0 && !CertNotif.off() ? `'),
 assert.ok(SRC.includes('${certAlerts.length > 0 && CertNotif.off() ? `'),
   '꺼진 상태의 홈 배너가 없다 — 껐다는 사실도, 켤 길도 화면에서 사라진다');
 
-// 만료 판정 자체는 끄지 않는다 — 성적서 탭·현황 카드는 그대로 남아야 한다(HACCP 근거)
+// 만료 판정 자체는 끄지 않는다 — 성적서 탭은 그대로 남아야 한다(HACCP 근거)
 const certStatusBlock = slice('  certStatus(validUntil) {', '\n  },');
 assert.ok(!certStatusBlock.includes('CertNotif'),
   '만료 판정(certStatus)이 알림 설정을 보면 안 된다 — 끄기는 표시만 멈추는 것이다');
-const statCard = SRC.slice(SRC.indexOf("'성적서 알림' : '성적서 정상'") - 900, SRC.indexOf("'성적서 알림' : '성적서 정상'"));
-assert.ok(!statCard.includes('CertNotif'),
-  '홈 상태 카드(🧪 N건)까지 숨기면 안 된다 — 만료 사실을 감추는 것이 된다');
+
+// ── ②-2 홈 요약 카드 — 껐으면 건수·경고색이 남으면 안 된다 (건의 FR-20260813-QMX) ──
+//    3ZC 때 카드를 일부러 남겼더니 «성적서 알림 3건» 이 주황색 그대로라
+//    같은 사람이 "끈 게 아니다"로 다시 건의했다. 껐다는 말과 화면이 어긋나면 스위치를 못 믿는다.
+CertNotif.set(true);
+const cardOff = CertNotif.statCard(3, true);
+assert.ok(!/\d/.test(cardOff.num),
+  '껐는데 카드에 건수가 남는다 — 사진 속 «성적서 알림 3건» 이 그대로다');
+assert.ok(!/--err|--warn/.test(cardOff.bd) && !/c-err|c-warn/.test(cardOff.cls),
+  '껐는데 카드가 경고색이다 — 조용해진 게 아니다');
+assert.ok(cardOff.label.includes('꺼짐'),
+  '카드가 «꺼짐» 이라고 말하지 않는다 — 왜 조용한지 모르면 알림이 고장난 줄 안다');
+assert.strictEqual(cardOff.ic, '🔕', '꺼진 카드 아이콘은 🔕');
+
+// 켜져 있으면 종전 그대로 — 한 사람이 껐다고 판정 자체가 바뀌면 안 된다
+CertNotif.set(false);
+assert.deepStrictEqual(CertNotif.statCard(3, true),
+  { bd: 'var(--err)', ic: '🧪', cls: 'c-err', num: '3건', label: '성적서 알림' }, '만료 있음(켜짐)');
+assert.deepStrictEqual(CertNotif.statCard(2, false),
+  { bd: 'var(--warn)', ic: '🧪', cls: 'c-warn', num: '2건', label: '성적서 알림' }, '임박만(켜짐)');
+assert.deepStrictEqual(CertNotif.statCard(0, false),
+  { bd: 'var(--suc)', ic: '✅', cls: 'c-suc', num: '0건', label: '성적서 정상' }, '알림 없음(켜짐)');
+
+// 배선 — 화면이 실제로 statCard() 를 쓰는가(안 쓰면 위 판정이 전부 무용지물이다)
+assert.ok(/const certCard = CertNotif\.statCard\(certAlerts\.length, certAlerts\.some\(a => a\.badge === 'err'\)\);/.test(SRC),
+  '홈이 CertNotif.statCard() 로 카드를 만들지 않는다');
+['${certCard.bd}', '${certCard.ic}', '${certCard.cls}', '${certCard.num}', '${certCard.label}'].forEach(k =>
+  assert.ok(SRC.includes(k), `홈 요약 카드가 ${k} 를 쓰지 않는다 — 옛 삼항이 남아 있다`));
+assert.ok(!SRC.includes("'성적서 알림' : '성적서 정상'"),
+  '옛 삼항 카드가 그대로 남아 있다 — 껐어도 «성적서 알림 N건» 이 뜬다');
+
+// 꺼짐 배너에도 건수를 적지 않는다 — 카드에서 지운 숫자가 두 줄 아래 그대로면 지운 게 아니다
+const offBanner = SRC.slice(SRC.indexOf('${certAlerts.length > 0 && CertNotif.off() ? `'),
+                            SRC.indexOf('${certAlerts.length > 0 && !CertNotif.off() ? `'));
+assert.ok(offBanner.includes('시험성적서 알림 꺼짐'), '꺼짐 배너를 찾지 못했다');
+assert.ok(!offBanner.includes('${certAlerts.length}'),
+  '꺼짐 배너가 건수를 적고 있다 — 같은 화면에 숫자가 그대로 남는다');
 
 // ── ③ 다시 켜는 길 ───────────────────────────────────────────────────────────
 assert.ok(SRC.includes('function setCertAlertOff('), 'on/off 진입 함수가 없다');

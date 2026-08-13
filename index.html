@@ -2068,6 +2068,8 @@ Screens.dashboard = async () => {
     { ic: '🏷️', lb: '라벨', screen: 'label-print' },
     { ic: '☰', lb: '더보기', screen: 'more' },
   ];
+  // 🧪 성적서 요약 카드 — 알림을 껐으면 건수·경고색을 내지 않는다(FR-20260813-QMX)
+  const certCard = CertNotif.statCard(certAlerts.length, certAlerts.some(a => a.badge === 'err'));
   const qaHtml = quickActions.map(q => {
     const nav = q.tab ? `State._prodActiveTab='${q.tab}';Router.go('${q.screen}')` : `Router.go('${q.screen}')`;
     return `<div class="qa-tile" onclick="${nav}"><div class="qa-ic">${q.ic}</div><div class="qa-lb">${q.lb}</div></div>`;
@@ -2097,10 +2099,10 @@ Screens.dashboard = async () => {
           <div class="stat-num ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${calAlerts.length}건</div>
           <div class="stat-label">${calAlerts.length > 0 ? '검교정 알림' : '검교정 정상'}</div>
         </div>
-        <div class="card clickable stat-card" style="border-left:3px solid ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'var(--err)' : 'var(--warn)') : 'var(--suc)'}" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})">
-          <div class="stat-icon">${certAlerts.length > 0 ? '🧪' : '✅'}</div>
-          <div class="stat-num ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${certAlerts.length}건</div>
-          <div class="stat-label">${certAlerts.length > 0 ? '성적서 알림' : '성적서 정상'}</div>
+        <div class="card clickable stat-card" style="border-left:3px solid ${certCard.bd}" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})">
+          <div class="stat-icon">${certCard.ic}</div>
+          <div class="stat-num ${certCard.cls}">${certCard.num}</div>
+          <div class="stat-label">${certCard.label}</div>
         </div>
         <div class="card clickable stat-card" style="border-left:3px solid ${openDevCount > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="State._hsTab='편차';Router.go('haccp-std',{tab:'편차'})">
           <div class="stat-icon">${openDevCount > 0 ? '📑' : '✅'}</div>
@@ -2179,7 +2181,7 @@ Screens.dashboard = async () => {
         <div class="card mt-8" style="border-left:3px solid var(--gray-l)">
           <div class="row between">
             <div>
-              <div class="fs-13 fw-6 c-txt-l">🔕 시험성적서 알림 꺼짐 (${certAlerts.length}건)</div>
+              <div class="fs-13 fw-6 c-txt-l">🔕 시험성적서 알림 꺼짐</div>
               <div class="fs-11 c-txt-l">만료·임박 성적서는 그대로 있습니다 — 성적서 탭에서 확인할 수 있어요.</div>
             </div>
             <button class="btn btn-sm btn-outline btn-gray" onclick="setCertAlertOff(false)">🔔 켜기</button>
@@ -5055,7 +5057,7 @@ Screens.settings = () => {
           <div style="flex:1">
             <div class="fs-13 fw-6">시험성적서 만료·임박 알림</div>
             <div class="fs-11 c-txt-l mt-2">${CertNotif.off()
-              ? '지금 꺼져 있습니다 — 홈에서 토스트가 뜨지 않습니다. 성적서 탭·현황 카드는 그대로예요.'
+              ? '지금 꺼져 있습니다 — 홈 토스트·목록·요약 카드가 조용합니다. 만료 성적서는 성적서 탭에 그대로 있어요.'
               : '홈을 열 때 만료·갱신 임박 성적서를 알려줍니다.'}</div>
           </div>
           <button class="btn btn-sm ${CertNotif.off() ? 'btn-outline btn-gray' : 'btn-pri'}" style="min-width:64px" onclick="setCertAlertOff(${!CertNotif.off()})">${CertNotif.off() ? '🔕 꺼짐' : '🔔 켜짐'}</button>
@@ -6855,15 +6857,30 @@ const CERT_WARN_DAYS = 30;
 /* 왜 — 만료·임박 성적서가 하나라도 있으면 홈에 들어올 때마다 같은 토스트가 뜬다.
    지금 갱신할 수 없는 기간(의뢰 진행 중·해당 품목 생산 중단)엔 알림을 닫는 일만 남고,
    그러면 사람은 알림 자체를 안 보게 된다.
-   ⚠️ 끄는 것은 **이 기기의 알림 표시**뿐이다 — 만료 판정(HaccpStd.certStatus)·성적서 탭·
-      홈 상태 카드(🧪 N건)는 그대로 둔다. 만료 성적서는 원·부재료 입고검사 기준 미충족이라
-      사실 자체를 숨기면 HACCP 근거가 흔들린다. "조르는 알림"만 멈추고 현황은 남긴다.
+   ⚠️ 끄는 것은 **이 기기의 알림 표시**뿐이다 — 만료 판정(HaccpStd.certStatus)·성적서 탭은
+      그대로 둔다. 만료 성적서는 원·부재료 입고검사 기준 미충족이라 사실 자체를 없애면
+      HACCP 근거가 흔들린다. "조르는 알림"만 멈추고 사실은 한 탭 뒤에 그대로 남긴다.
    저장 = localStorage(기기별). 기존 알림 상태(lastNotifCheck·invAlertPopupDate)와 같은
-      자리라 시트 컬럼을 늘리지 않는다. 다시 켜는 곳 = 홈 배너 + 설정 › 알림 (두 곳 다). */
+      자리라 시트 컬럼을 늘리지 않는다. 다시 켜는 곳 = 홈 배너 + 설정 › 알림 (두 곳 다).
+
+   🔕 2026-08-13 (건의 FR-20260813-QMX) — **홈 상태 카드까지 조용해진다.**
+      3ZC 때는 카드(🧪 N건)를 일부러 남겼는데, 껐는데도 홈에 «성적서 알림 3건» 이 주황색으로
+      그대로 떠서 같은 사람이 "끈 게 아니다"라고 다시 건의했다. 껐다는 말과 화면이 어긋나면
+      스위치를 못 믿게 되고, 그러면 스위치가 있으나 마나다.
+      대신 **카드가 사라지지는 않는다** — 🔕 «성적서 알림 꺼짐» 으로 자리를 지키며 눌러 들어가면
+      성적서 탭에 만료 목록이 그대로 있다. 즉 감추는 것은 **건수와 경고색**이지 사실이 아니다. */
 const CertNotif = {
   KEY: 'mt_certAlertOff',
   off() { try { return localStorage.getItem(this.KEY) === '1'; } catch (e) { return false; } },
   set(v) { try { v ? localStorage.setItem(this.KEY, '1') : localStorage.removeItem(this.KEY); } catch (e) {} },
+  /* 홈 요약 카드 한 칸의 표시값. 껐으면 건수·경고색을 내지 않는다(FR-20260813-QMX).
+     화면이 아니라 여기서 고르는 이유 = 이 판단이 테스트로 실행돼야 하기 때문 —
+     템플릿 문자열 안에 삼항으로 흩어 두면 "껐는데 3건이 남았다"를 잡을 방법이 없다. */
+  statCard(n, hasExpired) {
+    if (this.off())  return { bd: 'var(--gray-l)', ic: '🔕', cls: 'c-txt-l', num: '—', label: '성적서 알림 꺼짐' };
+    if (n > 0)       return { bd: hasExpired ? 'var(--err)' : 'var(--warn)', ic: '🧪', cls: hasExpired ? 'c-err' : 'c-warn', num: n + '건', label: '성적서 알림' };
+    return { bd: 'var(--suc)', ic: '✅', cls: 'c-suc', num: n + '건', label: '성적서 정상' };
+  },
 };
 // </cert-notif>
 
