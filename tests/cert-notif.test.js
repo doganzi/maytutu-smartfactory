@@ -71,9 +71,17 @@ assert.ok(SRC.includes('${certAlerts.length > 0 && CertNotif.off() ? `'),
 const certStatusBlock = slice('  certStatus(validUntil) {', '\n  },');
 assert.ok(!certStatusBlock.includes('CertNotif'),
   '만료 판정(certStatus)이 알림 설정을 보면 안 된다 — 끄기는 표시만 멈추는 것이다');
+// 상태 카드도 끄면 숨긴다 — 규칙이 바뀌었다(FR-20260813-QMX 이상현: "끄면 여기서도 안 나오게").
+//   처음엔 «카드는 남긴다»로 잠갔었다(만료 사실을 감추면 HACCP 근거가 흔들린다는 이유).
+//   그런데 신고자가 본 화면에서 그 칸의 이름이 하필 「성적서 알림」이었다 — 알림을 껐는데
+//   「알림 N건」이 그대로 있으니 끈 게 아니다.
+//   → 카드는 숨기되 **건수는 절대 사라지지 않는다**: 홈의 「🔕 시험성적서 알림 꺼짐 (N건)」 줄이
+//     그 자리를 대신한다. 그래서 아래 두 가지를 함께 못박는다(하나만 지키면 사실이 사라진다).
 const statCard = SRC.slice(SRC.indexOf("'성적서 알림' : '성적서 정상'") - 900, SRC.indexOf("'성적서 알림' : '성적서 정상'"));
-assert.ok(!statCard.includes('CertNotif'),
-  '홈 상태 카드(🧪 N건)까지 숨기면 안 된다 — 만료 사실을 감추는 것이 된다');
+assert.ok(statCard.includes("CertNotif.off() && certAlerts.length > 0 ? '' : `"),
+  '알림을 꺼도 홈 상태 카드가 그대로다 — 「알림 N건」이 남으면 끈 게 아니다');
+assert.ok(/🔕 시험성적서 알림 꺼짐 \(\$\{certAlerts\.length\}건\)/.test(SRC),
+  '꺼짐 배너에 **건수**가 없다 — 카드를 숨긴 이상 여기가 만료 사실이 남는 유일한 자리다');
 
 // ── ③ 다시 켜는 길 ───────────────────────────────────────────────────────────
 assert.ok(SRC.includes('function setCertAlertOff('), 'on/off 진입 함수가 없다');
