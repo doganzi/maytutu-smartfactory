@@ -2035,7 +2035,8 @@ Screens.dashboard = async () => {
       }
     }
     // 시험성적서 알림 — 만료는 입고검사 기준 미충족이므로 즉시 알린다
-    if (certAlerts.length > 0) {
+    // 🔕 CertNotif.off() = 이 기기에서 껐다(FR-20260813-3ZC). 토스트만 멈추고 현황 카드는 남는다.
+    if (certAlerts.length > 0 && !CertNotif.off()) {
       const expired = certAlerts.filter(a => a.badge === 'err');
       if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${expired.map(a=>a.name).join(', ')}`, 'err', 6000);
       const soon = certAlerts.filter(a => a.badge !== 'err');
@@ -2174,8 +2175,23 @@ Screens.dashboard = async () => {
         `).join('')}
       ` : ''}
 
-      ${certAlerts.length > 0 ? `
-        <div class="fs-14 fw-7 mb-8 mt-8">🧪 시험성적서 알림 (${certAlerts.length}건)</div>
+      ${certAlerts.length > 0 && CertNotif.off() ? `
+        <div class="card mt-8" style="border-left:3px solid var(--gray-l)">
+          <div class="row between">
+            <div>
+              <div class="fs-13 fw-6 c-txt-l">🔕 시험성적서 알림 꺼짐 (${certAlerts.length}건)</div>
+              <div class="fs-11 c-txt-l">만료·임박 성적서는 그대로 있습니다 — 성적서 탭에서 확인할 수 있어요.</div>
+            </div>
+            <button class="btn btn-sm btn-outline btn-gray" onclick="setCertAlertOff(false)">🔔 켜기</button>
+          </div>
+        </div>
+      ` : ''}
+
+      ${certAlerts.length > 0 && !CertNotif.off() ? `
+        <div class="row between mb-8 mt-8">
+          <div class="fs-14 fw-7">🧪 시험성적서 알림 (${certAlerts.length}건)</div>
+          <button class="btn btn-sm btn-outline btn-gray" onclick="setCertAlertOff(true)" title="이 기기에서 시험성적서 알림만 끕니다. 성적서 현황은 그대로 남습니다.">🔕 끄기</button>
+        </div>
         ${certAlerts.map(a => `
           <div class="card clickable" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})" style="border-left:3px solid ${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">
             <div class="row between">
@@ -5031,6 +5047,21 @@ Screens.settings = () => {
         </div>
       </div>
       <div class="card">
+        <div class="row between mb-8">
+          <div class="fs-14 fw-7">🔔 알림</div>
+          <span class="badge badge-gray">이 기기</span>
+        </div>
+        <div class="row between">
+          <div style="flex:1">
+            <div class="fs-13 fw-6">시험성적서 만료·임박 알림</div>
+            <div class="fs-11 c-txt-l mt-2">${CertNotif.off()
+              ? '지금 꺼져 있습니다 — 홈에서 토스트가 뜨지 않습니다. 성적서 탭·현황 카드는 그대로예요.'
+              : '홈을 열 때 만료·갱신 임박 성적서를 알려줍니다.'}</div>
+          </div>
+          <button class="btn btn-sm ${CertNotif.off() ? 'btn-outline btn-gray' : 'btn-pri'}" style="min-width:64px" onclick="setCertAlertOff(${!CertNotif.off()})">${CertNotif.off() ? '🔕 꺼짐' : '🔔 켜짐'}</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
         <div class="fs-12 c-txt-l">메이투투 스마트팩토리 v1.0</div>
         <div class="fs-12 c-txt-l">HACCP 기반 생산공정 관리 시스템</div>
@@ -5040,6 +5071,14 @@ Screens.settings = () => {
     </div>
   `;
 };
+
+/** 🔕 시험성적서 알림 on/off — 홈 배너·설정 두 곳에서 같은 함수를 쓴다(FR-20260813-3ZC).
+    끈 뒤 어디서 다시 켜는지 토스트가 말해 준다 — 안 말하면 "꺼졌는데 못 켠다"가 된다. */
+function setCertAlertOff(off) {
+  CertNotif.set(off);
+  toast(off ? '🔕 시험성적서 알림을 껐습니다 — 설정 › 알림에서 다시 켤 수 있어요' : '🔔 시험성적서 알림을 다시 켰습니다', 'suc', off ? 5000 : 3000);
+  Router.render();
+}
 
 function saveSettings() {
   CONFIG.SHEET_ID = $id('set-sheet-id')?.value?.trim() || '';
@@ -6811,6 +6850,22 @@ const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','sto
                          '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가'];
 /** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
 const CERT_WARN_DAYS = 30;
+
+// <cert-notif> ─── 🔕 시험성적서 알림 끄기 (건의 FR-20260813-3ZC) ────────────────
+/* 왜 — 만료·임박 성적서가 하나라도 있으면 홈에 들어올 때마다 같은 토스트가 뜬다.
+   지금 갱신할 수 없는 기간(의뢰 진행 중·해당 품목 생산 중단)엔 알림을 닫는 일만 남고,
+   그러면 사람은 알림 자체를 안 보게 된다.
+   ⚠️ 끄는 것은 **이 기기의 알림 표시**뿐이다 — 만료 판정(HaccpStd.certStatus)·성적서 탭·
+      홈 상태 카드(🧪 N건)는 그대로 둔다. 만료 성적서는 원·부재료 입고검사 기준 미충족이라
+      사실 자체를 숨기면 HACCP 근거가 흔들린다. "조르는 알림"만 멈추고 현황은 남긴다.
+   저장 = localStorage(기기별). 기존 알림 상태(lastNotifCheck·invAlertPopupDate)와 같은
+      자리라 시트 컬럼을 늘리지 않는다. 다시 켜는 곳 = 홈 배너 + 설정 › 알림 (두 곳 다). */
+const CertNotif = {
+  KEY: 'mt_certAlertOff',
+  off() { try { return localStorage.getItem(this.KEY) === '1'; } catch (e) { return false; } },
+  set(v) { try { v ? localStorage.setItem(this.KEY, '1') : localStorage.removeItem(this.KEY); } catch (e) {} },
+};
+// </cert-notif>
 
 const DB_SHEETS = {
   '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
