@@ -2097,11 +2097,12 @@ Screens.dashboard = async () => {
           <div class="stat-num ${calAlerts.length > 0 ? (calAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${calAlerts.length}건</div>
           <div class="stat-label">${calAlerts.length > 0 ? '검교정 알림' : '검교정 정상'}</div>
         </div>
+        ${CertNotif.off() && certAlerts.length > 0 ? '' : `
         <div class="card clickable stat-card" style="border-left:3px solid ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'var(--err)' : 'var(--warn)') : 'var(--suc)'}" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})">
           <div class="stat-icon">${certAlerts.length > 0 ? '🧪' : '✅'}</div>
           <div class="stat-num ${certAlerts.length > 0 ? (certAlerts.some(a=>a.badge==='err') ? 'c-err' : 'c-warn') : 'c-suc'}">${certAlerts.length}건</div>
           <div class="stat-label">${certAlerts.length > 0 ? '성적서 알림' : '성적서 정상'}</div>
-        </div>
+        </div>`}
         <div class="card clickable stat-card" style="border-left:3px solid ${openDevCount > 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="State._hsTab='편차';Router.go('haccp-std',{tab:'편차'})">
           <div class="stat-icon">${openDevCount > 0 ? '📑' : '✅'}</div>
           <div class="stat-num ${openDevCount > 0 ? 'c-warn' : 'c-suc'}">${openDevCount}건</div>
