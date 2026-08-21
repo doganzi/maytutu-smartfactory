@@ -16,7 +16,7 @@ const j = SRC.indexOf('// </prod-plan>');
 assert.ok(i !== -1 && j > i, 'index.html 에서 <prod-plan> 블록을 찾지 못함');
 const ctx = vm.createContext({ Math, Date, Map, Set, parseFloat, isFinite, console });
 vm.runInContext(SRC.slice(i, j), ctx);
-const { planWeekStart, planDate, planPacksPerBox, planSalesEvents, planWeeklySeries, calcProductionPlan } = ctx;
+const { planWeekStart, planDate, planPacksPerBox, planSalesEvents, planWeeklySeries, calcProductionPlan, buildPlanChartSeries } = ctx;
 const PLAN_CFG = vm.runInContext('PLAN_CFG', ctx);   // const 는 컨텍스트 객체에 안 붙는다
 
 const ok = [];
@@ -146,6 +146,61 @@ t('추세는 8주가 안 되면 안 낸다 (없는 근거를 지어내지 않는
 t('판매 이력이 없으면 null — 감으로 배치를 뽑지 않는다', () => {
   assert.strictEqual(calcProductionPlan({ series: [], stock: 500, pending: 0 }), null);
   assert.strictEqual(calcProductionPlan({ series: [{ week: 1, packs: 0 }], stock: 500, pending: 0 }), null);
+});
+
+/* ── 3-2. 그래프 시계열 — 과거 역산 + 향후 시뮬레이션 ───────────────────── */
+const wkTime = n => planWeekStart(AS_OF).getTime() - n * 7 * DAY;   // n주 전 주 시작
+const ev = (weekAgo, packs, dayOffset = 2) => ({ date: new Date(wkTime(weekAgo) + dayOffset * DAY), packs });
+
+t('과거 재고는 현재고에서 역산한다 (재고ᵢ₋₁ = 재고ᵢ − 생산ᵢ + 출하ᵢ)', () => {
+  const s = buildPlanChartSeries({
+    useEvents: [ev(0, 200), ev(1, 272), ev(2, 248)],       // ev(0)=이번 주 진행분
+    prodEvents: [ev(1, 240), ev(2, 320)],
+    stockNow: 840, demand: 250, asOf: AS_OF, weeksBack: 2, weeksAhead: 3,
+  });
+  assert.strictEqual(s.splitIndex, 2, '「지금」 은 과거 2주 뒤');
+  assert.deepStrictEqual([...s.labels], ['08.09', '08.16', '지금', '+1주', '+2주', '+3주']);
+  // 마지막 완결주말 = 840 + 이번주출하 200 − 이번주생산 0 = 1040 · 그 전주 = 1040 − 240 + 272 = 1072
+  assert.deepStrictEqual([...s.stock].slice(0, 3), [1072, 1040, 840]);
+  assert.deepStrictEqual([...s.use].slice(0, 3), [248, 272, null], '이번 주 진행분은 막대로 그리지 않는다');
+  assert.deepStrictEqual([...s.prod].slice(0, 3), [320, 240, null]);
+});
+
+t('향후 계획 — 목표를 채우는 배치만 만들고, 넘치면 0을 낸다', () => {
+  const s = buildPlanChartSeries({
+    useEvents: [], prodEvents: [], stockNow: 840, demand: 249.6389,
+    asOf: AS_OF, weeksBack: 8, weeksAhead: 6,
+  });
+  assert.strictEqual(s.labels.length, 15, '과거 8 + 지금 1 + 미래 6');
+  assert.strictEqual(s.splitIndex, 8);
+  assert.deepStrictEqual([...s.prod].slice(9), [0, 160, 280, 240, 240, 240], '넘치는 첫 주는 0배치');
+  assert.deepStrictEqual([...s.stock].slice(9), [590, 501, 531, 521, 512, 502]);
+  assert.strictEqual(s.safety[0], 499, '안전재고 2주선(봉)');
+  assert.strictEqual(s.nextBatches, 0, '다음 주 권장 배치');
+  assert.strictEqual(s.steadyBatches, 6.2, '안정 구간 배치/주');
+  assert.ok(s.stock.slice(10).every(v => v >= s.safety[0]), '계획대로면 안전재고선 아래로 안 떨어진다');
+  assert.deepStrictEqual([...s.use].slice(9), [250, 250, 250, 250, 250, 250], '미래 사용량 = 예측 소비');
+});
+
+t('재고가 마른 상태에서 시작하면 첫 주부터 배치가 나온다', () => {
+  const s = buildPlanChartSeries({
+    useEvents: [], prodEvents: [], stockNow: 200, demand: 250,
+    asOf: AS_OF, weeksBack: 4, weeksAhead: 2,
+  });
+  assert.strictEqual(s.nextBatches, 14, '(250×3 − 200) ÷ 40 → 올림 14배치');
+  assert.ok(s.stock[s.splitIndex + 1] >= s.safety[0], '한 주 만에 안전재고선 위로 올라온다');
+});
+
+t('과거 재고 역산은 0 밑으로 안 내려간다', () => {
+  const s = buildPlanChartSeries({
+    useEvents: [], prodEvents: [ev(1, 5000)], stockNow: 10, demand: 100,
+    asOf: AS_OF, weeksBack: 3, weeksAhead: 1,
+  });
+  assert.ok(s.stock.every(v => v >= 0), '음수 재고는 그리지 않는다');
+});
+
+t('수요가 0이면 그래프를 만들지 않는다 (0으로 나누지 않는다)', () => {
+  assert.strictEqual(buildPlanChartSeries({ useEvents: [], prodEvents: [], stockNow: 500, demand: 0, asOf: AS_OF }), null);
 });
 
 /* ── 4. 종단 — 원본 판매행에서 배치까지 ─────────────────────────────────── */
