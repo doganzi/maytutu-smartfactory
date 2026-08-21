@@ -8540,6 +8540,7 @@ Screens['items-rm'] = async () => {
                 <div class="fs-14 fw-6">${name} <span class="fs-11 c-txt-l">${code}</span></div>
                 <div class="row" style="gap:6px;align-items:center">
                   ${isWater ? '<span class="badge badge-info">수돗물</span>' :
+                    rpVal <= 0 ? '<span class="badge badge-gray">발주점 미설정</span>' :
                     rmNeedsOrder ? '<span class="badge badge-warn">발주필요</span>' : '<span class="badge badge-suc">정상</span>'}
                   ${isAdmin && !isWater ? `<button class="btn btn-sm btn-outline btn-err" style="padding:2px 8px;font-size:11px" onclick="deactivateRmItem('${code}','${(name||'').replace(/'/g,"\\'")}', ${lotCount})">🗑</button>` : ''}
                 </div>
@@ -8567,6 +8568,109 @@ Screens['items-rm'] = async () => {
   `;
 };
 
+/* ── 발주점(안전재고) 산식 ────────────────────────────────────────────────
+   손으로 박아 둔 발주점은 생산량이 바뀌면 조용히 썩는다. 2026-08-21 실측에서
+   계란 75kg = 1.8일치, 전용믹스 480kg = 4일치로 «리드타임조차» 못 덮고 있었다.
+   그래서 실제 사용량(공정기록)과 실제 입고 간격(입고기록)에서 매번 다시 뽑는다.
+
+     d(일평균)   = 최근 12주(완결주) 사용량 평균 ÷ 7                 kg/일
+     σ           = 같은 구간 주간 사용량 표본표준편차                kg/주
+     R(발주주기) = 실측 입고일 간격의 75퍼센타일(3회 이상) · 없으면 마스터 주문주기
+     P(보호기간) = 리드타임 + R/2   ← 아무 때나 봐도 다음 보충까지 남은 기대 일수
+     SS(안전여유)= 1.65 × σ × √(P/7)                     (서비스수준 95%)
+     발주점      = d × P + SS  → SKU 포장단위(판·통·포대)로 올림
+
+   R 을 중앙값이 아니라 75퍼센타일로 잡는 이유 = 주말·연휴로 벌어지는 «나쁜 쪽»
+   간격까지 덮어야 알람이 제 역할을 한다(계란 실측 간격은 대부분 1일이지만 주말마다 4일).
+   ⚠️ 숫자는 냉장고 용량도 유통기한도 모른다 — 값은 ✏️ 발주점에서 손으로 덮어쓸 수 있고,
+      덮어쓴 값이 시트의 정본이다. 이 산식은 «제안»까지만 한다.
+   검증: node tests/reorder-point.test.js                                      */
+// <reorder-calc>
+const RP_CFG = {
+  Z: 1.65,          // 서비스수준 95%
+  WEEKS: 12,        // 사용량 관측 창(완결주)
+  RCV_DAYS: 180,    // 입고간격 관측 창
+  GAP_PCT: 0.75,    // 발주주기 백분위 — 나쁜 쪽 간격을 덮는다
+  MIN_GAPS: 3,      // 실측 간격이 이보다 적으면 마스터 주문주기로 떨어진다
+  LEAD_DEFAULT: 3,  // 리드타임 미설정 시
+  CYCLE: { '매일': 1, '격일': 2, '주간': 7, '주1회': 7, '격주': 14, '월간': 30, '월1회': 30, '발주점도달시': 1 },
+};
+/** 시트 날짜("2026-08-21 8:59" 등) → Date.
+    ⚠️ ISO 흉내(' '→'T')를 내지 말 것 — 한 자리 시(8:59)가 통째로 버려진다(입고 68건 중 9건 실종). */
+function rpDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
+function rpWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
+function rpPercentile(arr, p) { const s = [...arr].sort((a, b) => a - b); if (!s.length) return null; const i = p * (s.length - 1), lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (i - lo) * (s[hi] - s[lo]); }
+
+/** 원재료별 주간 사용량(kg) — 공정기록 input 스텝의 inputQty 를 usedLotIds→원재료LOT 로 품목에 귀속.
+    진행 중인 주는 반쪽이라 뺀다(안 빼면 평균이 주 초마다 주저앉는다). */
+function rpWeeklyUse(procRecords, rmLots, asOf) {
+  const lotItem = new Map((rmLots || []).map(l => [l[0], l[1]]));
+  const curWk = rpWeekStart(asOf).getTime();
+  const out = new Map();
+  for (const r of procRecords || []) {
+    if (!r || r[3] !== 'input') continue;
+    let qty = 0; try { qty = parseFloat(JSON.parse(r[5] || '{}').inputQty) || 0; } catch (e) { qty = 0; }
+    if (qty <= 0) continue;
+    let code = null;
+    for (const id of String(r[4] || '').split(',')) {          // QR 개별(…-01)은 뒤 일련번호를 떼야 LOT 과 붙는다
+      const lot = id.trim().replace(/-\d+$/, '');
+      if (lotItem.has(lot)) { code = lotItem.get(lot); break; }
+    }
+    if (!code) continue;                                       // 물처럼 LOT 이 없는 자재 — 재고 추적 대상 아님
+    const d = rpDate(r[11]); if (!d) continue;
+    const w = rpWeekStart(d).getTime(); if (w >= curWk) continue;
+    if (!out.has(code)) out.set(code, new Map());
+    const m = out.get(code); m.set(w, (m.get(w) || 0) + qty);
+  }
+  return out;
+}
+
+/** 관측 창(최근 WEEKS 주, 첫 사용주 이후)의 주간 사용량 배열 — 안 쓴 주는 0 으로 채운다.
+    첫 사용주 이전을 0 으로 깔면 자재 교체 직후 평균이 반토막 난다(RM003→RM011). */
+function rpUseSeries(weekMap, asOf) {
+  if (!weekMap || !weekMap.size) return [];
+  const DAY = 86400000, curWk = rpWeekStart(asOf).getTime();
+  const from = Math.max(Math.min(...weekMap.keys()), curWk - RP_CFG.WEEKS * 7 * DAY);
+  const ser = [];
+  for (let w = from; w < curWk; w += 7 * DAY) ser.push(weekMap.get(w) || 0);
+  return ser;
+}
+
+/** 실측 입고 간격(일) — 같은 날 여러 건은 «한 번의 보충»이므로 날짜로 묶는다. */
+function rpReceiptGaps(rcvRecords, code, asOf) {
+  const DAY = 86400000, since = asOf.getTime() - RP_CFG.RCV_DAYS * DAY, days = new Set();
+  for (const r of rcvRecords || []) {
+    if (!r || r[1] !== '원재료' || r[3] !== code) continue;
+    const d = rpDate(r[8]); if (!d) continue;
+    d.setHours(0, 0, 0, 0);
+    if (d.getTime() >= since) days.add(d.getTime());
+  }
+  const sorted = [...days].sort((a, b) => a - b), gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push((sorted[i] - sorted[i - 1]) / DAY);
+  return gaps;
+}
+
+/** 발주점 산출. 사용 이력이 없으면 null — 근거 없는 숫자를 심지 않는다. */
+function calcReorderPoint({ series, gaps, leadDays, orderCycle, perUnit }) {
+  const ser = (series || []).map(v => parseFloat(v) || 0);
+  if (!ser.length) return null;
+  const n = ser.length, mu = ser.reduce((a, b) => a + b, 0) / n;
+  if (mu <= 0) return null;
+  const sd = n > 1 ? Math.sqrt(ser.reduce((a, b) => a + (b - mu) ** 2, 0) / (n - 1)) : 0;
+  const lt = parseFloat(leadDays) > 0 ? parseFloat(leadDays) : RP_CFG.LEAD_DEFAULT;
+  const cyc = (gaps || []).length >= RP_CFG.MIN_GAPS
+    ? rpPercentile(gaps, RP_CFG.GAP_PCT)
+    : (RP_CFG.CYCLE[String(orderCycle || '').trim()] || 7);
+  const r = Math.round(cyc * 10) / 10;
+  const p = lt + r / 2;
+  const ss = RP_CFG.Z * sd * Math.sqrt(p / 7);
+  const daily = mu / 7, rop = daily * p + ss;
+  const per = parseFloat(perUnit) > 0 ? parseFloat(perUnit) : 0;
+  const rounded = per ? Math.round(Math.ceil(rop / per) * per * 100) / 100 : Math.ceil(rop);
+  return { weeks: n, mu, sd, daily, leadDays: lt, cycleDays: r, protectDays: p, safety: ss, rop, rounded };
+}
+// </reorder-calc>
+
 /* 발주점 편집 모달 — SKU 단위(판/통/봉) 인식해 친화적 입력 */
 function openReorderPointEditor(code, name, currentRpKg, sku, unit) {
   const parsed = parseSkuUnit(sku);
@@ -8585,6 +8689,7 @@ function openReorderPointEditor(code, name, currentRpKg, sku, unit) {
         <label>발주점 (${unitName} 단위)</label>
         <input type="number" id="rp-input" value="${curInUnit}" min="0" step="${step}" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
       </div>
+      <div id="rp-suggest" class="fs-11 c-txt-l" style="margin-bottom:8px">📐 권장 발주점 계산 중…</div>
       ${hasSkuUnit ? `
         <div class="card bl-info" style="background:#e3f2fd;padding:8px;margin-bottom:12px">
           <div class="fs-11 c-info">${unitName} 1개 = ${perUnit}${unit || 'kg'}</div>
@@ -8606,6 +8711,46 @@ function openReorderPointEditor(code, name, currentRpKg, sku, unit) {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
   overlay.querySelector('#rp-save').onclick = () => saveReorderPoint(code, name, perUnit, unit, close);
   setTimeout(() => $id('rp-input')?.focus(), 50);
+  rpRenderSuggestion(code, perUnit, unitName, unit || 'kg');   // 근거를 옆에 깔아 준다 — 채택은 사람이
+}
+
+/** 실사용·실입고에서 뽑은 권장 발주점을 모달에 깔아 준다. 채우기만 하고 저장하지 않는다. */
+async function rpRenderSuggestion(code, perUnit, unitName, unit) {
+  const el = $id('rp-suggest');
+  if (!el) return;
+  try {
+    const [items, lots, proc, rcv] = await Promise.all([
+      SheetsAPI.getAll('원재료품목').catch(() => []),
+      SheetsAPI.getAll('원재료LOT').catch(() => []),
+      SheetsAPI.getAll('공정기록').catch(() => []),
+      SheetsAPI.getAll('입고기록').catch(() => []),
+    ]);
+    const item = items.find(i => i && i[0] === code) || [];
+    const asOf = new Date();
+    const res = calcReorderPoint({
+      series: rpUseSeries(rpWeeklyUse(proc, lots, asOf).get(code), asOf),
+      gaps: rpReceiptGaps(rcv, code, asOf),
+      leadDays: item[10], orderCycle: item[11], perUnit,
+    });
+    if (!res) { el.innerHTML = '📐 최근 사용 이력이 없어 권장값을 낼 수 없습니다 — 손으로 정하세요'; return; }
+    const inUnit = perUnit > 0 ? Math.round(res.rounded / perUnit * 10) / 10 : res.rounded;
+    el.innerHTML = `
+      <div class="card bl-info" style="background:var(--bg);padding:8px;margin:0">
+        <div class="row between" style="align-items:center;gap:6px">
+          <div class="fs-12 fw-6">📐 권장 발주점 <b>${inUnit}${unitName}</b>${perUnit > 0 ? ` (${res.rounded}${unit})` : ''}</div>
+          <button class="btn btn-sm btn-outline btn-pri" id="rp-apply" style="padding:2px 8px;font-size:11px;flex-shrink:0">적용</button>
+        </div>
+        <div class="fs-11 c-txt-l" style="margin-top:4px">
+          최근 ${res.weeks}주 평균 <b>${Math.round(res.mu)}${unit}/주</b>(일 ${res.daily.toFixed(1)}${unit})
+          · 리드타임 ${res.leadDays}일 · 실측 발주주기 ${res.cycleDays}일
+          → 보호기간 ${res.protectDays.toFixed(1)}일 + 안전여유 ${Math.round(res.safety)}${unit}
+        </div>
+      </div>`;
+    const btn = $id('rp-apply');
+    if (btn) btn.onclick = () => { const i = $id('rp-input'); if (i) { i.value = inUnit; i.focus(); } };
+  } catch (e) {
+    el.innerHTML = '📐 권장값 계산 실패 — ' + (e.message || '데이터를 읽지 못했습니다');
+  }
 }
 
 async function saveReorderPoint(code, name, perUnit, unit, closeFn) {
