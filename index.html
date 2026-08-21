@@ -2394,65 +2394,157 @@ function calcProductionPlan({ series, stock, pending, safetyWeeks, batchPacks })
     surplus: avail - target,
   };
 }
+
+/** 그래프용 시계열 — 과거 실적 + 「지금」 + 향후 계획. 단위는 전부 **봉**(축 하나로 읽힌다).
+      · 사용량  = 과거는 실제 출하(재고를 실제로 깎은 양) · 미래는 예측 소비 D(가맹점 실판매 기준)
+      · 생산량  = 과거는 실제 생산 · 미래는 매주 order-up-to 시뮬레이션(= 이 산식이 권하는 양)
+      · 보유재고 = 현재고를 앵커로 과거는 역산(재고ᵢ₋₁ = 재고ᵢ − 생산ᵢ + 출하ᵢ), 미래는 시뮬레이션
+      · 안전재고선 = D × 안전주수 (기본 2주) — 재고 선이 이 선 위에 있으면 안전
+    ⚠️ 과거 재고는 «현재고에서 역산한 추정»이다. 날짜별 재고원장이 없어서이고, 최신 값만 실측과 일치한다. */
+function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, weeksBack, weeksAhead, safetyWeeks, batchPacks }) {
+  const d = parseFloat(demand);
+  if (!(d > 0)) return null;
+  const DAY = 86400000, now = asOf || new Date(), cur = planWeekStart(now).getTime();
+  const back = weeksBack > 0 ? weeksBack : PLAN_CFG.WEEKS;
+  const ahead = weeksAhead > 0 ? weeksAhead : 6;
+  const sw = parseFloat(safetyWeeks) > 0 ? parseFloat(safetyWeeks) : PLAN_CFG.SAFETY_WEEKS;
+  const bp = parseFloat(batchPacks) > 0 ? parseFloat(batchPacks) : PLAN_CFG.BATCH_PACKS;
+  const bucket = evs => {
+    const m = new Map();
+    for (const e of evs || []) {
+      const dt = e && (e.date instanceof Date ? e.date : planDate(e.date));
+      const p = e ? parseFloat(e.packs) || 0 : 0;
+      if (!dt || !(p > 0)) continue;
+      const w = planWeekStart(dt).getTime();
+      m.set(w, (m.get(w) || 0) + p);
+    }
+    return m;
+  };
+  const U = bucket(useEvents), P = bucket(prodEvents);
+  const wks = []; for (let i = back; i >= 1; i--) wks.push(cur - i * 7 * DAY);
+  // 마지막 완결주말 재고 = 현재고에서 «이번 주 진행분»을 되돌린 값
+  const ends = new Array(wks.length);
+  ends[wks.length - 1] = Math.max(0, (parseFloat(stockNow) || 0) + (U.get(cur) || 0) - (P.get(cur) || 0));
+  for (let i = wks.length - 1; i >= 1; i--) ends[i - 1] = Math.max(0, ends[i] - (P.get(wks[i]) || 0) + (U.get(wks[i]) || 0));
+  const lab = w => { const t = new Date(w + 6 * DAY); return String(t.getMonth() + 1).padStart(2, "0") + "." + String(t.getDate()).padStart(2, "0"); };
+  const labels = wks.map(lab), use = wks.map(w => Math.round(U.get(w) || 0)), prod = wks.map(w => Math.round(P.get(w) || 0)), stock = ends.map(v => Math.round(v));
+  const splitIndex = labels.length;                       // 「지금」 위치
+  labels.push("지금"); use.push(null); prod.push(null); stock.push(Math.round(parseFloat(stockNow) || 0));
+  const target = d * (sw + 1);
+  let s = parseFloat(stockNow) || 0;
+  const plan = [];
+  for (let i = 1; i <= ahead; i++) {
+    const p = Math.ceil(Math.max(0, target - s) / bp) * bp;
+    s = s + p - d;
+    plan.push(p);
+    labels.push("+" + i + "주"); use.push(Math.round(d)); prod.push(p); stock.push(Math.round(Math.max(0, s)));
+  }
+  return {
+    labels, use, prod, stock, splitIndex,
+    safety: labels.map(() => Math.round(d * sw)),
+    demand: d, safetyWeeks: sw, batchPacks: bp, targetStock: target,
+    nextBatches: plan.length ? plan[0] / bp : 0,
+    steadyBatches: Math.round(d / bp * 10) / 10,
+    weeksOnHand: stock.map(v => Math.round(v / d * 100) / 100),
+  };
+}
 // </prod-plan>
 
-/** 홈 「이번 주 권장 생산」 — 실패해도 홈은 그대로여야 하니 조용히 접는다. */
+/** 생산 계획 그래프(SVG) — 축 하나(봉)에 사용량·생산량 막대 + 보유재고 선 + 안전재고선.
+    차트 라이브러리를 새로 안 들이는 이유: 이 앱은 오프라인 PWA 단일 파일이라 CDN 이 막히면 그래프가 통째로 사라진다. */
+function planSvgChart(s) {
+  const W = 720, H = 240, L = 46, R = 8, T = 12, B = 38;
+  const n = s.labels.length, iw = W - L - R, ih = H - T - B;
+  const raw = Math.max(1, ...s.use.map(v => v || 0), ...s.prod.map(v => v || 0), ...s.stock, ...s.safety) * 1.05;
+  // 눈금이 1141 같은 숫자가 되지 않게 — 5칸 기준으로 1·2·2.5·5·10 배수 중 하나로 맞춘다
+  const rough = raw / 5, mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = ([1, 2, 2.5, 5, 10].find(m => rough <= m * mag) || 10) * mag;
+  const maxV = Math.ceil(raw / step) * step;
+  const cw = iw / n, bw = Math.min(cw * 0.3, 13);
+  const cx = i => L + cw * (i + 0.5), cy = v => T + ih * (1 - v / maxV);
+  const bar = (v, i, dx, fill, op) => (v == null || v <= 0) ? '' :
+    `<rect x="${(cx(i) + dx - bw / 2).toFixed(1)}" y="${cy(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + ih - cy(v)).toFixed(1)}" rx="1.5" fill="${fill}" fill-opacity="${op}"/>`;
+  const line = (from, to) => s.stock.slice(from, to + 1)
+    .map((v, k) => `${k ? 'L' : 'M'}${cx(from + k).toFixed(1)},${cy(v).toFixed(1)}`).join('');
+  const tickVals = []; for (let v = 0; v <= maxV + 0.001; v += step) tickVals.push(v);
+  const ticks = tickVals.map(v =>
+    `<line x1="${L}" y1="${cy(v).toFixed(1)}" x2="${W - R}" y2="${cy(v).toFixed(1)}" stroke="var(--gray-l)" stroke-width="0.5"/>
+     <text x="${L - 5}" y="${(cy(v) + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--txt-l)">${Math.round(v)}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" role="img" aria-label="주별 사용량·생산량·보유재고 추이">
+    ${ticks}
+    <line x1="${cx(s.splitIndex).toFixed(1)}" y1="${T}" x2="${cx(s.splitIndex).toFixed(1)}" y2="${T + ih}" stroke="var(--txt-l)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+    ${s.use.map((v, i) => bar(v, i, -bw * 0.6, 'var(--info)', i < s.splitIndex ? 0.85 : 0.35)).join('')}
+    ${s.prod.map((v, i) => bar(v, i, bw * 0.6, i < s.splitIndex ? 'var(--suc)' : 'var(--pri)', i < s.splitIndex ? 0.85 : 0.55)).join('')}
+    <line x1="${L}" y1="${cy(s.safety[0]).toFixed(1)}" x2="${W - R}" y2="${cy(s.safety[0]).toFixed(1)}" stroke="var(--err)" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="${L + 4}" y="${(cy(s.safety[0]) - 5).toFixed(1)}" font-size="9" fill="var(--err)">안전재고 ${s.safetyWeeks}주 · ${s.safety[0]}봉</text>
+    <path d="${line(0, s.splitIndex)}" fill="none" stroke="var(--txt)" stroke-width="2"/>
+    <path d="${line(s.splitIndex, n - 1)}" fill="none" stroke="var(--txt)" stroke-width="2" stroke-dasharray="5 4" opacity="0.75"/>
+    ${s.stock.map((v, i) => `<circle cx="${cx(i).toFixed(1)}" cy="${cy(v).toFixed(1)}" r="${i === s.splitIndex ? 3.5 : 2}" fill="var(--txt)"/>`).join('')}
+    ${s.labels.map((t, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 14}" text-anchor="middle" font-size="8.5" fill="${i === s.splitIndex ? 'var(--txt)' : 'var(--txt-l)'}" font-weight="${i === s.splitIndex ? 700 : 400}">${t}</text>`).join('')}
+    ${s.weeksOnHand.map((w, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 25}" text-anchor="middle" font-size="7.5" fill="var(--txt-l)">${w.toFixed(1)}주</text>`).join('')}
+  </svg>`;
+}
+
+/** 홈 「생산 계획」 그래프 — 실패해도 홈은 그대로여야 하니 조용히 접는다. */
 async function loadHomeProdPlan() {
   const el = $id('home-prod-plan');
   if (!el) return;
   try {
-    const [items, lots, wos, mb] = await Promise.all([
+    const [items, lots, wos, ships, mb] = await Promise.all([
       SheetsAPI.getAll('완제품품목').catch(() => []),
       SheetsAPI.getAll('완제품LOT').catch(() => []),
       SheetsAPI.getAll('작업지시서').catch(() => []),
+      SheetsAPI.getAll('출하기록').catch(() => []),
       FactoryPnl.fetchMarketbom().catch(() => ({ rows: [] })),
     ]);
     const asOf = new Date();
+    const FG_DEAD = new Set(['출하완료', '폐기', '삭제', '소진', '채번예약']);
     const cards = [];
-    let shipsP = null;                                     // 4천 행이라 폴백이 필요할 때만 읽는다
-    const ships = () => (shipsP = shipsP || SheetsAPI.getAll('출하기록').catch(() => []));
     for (const it of items) {
       if (!it || !it[0] || it[7] === '비활성') continue;
       const code = it[0];
+      const myLots = new Set(lots.filter(l => l && l[1] === code).map(l => l[0]));
+      // 출하 = 재고를 실제로 깎은 양(그래프의 과거 사용량·재고 역산은 이걸 써야 앞뒤가 맞는다)
+      const shipEv = ships.filter(s => s && myLots.has(s[1]) && !/테스트|E2E/i.test(String(s[3] || '') + String(s[7] || '')))
+        .map(s => ({ date: s[6], packs: parseFloat(s[4]) || 1 }));
+      // 수요 예측 = 마켓봄 실판매(가맹점 주문). 연결이 없으면 출하로 떨어진다.
       const mbCodes = String(it[FG_EXT.mbCodes] || '').split(',').map(s => s.trim()).filter(Boolean);
-      // 수요 — 마켓봄 실판매(봉) 우선, 연결이 없거나 못 읽으면 공장 출하 실적
-      let src = 'marketbom';
-      let events = planSalesEvents(mb.rows, mbCodes);
-      if (!events.length) {
-        src = 'ship';
-        const myLots = new Set(lots.filter(l => l && l[1] === code).map(l => l[0]));
-        events = (await ships()).filter(s => s && myLots.has(s[1]) && !/테스트|E2E/i.test(String(s[3] || '') + String(s[7] || '')))
-          .map(s => ({ date: s[6], packs: parseFloat(s[4]) || 1 }));
-      }
-      const FG_DEAD = new Set(['출하완료', '폐기', '삭제', '소진', '채번예약']);
-      const stock = lots.filter(l => l && l[1] === code && !FG_DEAD.has(l[9]))
-        .reduce((s, l) => s + (parseFloat(l[8]) || 0), 0);
+      const saleEv = planSalesEvents(mb.rows, mbCodes);
+      const src = saleEv.length ? '실판매' : '출하';
+      const stock = lots.filter(l => l && l[1] === code && !FG_DEAD.has(l[9])).reduce((a, l) => a + (parseFloat(l[8]) || 0), 0);
       const pending = wos.filter(w => w && w[3] === code && ['냉동보관중', '진행중'].includes(w[12]))
-        .reduce((s, w) => s + (parseFloat(w[7]) || 0), 0);
-      const plan = calcProductionPlan({ series: planWeeklySeries(events, asOf), stock, pending });
-      if (plan) cards.push({ code, name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan });
+        .reduce((a, w) => a + (parseFloat(w[7]) || 0), 0);
+      const plan = calcProductionPlan({ series: planWeeklySeries(saleEv.length ? saleEv : shipEv, asOf), stock, pending });
+      if (!plan) continue;
+      const prodEv = lots.filter(l => l && l[1] === code && l[5] && !['폐기', '삭제'].includes(l[9]))
+        .map(l => ({ date: l[5], packs: parseFloat(l[10]) || parseFloat(l[3]) || 0 }));
+      if (pending > 0) prodEv.push({ date: asOf, packs: pending });   // 냉동중 = 이번 주에 이미 만든 것
+      const chart = buildPlanChartSeries({ useEvents: shipEv, prodEvents: prodEv, stockNow: plan.avail, demand: plan.demand, asOf });
+      if (chart) cards.push({ name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan, chart });
     }
     if (!cards.length) return;
-    el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 이번 주 권장 생산</div>' + cards.map(c => {
-      const p = c.plan, low = p.batches > 0, tr = p.trend;
-      const trTxt = tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'} ${Math.abs(tr * 100).toFixed(0)}%`;
+    el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 생산 계획 (주별 · 실적 → 예측)</div>' + cards.map(c => {
+      const p = c.plan, s = c.chart, tr = p.trend;
+      const key = s.nextBatches > 0
+        ? `다음 주 권장 <b class="c-pri">${s.nextBatches}배치</b>(${s.nextBatches * s.batchPacks}봉)`
+        : `다음 주 <b class="c-suc">생산 여유</b>`;
       return `
-        <div class="card clickable" onclick="Router.go('wo-create')" style="border-left:3px solid ${low ? 'var(--pri)' : 'var(--suc)'}">
-          <div class="row between" style="align-items:flex-start;gap:8px">
-            <div style="flex:1">
-              <div class="fs-14 fw-6">${c.name}</div>
-              <div class="fs-12 c-txt-l">예측 소비 <b>${Math.round(p.demand)}봉/주</b>(${Math.round(p.demand * c.kgPer).toLocaleString()}kg)${trTxt} · 최근 ${p.weeks}주 ${c.src === 'marketbom' ? '실판매' : '출하'} 기준</div>
-              <div class="fs-12 c-txt-l">가용 <b>${Math.round(p.avail)}봉</b>(재고 ${Math.round(p.stock)}${p.pending > 0 ? ` + 냉동중 ${Math.round(p.pending)}` : ''}) = <b>${p.weeksOnHand.toFixed(1)}주치</b> · 목표 ${Math.round(p.target)}봉</div>
-              <div class="fs-12 mt-2 ${low ? 'c-pri fw-6' : 'c-txt-l'}">${low
-                ? `부족 ${Math.round(p.need)}봉 → <b>${p.batches}배치</b> (${p.produce}봉 · ${(p.produce * c.kgPer).toLocaleString()}kg)`
-                : `목표보다 ${Math.round(p.surplus)}봉 많음 — 안전재고 2주선(${Math.round(p.safetyLine)}봉)까지 <b>약 ${Math.round(p.daysToSafety)}일</b> · 소비 균형 ${p.balanceBatches}배치/주`}</div>
-            </div>
-            <span class="badge badge-${low ? 'pri' : 'suc'}">${low ? p.batches + '배치' : '생산 여유'}</span>
+        <div class="card">
+          <div class="fs-14 fw-6">${c.name}</div>
+          <div class="fs-11 c-txt-l" style="margin:2px 0 6px">지금 <b>${Math.round(p.avail)}봉 · ${p.weeksOnHand.toFixed(1)}주치</b> · 예측 소비 <b>${Math.round(p.demand)}봉/주</b>(${Math.round(p.demand * c.kgPer).toLocaleString()}kg)${tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'}${Math.abs(tr * 100).toFixed(0)}%`} · ${key}</div>
+          ${planSvgChart(s)}
+          <div class="fs-10 c-txt-l" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--info);border-radius:2px;vertical-align:-1px"></span> 사용량(과거=출하 · 미래=예측)</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--suc);border-radius:2px;vertical-align:-1px"></span> 생산 실적</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--pri);border-radius:2px;vertical-align:-1px"></span> 권장 생산</span>
+            <span><span style="display:inline-block;width:12px;height:2px;background:var(--txt);vertical-align:3px"></span> 보유재고(봉)</span>
+            <span><span style="display:inline-block;width:12px;height:2px;background:var(--err);vertical-align:3px"></span> 안전재고 ${s.safetyWeeks}주선</span>
           </div>
+          <div class="fs-10 c-txt-l" style="margin-top:4px">수요 예측 = 최근 ${p.weeks}주 ${c.src} 선형가중평균 · 미래 생산 = 매주 «안전 ${s.safetyWeeks}주 + 다음주 1주»를 채우는 양(${s.batchPacks}봉 배치 단위) · 안정되면 주 ${s.steadyBatches}배치 · 과거 재고는 현재고에서 역산한 추정</div>
         </div>`;
     }).join('');
   } catch (e) {
-    console.warn('[홈] 생산량 제안 계산 실패:', e);
+    console.warn('[홈] 생산 계획 그래프 실패:', e);
   }
 }
 
