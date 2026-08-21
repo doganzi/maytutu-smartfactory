@@ -2207,6 +2207,9 @@ Screens.dashboard = async () => {
       ` : ''}
 
       <!-- Drive 서류 부족 — 렌더 후 hsLoadHomeDocAlert() 가 채운다 -->
+      <div id="home-prod-plan"></div>
+
+      <!-- Drive 서류 부족 -->
       <div id="home-doc-alert"></div>
 
       <!-- 빠른 작업 -->
@@ -2258,6 +2261,7 @@ Screens.dashboard = async () => {
     }
   }
 
+  loadHomeProdPlan();     // 마켓봄 실판매(ERP API) 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
   hsLoadHomeDocAlert();   // Drive 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
 };
 
@@ -2295,6 +2299,143 @@ async function hsLoadHomeDocAlert() {
     if (errN > 0) toast(`📂 서류 미보관 ${errN}건 — 성적서 탭에서 확인하세요`, 'err', 6000);
   } catch (e) {
     console.warn('[홈] Drive 문서 현황 조회 실패:', e);
+  }
+}
+
+/* ── 주간 생산량 제안 ──────────────────────────────────────────────────────────
+   「이번 주 몇 배치 만들까」를 감이 아니라 실판매에서 뽑는다.
+
+     D(예측 주간소비) = 마켓봄 실판매 최근 8주 **선형가중** 이동평균(봉)
+                        최근 주에 더 무게를 준다 — 단순평균은 두 달 전 값이 지난주와 같은 힘을 갖는다.
+     가용재고 S       = 완제품LOT 출하가능 잔량 + 냉동보관중·진행중 WO 예정 봉수(12h 뒤 합류)
+     목표 T           = D × (안전재고 2주 + 다음 주 소비 1주) = 3D
+     권장 생산        = max(0, T − S)  → 작업지시 1건 = 40봉(200kg) 단위로 올림
+
+   ⚠️ 재고가 목표보다 많으면 **0배치가 정답**이다. 늘 뭔가 만들라고 말하는 제안은 과잉재고를 굳힌다.
+   ⚠️ 수요는 **마켓봄 실판매**(가맹점 주문)를 쓴다. 공장 출하는 물류로 «밀어낸» 양이라 실수요보다
+      크고(2026-08 실측 주 17봉·12주 누적 207봉), 그 숫자로 계획하면 과잉생산이 스스로를 정당화한다.
+      마켓봄을 못 읽으면 출하 실적으로 떨어지고 화면에 「출하 기준」이라고 밝힌다.
+   ⚠️ 마켓봄↔완제품 연결은 **품명 추측이 아니라 `완제품품목[19] 마켓봄코드`**(쉼표구분)로만 한다.
+      품명은 실제로 안 맞는다 — 마켓봄 "앙호두 전용반죽" vs 마스터 "앙호두(호두과자 전용반죽)".
+      앞글자 일치로 풀면 앞치마·모자·쿠폰 같은 굿즈가 반죽 수요로 딸려 들어온다.
+   검증: node tests/prod-plan.test.js                                             */
+// <prod-plan>
+const PLAN_CFG = {
+  WEEKS: 8,          // 수요 관측 창(완결주)
+  SAFETY_WEEKS: 2,   // 본사 정책 「완제품은 2주치 안전재고 유지」
+  BATCH_PACKS: 40,   // 작업지시 1건 = 40봉 = 200kg
+  TREND_WEEKS: 4,    // 추세 비교 구간(최근 4주 vs 직전 4주)
+};
+function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
+function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
+
+/** {date, packs} 이벤트 → 완결주만의 주간 시계열(빈 주는 0).
+    진행 중인 주는 반쪽이라 뺀다 — 안 빼면 주 초마다 수요가 폭락한 것처럼 보인다. */
+function planWeeklySeries(events, asOf) {
+  const cur = planWeekStart(asOf).getTime(), by = new Map();
+  for (const e of events || []) {
+    const d = e && (e.date instanceof Date ? e.date : planDate(e.date));
+    const packs = e ? parseFloat(e.packs) : 0;
+    if (!d || !(packs > 0)) continue;
+    const w = planWeekStart(d).getTime();
+    if (w >= cur) continue;
+    by.set(w, (by.get(w) || 0) + packs);
+  }
+  const ws = [...by.keys()].sort((a, b) => a - b);
+  const out = [];
+  for (let w = ws[0]; w < cur; w += 7 * 86400000) out.push({ week: w, packs: Math.round((by.get(w) || 0) * 100) / 100 });
+  return out;
+}
+
+/** 이번 주 권장 생산. 판매 이력이 없으면 null — 감으로 배치를 뽑지 않는다. */
+function calcProductionPlan({ series, stock, pending, safetyWeeks, batchPacks }) {
+  const all = (series || []).filter(x => x && isFinite(parseFloat(x.packs)));
+  if (!all.length) return null;
+  const packs = all.slice(-PLAN_CFG.WEEKS).map(x => parseFloat(x.packs) || 0);
+  let num = 0, den = 0;
+  packs.forEach((v, i) => { num += v * (i + 1); den += (i + 1); });   // 선형가중 — 최근 주가 무겁다
+  const demand = num / den;
+  if (!(demand > 0)) return null;
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const k = PLAN_CFG.TREND_WEEKS;
+  const trend = packs.length >= 2 * k ? (avg(packs.slice(-k)) / avg(packs.slice(-2 * k, -k)) - 1) : null;
+  const sw = parseFloat(safetyWeeks) > 0 ? parseFloat(safetyWeeks) : PLAN_CFG.SAFETY_WEEKS;
+  const bp = parseFloat(batchPacks) > 0 ? parseFloat(batchPacks) : PLAN_CFG.BATCH_PACKS;
+  const st = parseFloat(stock) || 0, pd = parseFloat(pending) || 0, avail = st + pd;
+  const target = demand * (sw + 1);                                  // 안전재고 + 다음 주 소비
+  const need = Math.max(0, target - avail);
+  const batches = Math.ceil(need / bp);
+  const daily = demand / 7;
+  return {
+    weeks: packs.length, series: packs, demand, mean: avg(packs), trend,
+    stock: st, pending: pd, avail, weeksOnHand: avail / demand,
+    safetyLine: demand * sw, daysToSafety: Math.max(0, (avail - demand * sw) / daily),
+    target, need, batches, produce: batches * bp,
+    balanceBatches: Math.round(demand / bp * 10) / 10,               // 소비만큼 만들면 몇 배치
+    surplus: avail - target,
+  };
+}
+// </prod-plan>
+
+/** 홈 「이번 주 권장 생산」 — 실패해도 홈은 그대로여야 하니 조용히 접는다. */
+async function loadHomeProdPlan() {
+  const el = $id('home-prod-plan');
+  if (!el) return;
+  try {
+    const [items, lots, wos, mb] = await Promise.all([
+      SheetsAPI.getAll('완제품품목').catch(() => []),
+      SheetsAPI.getAll('완제품LOT').catch(() => []),
+      SheetsAPI.getAll('작업지시서').catch(() => []),
+      FactoryPnl.fetchMarketbom().catch(() => ({ rows: [] })),
+    ]);
+    const asOf = new Date();
+    const cards = [];
+    let shipsP = null;                                     // 4천 행이라 폴백이 필요할 때만 읽는다
+    const ships = () => (shipsP = shipsP || SheetsAPI.getAll('출하기록').catch(() => []));
+    for (const it of items) {
+      if (!it || !it[0] || it[7] === '비활성') continue;
+      const code = it[0];
+      const mbCodes = String(it[FG_EXT.mbCodes] || '').split(',').map(s => s.trim()).filter(Boolean);
+      // 수요 — 마켓봄 실판매(봉) 우선, 연결이 없거나 못 읽으면 공장 출하 실적
+      let src = 'marketbom';
+      let events = mbCodes.length ? (mb.rows || [])
+        .filter(r => r && mbCodes.includes(String(r.code || '').trim()))
+        .map(r => ({ date: r.date, packs: (parseFloat(r.qty) || 0) * FactoryPnl.packsPerBoxOf(r) })) : [];
+      if (!events.length) {
+        src = 'ship';
+        const myLots = new Set(lots.filter(l => l && l[1] === code).map(l => l[0]));
+        events = (await ships()).filter(s => s && myLots.has(s[1]) && !/테스트|E2E/i.test(String(s[3] || '') + String(s[7] || '')))
+          .map(s => ({ date: s[6], packs: parseFloat(s[4]) || 1 }));
+      }
+      const FG_DEAD = new Set(['출하완료', '폐기', '삭제', '소진', '채번예약']);
+      const stock = lots.filter(l => l && l[1] === code && !FG_DEAD.has(l[9]))
+        .reduce((s, l) => s + (parseFloat(l[8]) || 0), 0);
+      const pending = wos.filter(w => w && w[3] === code && ['냉동보관중', '진행중'].includes(w[12]))
+        .reduce((s, w) => s + (parseFloat(w[7]) || 0), 0);
+      const plan = calcProductionPlan({ series: planWeeklySeries(events, asOf), stock, pending });
+      if (plan) cards.push({ code, name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan });
+    }
+    if (!cards.length) return;
+    el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 이번 주 권장 생산</div>' + cards.map(c => {
+      const p = c.plan, low = p.batches > 0, tr = p.trend;
+      const trTxt = tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'} ${Math.abs(tr * 100).toFixed(0)}%`;
+      return `
+        <div class="card clickable" onclick="Router.go('wo-create')" style="border-left:3px solid ${low ? 'var(--pri)' : 'var(--suc)'}">
+          <div class="row between" style="align-items:flex-start;gap:8px">
+            <div style="flex:1">
+              <div class="fs-14 fw-6">${c.name}</div>
+              <div class="fs-12 c-txt-l">예측 소비 <b>${Math.round(p.demand)}봉/주</b>(${Math.round(p.demand * c.kgPer).toLocaleString()}kg)${trTxt} · 최근 ${p.weeks}주 ${c.src === 'marketbom' ? '실판매' : '출하'} 기준</div>
+              <div class="fs-12 c-txt-l">가용 <b>${Math.round(p.avail)}봉</b>(재고 ${Math.round(p.stock)}${p.pending > 0 ? ` + 냉동중 ${Math.round(p.pending)}` : ''}) = <b>${p.weeksOnHand.toFixed(1)}주치</b> · 목표 ${Math.round(p.target)}봉</div>
+              <div class="fs-12 mt-2 ${low ? 'c-pri fw-6' : 'c-txt-l'}">${low
+                ? `부족 ${Math.round(p.need)}봉 → <b>${p.batches}배치</b> (${p.produce}봉 · ${(p.produce * c.kgPer).toLocaleString()}kg)`
+                : `목표보다 ${Math.round(p.surplus)}봉 많음 — 안전재고 2주선(${Math.round(p.safetyLine)}봉)까지 <b>약 ${Math.round(p.daysToSafety)}일</b> · 소비 균형 ${p.balanceBatches}배치/주`}</div>
+            </div>
+            <span class="badge badge-${low ? 'pri' : 'suc'}">${low ? p.batches + '배치' : '생산 여유'}</span>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    console.warn('[홈] 생산량 제안 계산 실패:', e);
   }
 }
 
@@ -6846,9 +6987,9 @@ const HACCP_STD_HEADER = ['stdId','구분','항목','대상품목','위해요소
 const CERT_SHEET_HEADER = ['certId','구분','itemCode','itemName','발행기관','성적서번호','발행일','유효기한','판정','파일링크','등록자','등록일시','상태','비고'];
 const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근거','심각도','상태','담당','조치내용','조치일','등록자','등록일시','audit_note'];
 /** 완제품품목 확장 컬럼 — 기존 [0]~[9] 뒤에 append (기존 인덱스 절대 변경 금지) */
-const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18 };
+const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18, mbCodes: 19 };
 const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
-                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가'];
+                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가','마켓봄코드'];
 /** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
 const CERT_WARN_DAYS = 30;
 
