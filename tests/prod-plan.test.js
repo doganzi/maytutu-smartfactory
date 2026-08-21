@@ -16,7 +16,7 @@ const j = SRC.indexOf('// </prod-plan>');
 assert.ok(i !== -1 && j > i, 'index.html 에서 <prod-plan> 블록을 찾지 못함');
 const ctx = vm.createContext({ Math, Date, Map, Set, parseFloat, isFinite, console });
 vm.runInContext(SRC.slice(i, j), ctx);
-const { planWeekStart, planDate, planWeeklySeries, calcProductionPlan } = ctx;
+const { planWeekStart, planDate, planPacksPerBox, planSalesEvents, planWeeklySeries, calcProductionPlan } = ctx;
 const PLAN_CFG = vm.runInContext('PLAN_CFG', ctx);   // const 는 컨텍스트 객체에 안 붙는다
 
 const ok = [];
@@ -38,6 +38,31 @@ t('주는 월요일에 시작한다', () => {
   assert.strictEqual(planWeekStart(new Date('2026/08/21')).getDay(), 1);
   assert.strictEqual(planWeekStart(new Date('2026/08/17')).getDate(), 17);
   assert.strictEqual(planWeekStart(new Date('2026/08/16')).getDate(), 10);   // 일 → 전주 월
+});
+
+/* ── 1-2. 마켓봄 연결 — 코드로만, 봉수는 규격 표기 우선 ─────────────────── */
+t('봉수/박스 — 품명 규격 표기가 있으면 그걸 쓴다', () => {
+  assert.strictEqual(planPacksPerBox({ name: '앙호두 전용반죽(5kg*3ea)', qty: 3, supply: 196365 }), 3);
+  assert.strictEqual(planPacksPerBox({ name: '앙호두 전용반죽 (5kg x 4)', qty: 1, supply: 0 }), 4);
+});
+
+t('봉수/박스 — 규격 표기가 없는 옛 SKU 는 공급가로 역산한다', () => {
+  assert.strictEqual(planPacksPerBox({ name: '앙호두 전용반죽', qty: 1, supply: 86364 }), 4);   // ANG00266
+  assert.strictEqual(planPacksPerBox({ name: '앙호두 전용반죽', qty: 1, supply: 94546 }), 4);   // ANG00002(옛 단가)
+  assert.strictEqual(planPacksPerBox({ name: '알 수 없음' }), 1, '근거가 없으면 1봉 — 부풀리지 않는다');
+});
+
+t('연결은 마켓봄코드로만 — 품명이 비슷한 굿즈가 딸려오지 않는다', () => {
+  const rows = [
+    { date: '2026-08-10', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 2, supply: 130910 },
+    { date: '2026-08-10', code: 'ANG00266', name: '앙호두 전용반죽', qty: 1, supply: 86364 },
+    { date: '2026-08-10', code: 'ANG00300', name: '앙호두 앞치마', qty: 5, supply: 50000 },
+    { date: '2026-08-10', code: 'ANG00223', name: '앙붕어빵 반죽', qty: 3, supply: 240000 },
+  ];
+  const ev = planSalesEvents(rows, ['ANG00002', 'ANG00266', 'ANG00276']);
+  assert.strictEqual(ev.length, 2, '반죽 2행만 잡혀야 한다 — 앞치마·앙붕어빵은 우리 수요가 아니다');
+  assert.strictEqual(ev.reduce((s, e) => s + e.packs, 0), 2 * 3 + 1 * 4);
+  assert.deepStrictEqual([...planSalesEvents(rows, [])], [], '연결이 비면 아무것도 잡지 않는다(출하로 폴백)');
 });
 
 /* ── 2. 주간 시계열 — 진행 주 제외 · 빈 주 0 ────────────────────────────── */
