@@ -2325,9 +2325,28 @@ const PLAN_CFG = {
   SAFETY_WEEKS: 2,   // 본사 정책 「완제품은 2주치 안전재고 유지」
   BATCH_PACKS: 40,   // 작업지시 1건 = 40봉 = 200kg
   TREND_WEEKS: 4,    // 추세 비교 구간(최근 4주 vs 직전 4주)
+  UNIT_PRICE: 21591, // 봉당 공급가(VAT 제외) — 품명에 규격 표기가 없는 옛 SKU 의 봉수 역산용
 };
 function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
 function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
+
+/** 마켓봄 판매행 1건의 **봉수/박스** — ① 품명의 규격 표기 `(5kg*3ea)` ② 없으면 박스 공급가 ÷ 봉당 단가 역산.
+    박스 규격이 SKU 마다 달라(ANG00266 4봉·20kg → ANG00276 3봉·15kg) 박스수만으로는 봉수를 못 낸다. */
+function planPacksPerBox(row) {
+  const m = String(row && row.name || '').match(/\d+(?:\.\d+)?\s*kg\s*[*x×]\s*(\d+)\s*(?:ea|개|팩|pack)?/i);
+  if (m) { const n = parseInt(m[1], 10); if (n >= 1 && n <= 12) return n; }
+  const qty = parseFloat(row && row.qty) || 0, sup = parseFloat(row && row.supply) || 0;
+  if (qty > 0 && sup > 0) { const n = Math.round((sup / qty) / PLAN_CFG.UNIT_PRICE); if (n >= 1 && n <= 12) return n; }
+  return 1;
+}
+
+/** 마켓봄 판매행 → {date, packs} 이벤트. 연결은 **마켓봄코드로만** 한다 — 품명 추측 금지. */
+function planSalesEvents(mbRows, mbCodes) {
+  const codes = new Set((mbCodes || []).map(c => String(c).trim()).filter(Boolean));
+  if (!codes.size) return [];
+  return (mbRows || []).filter(r => r && codes.has(String(r.code || '').trim()))
+    .map(r => ({ date: r.date, packs: (parseFloat(r.qty) || 0) * planPacksPerBox(r) }));
+}
 
 /** {date, packs} 이벤트 → 완결주만의 주간 시계열(빈 주는 0).
     진행 중인 주는 반쪽이라 뺀다 — 안 빼면 주 초마다 수요가 폭락한 것처럼 보인다. */
@@ -2398,9 +2417,7 @@ async function loadHomeProdPlan() {
       const mbCodes = String(it[FG_EXT.mbCodes] || '').split(',').map(s => s.trim()).filter(Boolean);
       // 수요 — 마켓봄 실판매(봉) 우선, 연결이 없거나 못 읽으면 공장 출하 실적
       let src = 'marketbom';
-      let events = mbCodes.length ? (mb.rows || [])
-        .filter(r => r && mbCodes.includes(String(r.code || '').trim()))
-        .map(r => ({ date: r.date, packs: (parseFloat(r.qty) || 0) * FactoryPnl.packsPerBoxOf(r) })) : [];
+      let events = planSalesEvents(mb.rows, mbCodes);
       if (!events.length) {
         src = 'ship';
         const myLots = new Set(lots.filter(l => l && l[1] === code).map(l => l[0]));
