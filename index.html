@@ -2466,6 +2466,9 @@ function planSvgChart(s) {
   const maxV = Math.ceil(raw / step) * step;
   const cw = iw / n, bw = Math.min(cw * 0.3, 22);
   const cx = i => L + cw * (i + 0.5), cy = v => T + ih * (1 - v / maxV);
+  // 값 수치 — 막대와 보유재고 선에만. 안전재고선은 상수라 칸마다 찍으면 그래프가 숫자로 덮인다(키에 한 번 적혀 있다).
+  const bval = (v, i, dx) => (v == null || v <= 0) ? '' :
+    `<text x="${(cx(i) + dx).toFixed(1)}" y="${(cy(v) - 3).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--txt-l)">${Math.round(v)}</text>`;
   const bar = (v, i, dx, fill, op) => (v == null || v <= 0) ? '' :
     `<rect x="${(cx(i) + dx - bw / 2).toFixed(1)}" y="${cy(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + ih - cy(v)).toFixed(1)}" rx="1.5" fill="${fill}" fill-opacity="${op}"/>`;
   const line = (from, to) => s.stock.slice(from, to + 1)
@@ -2499,6 +2502,9 @@ function planSvgChart(s) {
     <path d="${line(0, s.splitIndex)}" fill="none" stroke="var(--txt)" stroke-width="2"/>
     <path d="${line(s.splitIndex, n - 1)}" fill="none" stroke="var(--txt)" stroke-width="2" stroke-dasharray="5 4" opacity="0.75"/>
     ${s.stock.map((v, i) => `<circle cx="${cx(i).toFixed(1)}" cy="${cy(v).toFixed(1)}" r="${i === s.splitIndex ? 3.5 : 2}" fill="var(--txt)"/>`).join('')}
+    ${s.use.map((v, i) => bval(v, i, -bw * 0.6)).join('')}
+    ${s.prod.map((v, i) => bval(v, i, bw * 0.6)).join('')}
+    ${s.stock.map((v, i) => `<text x="${cx(i).toFixed(1)}" y="${(cy(v) - 6).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--txt)">${Math.round(v)}</text>`).join('')}
     ${s.labels.map((t, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 14}" text-anchor="middle" font-size="10" fill="${i === s.splitIndex ? 'var(--txt)' : (i === ni ? nc : 'var(--txt-l)')}" font-weight="${i === s.splitIndex || i === ni ? 700 : 400}">${t}</text>`).join('')}
     ${s.weeksOnHand.map((w, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 25}" text-anchor="middle" font-size="8.5" fill="var(--txt-l)">${w.toFixed(1)}주</text>`).join('')}
   </svg>`;
