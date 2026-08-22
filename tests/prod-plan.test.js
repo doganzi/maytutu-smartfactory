@@ -159,8 +159,8 @@ t('과거 재고는 현재고에서 역산한다 (재고ᵢ₋₁ = 재고ᵢ �
     stockNow: 840, demand: 250, asOf: AS_OF, weeksBack: 2, weeksAhead: 3,
   });
   assert.strictEqual(s.splitIndex, 2, '「지금」 은 과거 2주 뒤');
-  // 라벨은 「M월 N주차」 — 주차 = 그 주 월요일이 그 달의 몇 번째 월요일인가(2026-08-03·10·17·24·31 = 8월 1~5주차)
-  assert.deepStrictEqual([...s.labels], ['8월 1주차', '8월 2주차', '8월 3주차', '8월 4주차', '8월 5주차', '9월 1주차']);
+  // 라벨은 「M월 D일주차」 — 그 주가 시작하는 월요일 날짜(2026-08-03·10·17·24·31·09-07)
+  assert.deepStrictEqual([...s.labels], ['8월 3일주차', '8월 10일주차', '8월 17일주차', '8월 24일주차', '8월 31일주차', '9월 7일주차']);
   // 마지막 완결주말 = 840 + 이번주출하 200 − 이번주생산 0 = 1040 · 그 전주 = 1040 − 240 + 272 = 1072
   assert.deepStrictEqual([...s.stock].slice(0, 3), [1072, 1040, 840]);
   assert.deepStrictEqual([...s.use].slice(0, 3), [248, 272, 200], '「지금」 칸에도 진행 중인 주 실적이 들어간다');
@@ -200,10 +200,10 @@ t('기본 구간은 앞뒤 4주씩 — 예측 관측창(8주)과 별개다', () 
   assert.strictEqual(PLAN_CFG.CHART_AHEAD, 4);
   assert.strictEqual(s.labels.length, 9, '과거 4 + 지금 1 + 미래 4');
   assert.strictEqual(s.splitIndex, 4);
-  assert.strictEqual(s.labels[s.splitIndex], '8월 3주차', '진행 중인 주(2026-08-17 시작)');
+  assert.strictEqual(s.labels[s.splitIndex], '8월 17일주차', '진행 중인 주(2026-08-17 시작)');
   // 「바로 다음 주」 = 강조 칸. 관측창이 8주 그대로라 예측값은 안 흔들린다.
   assert.strictEqual(s.nextIndex, 5);
-  assert.strictEqual(s.labels[s.nextIndex], '8월 4주차', '바로 다음 주(2026-08-24 시작)');
+  assert.strictEqual(s.labels[s.nextIndex], '8월 24일주차', '바로 다음 주(2026-08-24 시작)');
   assert.strictEqual(s.nextPacks, 0, '지금은 재고가 넘쳐 0봉');
   assert.strictEqual(s.prod[s.nextIndex], s.nextPacks, '강조 칸의 막대와 강조 수치가 같아야 한다');
   assert.deepStrictEqual([...s.prod].slice(5), [0, 160, 280, 240], '4주치 계획');
