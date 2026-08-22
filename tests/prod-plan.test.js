@@ -188,7 +188,23 @@ t('재고가 마른 상태에서 시작하면 첫 주부터 배치가 나온다'
     asOf: AS_OF, weeksBack: 4, weeksAhead: 2,
   });
   assert.strictEqual(s.nextBatches, 14, '(250×3 − 200) ÷ 40 → 올림 14배치');
+  assert.strictEqual(s.nextPacks, 560, '화면에 크게 띄우는 값은 «봉»이다');
   assert.ok(s.stock[s.splitIndex + 1] >= s.safety[0], '한 주 만에 안전재고선 위로 올라온다');
+});
+
+t('기본 구간은 앞뒤 4주씩 — 예측 관측창(8주)과 별개다', () => {
+  const s = buildPlanChartSeries({ useEvents: [], prodEvents: [], stockNow: 840, demand: 249.6389, asOf: AS_OF });
+  assert.strictEqual(PLAN_CFG.CHART_BACK, 4);
+  assert.strictEqual(PLAN_CFG.CHART_AHEAD, 4);
+  assert.strictEqual(s.labels.length, 9, '과거 4 + 지금 1 + 미래 4');
+  assert.strictEqual(s.splitIndex, 4);
+  assert.strictEqual(s.labels[s.splitIndex], '지금');
+  // 「바로 다음 주」 = 강조 칸. 관측창이 8주 그대로라 예측값은 안 흔들린다.
+  assert.strictEqual(s.nextIndex, 5);
+  assert.strictEqual(s.labels[s.nextIndex], '+1주');
+  assert.strictEqual(s.nextPacks, 0, '지금은 재고가 넘쳐 0봉');
+  assert.strictEqual(s.prod[s.nextIndex], s.nextPacks, '강조 칸의 막대와 강조 수치가 같아야 한다');
+  assert.deepStrictEqual([...s.prod].slice(5), [0, 160, 280, 240], '4주치 계획');
 });
 
 t('과거 재고 역산은 0 밑으로 안 내려간다', () => {
