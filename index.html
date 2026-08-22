@@ -2457,7 +2457,7 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
 /** 생산 계획 그래프(SVG) — 축 하나(봉)에 사용량·생산량 막대 + 보유재고 선 + 안전재고선.
     차트 라이브러리를 새로 안 들이는 이유: 이 앱은 오프라인 PWA 단일 파일이라 CDN 이 막히면 그래프가 통째로 사라진다. */
 function planSvgChart(s) {
-  const W = 720, H = 240, L = 46, R = 8, T = 12, B = 38;
+  const W = 720, H = 252, L = 46, R = 8, T = 24, B = 38;   // T 를 키운 만큼 위에 한 줄짜리 키(범례)가 들어간다
   const n = s.labels.length, iw = W - L - R, ih = H - T - B;
   const raw = Math.max(1, ...s.use.map(v => v || 0), ...s.prod.map(v => v || 0), ...s.stock, ...s.safety) * 1.05;
   // 눈금이 1141 같은 숫자가 되지 않게 — 5칸 기준으로 1·2·2.5·5·10 배수 중 하나로 맞춘다
@@ -2479,7 +2479,16 @@ function planSvgChart(s) {
   const hi = `<rect x="${(nx - cw / 2).toFixed(1)}" y="${T}" width="${cw.toFixed(1)}" height="${ih}" fill="${nc}" opacity="0.08"/>
     <text x="${nx.toFixed(1)}" y="${T + 12}" text-anchor="middle" font-size="14" font-weight="800" fill="${nc}">${s.nextPacks}봉</text>
     <text x="${nx.toFixed(1)}" y="${T + 24}" text-anchor="middle" font-size="9.5" fill="${nc}">${s.nextPacks > 0 ? s.nextBatches + '배치 · 다음 주' : '생산 없어도 됨'}</text>`;
+  // 한 줄짜리 키 — 별도 범례 블록 대신 그래프 안에 넣는다(카드가 설명문으로 길어지지 않게)
+  let kx = L;
+  const keyOf = (label, draw) => { const g = draw(kx) + `<text x="${kx + 15}" y="12" font-size="9" fill="var(--txt-l)">${label}</text>`; kx += 22 + label.length * 8; return g; };
+  const sw_ = (x, col) => `<rect x="${x}" y="4" width="9" height="9" rx="2" fill="${col}"/>`;
+  const ln_ = (x, col, dash) => `<line x1="${x}" y1="8.5" x2="${x + 11}" y2="8.5" stroke="${col}" stroke-width="2"${dash ? ' stroke-dasharray="4 3"' : ''}/>`;
+  const legend = keyOf('사용', x => sw_(x, 'var(--info)')) + keyOf('생산', x => sw_(x, 'var(--suc)'))
+    + keyOf('권장', x => sw_(x, 'var(--pri)')) + keyOf('재고', x => ln_(x, 'var(--txt)'))
+    + keyOf(`안전 ${s.safetyWeeks}주`, x => ln_(x, 'var(--err)', true));
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" role="img" aria-label="주별 사용량·생산량·보유재고 추이">
+    ${legend}
     ${hi}
     ${ticks}
     <line x1="${cx(s.splitIndex).toFixed(1)}" y1="${T}" x2="${cx(s.splitIndex).toFixed(1)}" y2="${T + ih}" stroke="var(--txt-l)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
@@ -2543,14 +2552,6 @@ async function loadHomeProdPlan() {
           <div class="fs-14 fw-6">${c.name}</div>
           <div class="fs-11 c-txt-l" style="margin:2px 0 6px">지금 <b>${Math.round(p.avail)}봉 · ${p.weeksOnHand.toFixed(1)}주치</b> · 예측 소비 <b>${Math.round(p.demand)}봉/주</b>(${Math.round(p.demand * c.kgPer).toLocaleString()}kg)${tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'}${Math.abs(tr * 100).toFixed(0)}%`} · ${key}</div>
           ${planSvgChart(s)}
-          <div class="fs-10 c-txt-l" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--info);border-radius:2px;vertical-align:-1px"></span> 사용량(과거=출하 · 미래=예측)</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--suc);border-radius:2px;vertical-align:-1px"></span> 생산 실적</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--pri);border-radius:2px;vertical-align:-1px"></span> 권장 생산</span>
-            <span><span style="display:inline-block;width:12px;height:2px;background:var(--txt);vertical-align:3px"></span> 보유재고(봉)</span>
-            <span><span style="display:inline-block;width:12px;height:2px;background:var(--err);vertical-align:3px"></span> 안전재고 ${s.safetyWeeks}주선</span>
-          </div>
-          <div class="fs-10 c-txt-l" style="margin-top:4px">수요 예측 = 최근 ${p.weeks}주 ${c.src} 선형가중평균 · 미래 생산 = 매주 «안전 ${s.safetyWeeks}주 + 다음주 1주»를 채우는 양(${s.batchPacks}봉 배치 단위) · 안정되면 주 ${s.steadyBatches}배치 · 과거 재고는 현재고에서 역산한 추정</div>
         </div>`;
     }).join('');
   } catch (e) {
