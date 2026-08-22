@@ -163,8 +163,8 @@ t('과거 재고는 현재고에서 역산한다 (재고ᵢ₋₁ = 재고ᵢ �
   assert.deepStrictEqual([...s.labels], ['8월 1주차', '8월 2주차', '8월 3주차', '8월 4주차', '8월 5주차', '9월 1주차']);
   // 마지막 완결주말 = 840 + 이번주출하 200 − 이번주생산 0 = 1040 · 그 전주 = 1040 − 240 + 272 = 1072
   assert.deepStrictEqual([...s.stock].slice(0, 3), [1072, 1040, 840]);
-  assert.deepStrictEqual([...s.use].slice(0, 3), [248, 272, null], '이번 주 진행분은 막대로 그리지 않는다');
-  assert.deepStrictEqual([...s.prod].slice(0, 3), [320, 240, null]);
+  assert.deepStrictEqual([...s.use].slice(0, 3), [248, 272, 200], '「지금」 칸에도 진행 중인 주 실적이 들어간다');
+  assert.deepStrictEqual([...s.prod].slice(0, 3), [320, 240, 0], '이번 주 생산은 0 — 값이 없을 뿐 null 이 아니다');
 });
 
 t('향후 계획 — 목표를 채우는 배치만 만들고, 넘치면 0을 낸다', () => {
@@ -181,6 +181,7 @@ t('향후 계획 — 목표를 채우는 배치만 만들고, 넘치면 0을 낸
   assert.strictEqual(s.steadyBatches, 6.2, '안정 구간 배치/주');
   assert.ok(s.stock.slice(10).every(v => v >= s.safety[0]), '계획대로면 안전재고선 아래로 안 떨어진다');
   assert.deepStrictEqual([...s.use].slice(9), [250, 250, 250, 250, 250, 250], '미래 사용량 = 예측 소비');
+  assert.strictEqual(s.use[s.splitIndex], 0, '진행 중인 주에 실적이 없으면 0');
 });
 
 t('재고가 마른 상태에서 시작하면 첫 주부터 배치가 나온다', () => {
