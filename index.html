@@ -2331,6 +2331,9 @@ const PLAN_CFG = {
 };
 function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
 function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
+/** 주 라벨 — 「M월 N주차」. 주차 = 그 주의 시작(월요일)이 그 달의 몇 번째 월요일인가.
+    한 주가 달을 걸치면 **시작 월**에 붙인다 — 정의를 하나로 박아 두지 않으면 화면마다 주차가 달라진다. */
+function planWeekLabel(w) { const d = new Date(w); return (d.getMonth() + 1) + '월 ' + (Math.floor((d.getDate() - 1) / 7) + 1) + '주차'; }
 
 /** 마켓봄 판매행 1건의 **봉수/박스** — ① 품명의 규격 표기 `(5kg*3ea)` ② 없으면 박스 공급가 ÷ 봉당 단가 역산.
     박스 규격이 SKU 마다 달라(ANG00266 4봉·20kg → ANG00276 3봉·15kg) 박스수만으로는 봉수를 못 낸다. */
@@ -2428,10 +2431,9 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
   const ends = new Array(wks.length);
   ends[wks.length - 1] = Math.max(0, (parseFloat(stockNow) || 0) + (U.get(cur) || 0) - (P.get(cur) || 0));
   for (let i = wks.length - 1; i >= 1; i--) ends[i - 1] = Math.max(0, ends[i] - (P.get(wks[i]) || 0) + (U.get(wks[i]) || 0));
-  const lab = w => { const t = new Date(w + 6 * DAY); return String(t.getMonth() + 1).padStart(2, "0") + "." + String(t.getDate()).padStart(2, "0"); };
-  const labels = wks.map(lab), use = wks.map(w => Math.round(U.get(w) || 0)), prod = wks.map(w => Math.round(P.get(w) || 0)), stock = ends.map(v => Math.round(v));
+  const labels = wks.map(planWeekLabel), use = wks.map(w => Math.round(U.get(w) || 0)), prod = wks.map(w => Math.round(P.get(w) || 0)), stock = ends.map(v => Math.round(v));
   const splitIndex = labels.length;                       // 「지금」 위치
-  labels.push("지금"); use.push(null); prod.push(null); stock.push(Math.round(parseFloat(stockNow) || 0));
+  labels.push(planWeekLabel(cur)); use.push(null); prod.push(null); stock.push(Math.round(parseFloat(stockNow) || 0));   // 진행 중인 주 — 세로 점선이 실적/예측을 가른다
   const target = d * (sw + 1);
   let s = parseFloat(stockNow) || 0;
   const plan = [];
@@ -2439,7 +2441,7 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
     const p = Math.ceil(Math.max(0, target - s) / bp) * bp;
     s = s + p - d;
     plan.push(p);
-    labels.push("+" + i + "주"); use.push(Math.round(d)); prod.push(p); stock.push(Math.round(Math.max(0, s)));
+    labels.push(planWeekLabel(cur + i * 7 * DAY)); use.push(Math.round(d)); prod.push(p); stock.push(Math.round(Math.max(0, s)));
   }
   return {
     labels, use, prod, stock, splitIndex,
@@ -2495,6 +2497,7 @@ function planSvgChart(s) {
     ${hi}
     ${ticks}
     <line x1="${cx(s.splitIndex).toFixed(1)}" y1="${T}" x2="${cx(s.splitIndex).toFixed(1)}" y2="${T + ih}" stroke="var(--txt-l)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+    <text x="${(cx(s.splitIndex) - 3).toFixed(1)}" y="${T + ih - 3}" text-anchor="end" font-size="8" fill="var(--txt-l)">지금</text>
     ${s.use.map((v, i) => bar(v, i, -bw * 0.6, 'var(--info)', i < s.splitIndex ? 0.85 : 0.35)).join('')}
     ${s.prod.map((v, i) => bar(v, i, bw * 0.6, i < s.splitIndex ? 'var(--suc)' : 'var(--pri)', i < s.splitIndex ? 0.85 : (i === ni ? 1 : 0.5))).join('')}
     <line x1="${L}" y1="${cy(s.safety[0]).toFixed(1)}" x2="${W - R}" y2="${cy(s.safety[0]).toFixed(1)}" stroke="var(--err)" stroke-width="1.5" stroke-dasharray="6 4"/>
