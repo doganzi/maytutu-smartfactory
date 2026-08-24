@@ -9797,18 +9797,37 @@ const DriveDocs = {
   FOLDER: 'application/vnd.google-apps.folder',
   folderUrl: id => `https://drive.google.com/drive/folders/${id}`,
 
-  /** 부모 여러 개를 한 번에 조회. 폴더마다 1회씩 돌면 20회 왕복이라 20개씩 묶는다. */
+  /** 부모 여러 개를 한 번에 조회. 폴더마다 1회씩 돌면 20회 왕복이라 20개씩 묶는다.
+
+      🚨 **`corpora` 를 빼면 안 된다 — 빼는 순간 조용히 «없다» 고 답한다.** (2026-08-24 실측)
+      `q` 에 `'a' in parents or 'b' in parents` 처럼 **부모를 둘 이상 OR** 하면, 기본 corpora(`user`)
+      에서는 공유드라이브 파일이 **오류도 nextPageToken 도 없이 일부만·아예 안** 돌아온다.
+      실측(07_공장 · 기기 13대, 각 폴더에 회차폴더 1개):
+        부모 1개  → 1건(정상)   부모 2·3·4·5·8개 → **0건**   부모 13개 → 2건
+        같은 질의에 `corpora=allDrives` 만 붙이면 → 13건(정상)
+      이게 「기기 검교정 성적서 0/13 보유」·「원재료 시험성적서 비어 있음」의 원인이었다
+      (건의 FR-20260824-71S). 파일은 Drive 에 멀쩡히 있었고, 앱만 못 봤다.
+      ⚠️ 실패가 **200 OK + 빈 목록**이라 try/catch 로는 절대 안 잡힌다 — 화면은 태연히 「없음」을 그린다.
+
+      `pageSize` 는 힌트일 뿐이라 200 보다 적게 오면서 nextPageToken 이 붙을 수 있다.
+      따라가지 않으면 서류가 늘어난 순간 또 조용히 «없음» 이 된다. */
   async _children(parentIds) {
     const out = [];
     for (let i = 0; i < parentIds.length; i += 20) {
       const q = '(' + parentIds.slice(i, i + 20).map(p => `'${p}' in parents`).join(' or ') + ') and trashed=false';
-      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`
-        + '&fields=files(id,name,mimeType,modifiedTime,webViewLink,parents)'
-        + '&orderBy=modifiedTime%20desc&pageSize=200'
-        + '&supportsAllDrives=true&includeItemsFromAllDrives=true';
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${State.token}` } });
-      if (!res.ok) throw new Error(`Drive ${res.status}`);
-      out.push(...((await res.json()).files || []));
+      let pageToken = '';
+      do {
+        const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`
+          + '&fields=nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink,parents)'
+          + '&orderBy=modifiedTime%20desc&pageSize=200'
+          + '&corpora=allDrives&supportsAllDrives=true&includeItemsFromAllDrives=true'
+          + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${State.token}` } });
+        if (!res.ok) throw new Error(`Drive ${res.status}`);
+        const body = await res.json();
+        out.push(...(body.files || []));
+        pageToken = body.nextPageToken || '';
+      } while (pageToken);
     }
     return out;
   },
