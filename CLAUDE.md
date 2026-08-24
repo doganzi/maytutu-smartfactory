@@ -195,7 +195,17 @@ HACCP 감사 바인더로 들어가므로 번호가 기준서와 다르면 심�
 
 ## 환경
 
-- **Repo**: `doganzi/maytutu-smartfactory` (private)
+- **Repo**: `doganzi/maytutu-smartfactory` — 🌐 **public** (2026-08-24 실측 `visibility=public`).
+  이 줄은 오래 **`(private)`** 라고 적혀 있었다. 한 단어지만 대가가 크다:
+  - 🚫 **자격증명을 저장소에 두지 말 것** — 커밋하는 순간 전 세계에 공개된다. 지금은 하드코딩된
+    키가 없고(2026-08-24 스캔 0건), 앱은 **사용자 OAuth**(클라이언트 사이드)로만 구글에 접근한다.
+    시트·Drive 접근 권한은 **보는 사람 본인의 구글 계정**에 달려 있다 — 코드가 공개돼도 데이터는
+    공유 범위가 지킨다. 그 전제가 깨지는 순간(서버 키를 심는 순간) 이 저장소는 부적합해진다.
+  - 🚫 **사내 self-hosted 러너를 붙이지 말 것** — public 저장소는 **외부인이 올린 PR 의 코드가**
+    그 러너(사내 PC)에서 실행된다. 사내 규약이기도 하다(maytutu-erp CLAUDE.md 대원칙 6).
+  - 💸 반대로 **Actions 호스티드 분은 무료**다 — 사내 private 저장소를 막고 있는 계정 예산 `$0` 이
+    **여기엔 적용되지 않는다**. `unit-tests.yml`·`deploy-pages.yml` 이 `ubuntu-latest` 에서
+    정상 동작하는 것이 그 증거다(2026-08-24 실측 7초).
 - **배포**: GitHub Pages 자동 (main 브랜치) → https://doganzi.github.io/maytutu-smartfactory/
 - **백엔드**: Google Sheets + Drive (사용자 OAuth, 클라이언트 사이드)
 - **단일 파일**: `index.html` (~430KB) + `manifest.json` (PWA)
