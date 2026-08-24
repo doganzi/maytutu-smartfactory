@@ -1,0 +1,51 @@
+name: 테스트
+
+# 왜 있나 (2026-08-24) — 이 저장소엔 `tests/` 에 검증이 8종 있는데 **아무도 안 돌리고 있었다.**
+#   워크플로가 `deploy-pages.yml` 하나뿐이라, 고장난 코드도 그대로 배포됐다.
+#   실제로 그 대가를 치렀다: Drive 질의에 `corpora` 가 빠져 성적서가 「없음」으로 뜨는 버그가
+#   살아 있었고(건의 FR-20260824-71S), 그 버그를 본 화면이 **테스트 픽스처와 실무자 안내서에
+#   «정답» 으로 굳어** 있었다. 검사가 없으면 문서가 버그를 정당화한다.
+#
+# 🚫 **self-hosted 러너를 붙이지 않는다.** 이 저장소는 **public** 이라 외부인이 올린 PR 의
+#    코드가 사내 PC 에서 실행된다(사내 규약: public 저장소에 사내 러너 연결 금지).
+# 💸 그럴 필요도 없다 — **public 저장소는 GitHub 호스티드 분이 무료**다. 사내 private 저장소를
+#    막고 있는 Actions 예산 `$0` 은 여기에 적용되지 않는다(이 저장소의 Pages 배포가 지금도
+#    호스티드에서 정상 성공하는 것이 그 증거다).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read          # 검사만 한다 — 쓰기 권한을 주지 않는다(public 저장소)
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 이 저장소엔 package.json 이 없다 — 테스트는 파일 하나씩 `node tests/x.test.js` 로 돈다.
+      - name: 테스트 전량
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          n=0
+          for f in tests/*.test.js; do
+            echo "── $f"
+            node "$f"
+            n=$((n + 1))
+          done
+          # 🚨 **공허한 초록불 방지** — 파일이 0건이어도 for 문은 조용히 성공한다.
+          #    테스트가 사라지거나 경로가 바뀌면 «전부 통과» 로 보이는데 실은 아무것도 안 돈 것이다.
+          if [ "$n" -eq 0 ]; then
+            echo "::error::tests/*.test.js 가 하나도 없다 — 초록불이 거짓말을 하고 있다"
+            exit 1
+          fi
+          echo "✅ 테스트 ${n}종 전부 통과"
