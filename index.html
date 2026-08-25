@@ -2075,6 +2075,9 @@ Screens.dashboard = async () => {
 
   $id('content').innerHTML = `
     <div style="padding:16px">
+      <!-- 🏭 생산 계획 — 홈의 맨 위. 렌더 후 loadHomeProdPlan() 이 채운다(마켓봄 API 라 느리다) -->
+      <div id="home-prod-plan"></div>
+
       <!-- Summary Cards -->
       <div class="grid-2 mb-12">
         <div class="card clickable stat-card" style="border-left:3px solid ${inProgress === 0 ? 'var(--warn)' : 'var(--suc)'}" onclick="Router.go('production');setTimeout(()=>{const t=document.querySelector('.tab-filter .tab:nth-child(${isAdmin ? 3 : 2})');if(t)t.click();},200)">
@@ -2206,9 +2209,6 @@ Screens.dashboard = async () => {
         `).join('')}
       ` : ''}
 
-      <!-- Drive 서류 부족 — 렌더 후 hsLoadHomeDocAlert() 가 채운다 -->
-      <div id="home-prod-plan"></div>
-
       <!-- Drive 서류 부족 -->
       <div id="home-doc-alert"></div>
 
@@ -2326,8 +2326,8 @@ const PLAN_CFG = {
   BATCH_PACKS: 40,   // 작업지시 1건 = 40봉 = 200kg
   TREND_WEEKS: 4,    // 추세 비교 구간(최근 4주 vs 직전 4주)
   UNIT_PRICE: 21591, // 봉당 공급가(VAT 제외) — 품명에 규격 표기가 없는 옛 SKU 의 봉수 역산용
-  CHART_BACK: 4,     // 그래프에 그릴 과거 주수 — 예측 관측창(WEEKS=8)과 별개다. 화면은 앞뒤 4주씩만 본다.
-  CHART_AHEAD: 4,    // 그래프에 그릴 미래 주수
+  CHART_BACK: 2,     // 그래프 기본 구간(과거) — 예측 관측창(WEEKS=8)과 별개다.
+  CHART_AHEAD: 2,    // 그래프 기본 구간(미래) — 폰에서 막대가 가늘어지지 않게 5칸(2 + 지금 + 2). 넓은 화면은 호출 측에서 늘려 쓴다.
 };
 function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
 function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
@@ -2406,7 +2406,7 @@ function calcProductionPlan({ series, stock, pending, safetyWeeks, batchPacks })
       · 보유재고 = 현재고를 앵커로 과거는 역산(재고ᵢ₋₁ = 재고ᵢ − 생산ᵢ + 출하ᵢ), 미래는 시뮬레이션
       · 안전재고선 = D × 안전주수 (기본 2주) — 재고 선이 이 선 위에 있으면 안전
     ⚠️ 과거 재고는 «현재고에서 역산한 추정»이다. 날짜별 재고원장이 없어서이고, 최신 값만 실측과 일치한다. */
-function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, weeksBack, weeksAhead, safetyWeeks, batchPacks }) {
+function buildPlanChartSeries({ useEvents, prodEvents, stockNow, pendingPacks, lastApproved, demand, asOf, weeksBack, weeksAhead, safetyWeeks, batchPacks }) {
   const d = parseFloat(demand);
   if (!(d > 0)) return null;
   const DAY = 86400000, now = asOf || new Date(), cur = planWeekStart(now).getTime();
@@ -2429,15 +2429,23 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
   const wks = []; for (let i = back; i >= 1; i--) wks.push(cur - i * 7 * DAY);
   // 마지막 완결주말 재고 = 현재고에서 «이번 주 진행분»을 되돌린 값
   const ends = new Array(wks.length);
+  //   과거 칸은 «승인 끝난 재고» 기준이므로 승인 재고(stockNow)에서 이번 주 진행분만 되돌린다.
+  //   (미승인 pendingPacks 는 아직 LOT 이 없어 승인 재고에도 P.get(cur) 에도 안 들어 있다 — 양쪽에서 빼면 이중 반영이다.)
   ends[wks.length - 1] = Math.max(0, (parseFloat(stockNow) || 0) + (U.get(cur) || 0) - (P.get(cur) || 0));
   for (let i = wks.length - 1; i >= 1; i--) ends[i - 1] = Math.max(0, ends[i] - (P.get(wks[i]) || 0) + (U.get(wks[i]) || 0));
   const labels = wks.map(planWeekLabel), use = wks.map(w => Math.round(U.get(w) || 0)), prod = wks.map(w => Math.round(P.get(w) || 0)), stock = ends.map(v => Math.round(v));
+  const prodPending = wks.map(() => 0);               // 미승인은 「지금」 칸에만 쌓인다(과거는 전부 승인 끝)
   const splitIndex = labels.length;                       // 「지금」 = 진행 중인 주(권장 생산이 붙는 칸)
   // 「지금」 = 진행 중인 주. 지금까지의 실적을 그대로 넣는다 — 단, 반쪽짜리라 **예측 평균에서는 여전히 뺀다**(planWeeklySeries).
+  const approvedNow = parseFloat(stockNow) || 0;      // 출하승인까지 끝난 재고(완제품LOT 잔량)
+  const pendingNow = parseFloat(pendingPacks) || 0;   // 생산 중·미승인(진행중·냉동보관중·승인대기 WO)
+  const stock0 = approvedNow + pendingNow;            // 가용 — 미망은 12시간 뒤면 출하된다
   labels.push(planWeekLabel(cur));
-  use.push(Math.round(U.get(cur) || 0)); prod.push(Math.round(P.get(cur) || 0)); stock.push(Math.round(parseFloat(stockNow) || 0));
+  use.push(Math.round(U.get(cur) || 0));
+  // 이번 주 생산은 «승인 끝난 몴(LOT 생성)»과 «아직 생산 중» 을 나눠 쌓는다 — 현장은 이 둘을 구분해서 본다.
+  prod.push(Math.round(P.get(cur) || 0)); prodPending.push(Math.round(pendingNow));
+  stock.push(Math.round(stock0));
   const target = d * (sw + 1);
-  const stock0 = parseFloat(stockNow) || 0;
   // 권장은 **이번 주**에 붙인다 — 현장이 돌리는 건 지금 있는 주다. 가용재고가 목표에 모자라는 만큼.
   //   가용재고엔 이번 주에 이미 만든 몴(냉동중 포함)이 들어 있으므로 이 값은 **앞으로 더** 만들 양이다.
   const recPacks = Math.ceil(Math.max(0, target - stock0) / bp) * bp;
@@ -2447,14 +2455,16 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
   for (let i = 1; i <= ahead; i++) {
     const p = Math.ceil(Math.max(0, target - s) / bp) * bp;
     s = s + p - d;
-    labels.push(planWeekLabel(cur + i * 7 * DAY)); use.push(Math.round(d)); prod.push(p); stock.push(Math.round(Math.max(0, s)));
+    labels.push(planWeekLabel(cur + i * 7 * DAY)); use.push(Math.round(d)); prod.push(p); prodPending.push(0); stock.push(Math.round(Math.max(0, s)));
   }
   return {
-    labels, use, prod, stock, splitIndex,
+    labels, use, prod, prodPending, stock, splitIndex,
     safety: labels.map(() => Math.round(d * sw)),
     demand: d, safetyWeeks: sw, batchPacks: bp, targetStock: target,
     recIndex: splitIndex,                                            // 권장 생산을 붙이는 칸 = **진행 중인 주**
     recPacks, recBatches: recPacks / bp,
+    approvedNow, pendingNow, availNow: stock0,
+    lastApproved: lastApproved || null,               // {at, packs} — 마지막 출하승인 시점·수량
     steadyBatches: Math.round(d / bp * 10) / 10,
     weeksOnHand: stock.map(v => Math.round(v / d * 100) / 100),
   };
@@ -2464,9 +2474,12 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
 /** 생산 계획 그래프(SVG) — 축 하나(봉)에 사용량·생산량 막대 + 보유재고 선 + 안전재고선.
     차트 라이브러리를 새로 안 들이는 이유: 이 앱은 오프라인 PWA 단일 파일이라 CDN 이 막히면 그래프가 통째로 사라진다. */
 function planSvgChart(s) {
-  const W = 720, H = 252, L = 46, R = 8, T = 24, B = 38;   // T 를 키운 만큼 위에 한 줄짜리 키(범례)가 들어간다
+  // ⚠️ viewBox 폭은 **폰 폭에 맞춘다.** 720 으로 두면 390px 화면에서 세로가 136px 로 찌그러져 글씨가 안 보인다
+  //    (SVG 는 viewBox 비율대로 통째로 줄어든다 — 글씨만 키워서는 안 된다). 넓은 화면은 CSS max-width 로 막는다.
+  const W = 380, H = 232, L = 40, R = 6, T = 22, B = 34;
   const n = s.labels.length, iw = W - L - R, ih = H - T - B;
-  const raw = Math.max(1, ...s.use.map(v => v || 0), ...s.prod.map(v => v || 0), ...s.stock, ...s.safety) * 1.05;
+  const stackTop = s.prod.map((v, i) => (v || 0) + ((s.prodPending || [])[i] || 0));
+  const raw = Math.max(1, ...s.use.map(v => v || 0), ...stackTop, ...s.stock, ...s.safety) * 1.05;
   // 눈금이 1141 같은 숫자가 되지 않게 — 5칸 기준으로 1·2·2.5·5·10 배수 중 하나로 맞춘다
   const rough = raw / 5, mag = Math.pow(10, Math.floor(Math.log10(rough)));
   const step = ([1, 2, 2.5, 5, 10].find(m => rough <= m * mag) || 10) * mag;
@@ -2476,8 +2489,8 @@ function planSvgChart(s) {
   // 값 수치 — 막대와 보유재고 선에만. 안전재고선은 상수라 칸마다 찍으면 그래프가 숫자로 덮인다(키에 한 번 적혀 있다).
   const bval = (v, i, dx) => (v == null || v <= 0) ? '' :
     `<text x="${(cx(i) + dx).toFixed(1)}" y="${(cy(v) - 3).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--txt-l)">${Math.round(v)}</text>`;
-  const bar = (v, i, dx, fill, op) => (v == null || v <= 0) ? '' :
-    `<rect x="${(cx(i) + dx - bw / 2).toFixed(1)}" y="${cy(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + ih - cy(v)).toFixed(1)}" rx="1.5" fill="${fill}" fill-opacity="${op}"/>`;
+  const bar = (v, i, dx, fill, op, base) => (v == null || v <= 0) ? '' :
+    `<rect x="${(cx(i) + dx - bw / 2).toFixed(1)}" y="${cy((base || 0) + v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(cy(base || 0) - cy((base || 0) + v)).toFixed(1)}" rx="1.5" fill="${fill}" fill-opacity="${op}"/>`;
   const line = (from, to) => s.stock.slice(from, to + 1)
     .map((v, k) => `${k ? 'L' : 'M'}${cx(from + k).toFixed(1)},${cy(v).toFixed(1)}`).join('');
   const tickVals = []; for (let v = 0; v <= maxV + 0.001; v += step) tickVals.push(v);
@@ -2495,22 +2508,22 @@ function planSvgChart(s) {
   const sw_ = (x, col) => `<rect x="${x}" y="4" width="9" height="9" rx="2" fill="${col}"/>`;
   const ln_ = (x, col, dash) => `<line x1="${x}" y1="8.5" x2="${x + 11}" y2="8.5" stroke="${col}" stroke-width="2"${dash ? ' stroke-dasharray="4 3"' : ''}/>`;
   const legend = keyOf('사용', x => sw_(x, 'var(--info)')) + keyOf('생산', x => sw_(x, 'var(--suc)'))
-    + keyOf('권장', x => sw_(x, 'var(--pri)')) + keyOf('재고', x => ln_(x, 'var(--txt)'))
+    + keyOf('생산중', x => sw_(x, 'var(--warn)')) + keyOf('권장', x => sw_(x, 'var(--pri)')) + keyOf('재고', x => ln_(x, 'var(--txt)'))
     + keyOf(`안전 ${s.safetyWeeks}주`, x => ln_(x, 'var(--err)', true));
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" role="img" aria-label="주별 사용량·생산량·보유재고 추이">
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible;max-width:560px;margin:0 auto" role="img" aria-label="주별 사용량·생산량·보유재고 추이">
     ${legend}
     ${hi}
     ${ticks}
-    <text x="${cx(s.splitIndex).toFixed(1)}" y="${T + ih - 4}" text-anchor="middle" font-size="8" fill="var(--txt-l)">지금 · 진행 중</text>
     ${s.use.map((v, i) => bar(v, i, -bw * 0.6, 'var(--info)', i < s.splitIndex ? 0.85 : (i === s.splitIndex ? 0.5 : 0.35))).join('')}
     ${s.prod.map((v, i) => bar(v, i, bw * 0.6, i <= s.splitIndex ? 'var(--suc)' : 'var(--pri)', i < s.splitIndex ? 0.85 : 0.5)).join('')}
+    ${(s.prodPending || []).map((v, i) => bar(v, i, bw * 0.6, 'var(--warn)', 0.55, s.prod[i] || 0)).join('')}
     <line x1="${L}" y1="${cy(s.safety[0]).toFixed(1)}" x2="${W - R}" y2="${cy(s.safety[0]).toFixed(1)}" stroke="var(--err)" stroke-width="1.5" stroke-dasharray="6 4"/>
     <text x="${L + 4}" y="${(cy(s.safety[0]) - 5).toFixed(1)}" font-size="9" fill="var(--err)">안전재고 ${s.safetyWeeks}주 · ${s.safety[0]}봉</text>
     <path d="${line(0, s.splitIndex)}" fill="none" stroke="var(--txt)" stroke-width="2"/>
     <path d="${line(s.splitIndex, n - 1)}" fill="none" stroke="var(--txt)" stroke-width="2" stroke-dasharray="5 4" opacity="0.75"/>
     ${s.stock.map((v, i) => `<circle cx="${cx(i).toFixed(1)}" cy="${cy(v).toFixed(1)}" r="${i === s.splitIndex ? 3.5 : 2}" fill="var(--txt)"/>`).join('')}
     ${s.use.map((v, i) => bval(v, i, -bw * 0.6)).join('')}
-    ${s.prod.map((v, i) => bval(v, i, bw * 0.6)).join('')}
+    ${stackTop.map((v, i) => bval(v, i, bw * 0.6)).join('')}
     ${s.stock.map((v, i) => `<text x="${cx(i).toFixed(1)}" y="${(cy(v) - 6).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--txt)">${Math.round(v)}</text>`).join('')}
     ${s.labels.map((t, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 14}" text-anchor="middle" font-size="10" fill="${i === s.splitIndex ? 'var(--txt)' : (i === ni ? nc : 'var(--txt-l)')}" font-weight="${i === s.splitIndex || i === ni ? 700 : 400}">${t}</text>`).join('')}
     ${s.weeksOnHand.map((w, i) => `<text x="${cx(i).toFixed(1)}" y="${H - B + 25}" text-anchor="middle" font-size="8.5" fill="var(--txt-l)">${w.toFixed(1)}주</text>`).join('')}
@@ -2550,8 +2563,12 @@ async function loadHomeProdPlan() {
       if (!plan) continue;
       const prodEv = lots.filter(l => l && l[1] === code && l[5] && !['폐기', '삭제'].includes(l[9]))
         .map(l => ({ date: l[5], packs: parseFloat(l[10]) || parseFloat(l[3]) || 0 }));
-      if (pending > 0) prodEv.push({ date: asOf, packs: pending });   // 냉동중 = 이번 주에 이미 만든 것
-      const chart = buildPlanChartSeries({ useEvents: shipEv, prodEvents: prodEv, stockNow: plan.avail, demand: plan.demand, asOf });
+      // 마지막 출하승인 시점·수량 — 「언제까지가 확정인가」의 기준점(작업지시서[16] 승인시각)
+      const appr = wos.filter(w => w && w[3] === code && w[16]).sort((a, b) => String(a[16]).localeCompare(String(b[16])));
+      const lastAt = appr.length ? String(appr[appr.length - 1][16]) : '';
+      const lastAppr = lastAt ? { at: lastAt, packs: appr.filter(w => String(w[16]) === lastAt).reduce((a, w) => a + (parseFloat(w[7]) || 0), 0) } : null;
+      const chart = buildPlanChartSeries({ useEvents: shipEv, prodEvents: prodEv, stockNow: stock, pendingPacks: pending,
+        lastApproved: lastAppr, demand: plan.demand, asOf });
       if (chart) cards.push({ name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan, chart });
     }
     if (!cards.length) return;
@@ -2563,7 +2580,9 @@ async function loadHomeProdPlan() {
       return `
         <div class="card">
           <div class="fs-14 fw-6">${c.name}</div>
-          <div class="fs-11 c-txt-l" style="margin:2px 0 6px">지금 <b>${Math.round(p.avail)}봉 · ${p.weeksOnHand.toFixed(1)}주치</b> · 예측 소비 <b>${Math.round(p.demand)}봉/주</b>(${Math.round(p.demand * c.kgPer).toLocaleString()}kg)${tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'}${Math.abs(tr * 100).toFixed(0)}%`} · ${key}</div>
+          <div class="fs-11 c-txt-l" style="margin:2px 0 2px">지금 <b>${Math.round(s.availNow)}봉 · ${p.weeksOnHand.toFixed(1)}주치</b>
+            (출하승인 ${Math.round(s.approvedNow)}${s.pendingNow > 0 ? ` + <span class="c-warn">생산중 ${Math.round(s.pendingNow)}</span>` : ''}) · 예측 소비 <b>${Math.round(p.demand)}봉/주</b>${tr == null ? '' : ` · 최근 4주 ${tr >= 0 ? '↑' : '↓'}${Math.abs(tr * 100).toFixed(0)}%`}</div>
+          <div class="fs-11 c-txt-l" style="margin-bottom:6px">${key}${s.lastApproved ? ` · 최종 출하승인 ${s.lastApproved.at.slice(5, 16)} · ${s.lastApproved.packs}봉` : ''}</div>
           ${planSvgChart(s)}
         </div>`;
     }).join('');

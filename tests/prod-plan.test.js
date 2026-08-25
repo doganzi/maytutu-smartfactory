@@ -194,19 +194,19 @@ t('재고가 마른 상태에서 시작하면 첫 주부터 배치가 나온다'
   assert.ok(s.stock[s.splitIndex + 1] >= s.safety[0], '한 주 만에 안전재고선 위로 올라온다');
 });
 
-t('기본 구간은 앞뒤 4주씩 — 예측 관측창(8주)과 별개다', () => {
+t('기본 구간은 앞뒤 2주씩(5칸) — 예측 관측창(8주)과 별개다', () => {
   const s = buildPlanChartSeries({ useEvents: [], prodEvents: [], stockNow: 840, demand: 249.6389, asOf: AS_OF });
-  assert.strictEqual(PLAN_CFG.CHART_BACK, 4);
-  assert.strictEqual(PLAN_CFG.CHART_AHEAD, 4);
-  assert.strictEqual(s.labels.length, 9, '과거 4 + 지금 1 + 미래 4');
-  assert.strictEqual(s.splitIndex, 4);
+  assert.strictEqual(PLAN_CFG.CHART_BACK, 2, '폰에서 막대가 가늘어지지 않게 5칸만 본다');
+  assert.strictEqual(PLAN_CFG.CHART_AHEAD, 2);
+  assert.strictEqual(s.labels.length, 5, '과거 2 + 지금 1 + 미래 2');
+  assert.strictEqual(s.splitIndex, 2);
   assert.strictEqual(s.labels[s.splitIndex], '8월 17일주차', '진행 중인 주(2026-08-17 시작)');
   // 「바로 다음 주」 = 강조 칸. 관측창이 8주 그대로라 예측값은 안 흔들린다.
   assert.strictEqual(s.recIndex, s.splitIndex, '권장은 «이번 주» 칸에 붙는다');
   assert.strictEqual(s.labels[s.recIndex], '8월 17일주차', '권장 칸 = 진행 중인 주');
   assert.strictEqual(s.recPacks, 0, '지금은 재고가 넘쳐 0봉');
   assert.strictEqual(s.prod[s.recIndex], 0, '권장 칸의 막대는 «실적» — 권장은 밴드 수치로 따로 보여준다');
-  assert.deepStrictEqual([...s.prod].slice(5), [40, 240, 240, 280], '이번 주 권장(0봉) + 남은 소비를 반영한 4주 계획');
+  assert.deepStrictEqual([...s.prod].slice(3), [40, 240], '이번 주 권장(0봉) + 남은 소비를 반영한 2주 계획');
 });
 
 t('과거 재고 역산은 0 밑으로 안 내려간다', () => {
@@ -219,6 +219,29 @@ t('과거 재고 역산은 0 밑으로 안 내려간다', () => {
 
 t('수요가 0이면 그래프를 만들지 않는다 (0으로 나누지 않는다)', () => {
   assert.strictEqual(buildPlanChartSeries({ useEvents: [], prodEvents: [], stockNow: 500, demand: 0, asOf: AS_OF }), null);
+});
+
+t('출하승인 재고와 생산 중(미승인)을 나눠서 보여준다', () => {
+  const s = buildPlanChartSeries({
+    useEvents: [], prodEvents: [], stockNow: 780, pendingPacks: 80,
+    lastApproved: { at: '2026-08-25 10:23', packs: 80 }, demand: 240, asOf: AS_OF,
+  });
+  assert.strictEqual(s.approvedNow, 780, '출하승인까지 끝난 재고');
+  assert.strictEqual(s.pendingNow, 80, '생산 중·미승인');
+  assert.strictEqual(s.availNow, 860, '가용 = 승인 + 생산중');
+  assert.strictEqual(s.stock[s.splitIndex], 860, '재고 선은 가용 기준(미승인도 12시간 뒤면 출하된다)');
+  assert.strictEqual(s.prodPending[s.splitIndex], 80, '「지금」 칸에만 미승인이 쌓인다');
+  assert.ok(s.prodPending.slice(0, s.splitIndex).every(v => v === 0), '과거는 전부 승인 끝');
+  assert.deepStrictEqual(s.lastApproved, { at: '2026-08-25 10:23', packs: 80 });
+  // 권장은 «가용» 기준 — 미승인을 빼면 이미 만든 걸 또 만들라고 한다
+  assert.strictEqual(s.recPacks, Math.ceil(Math.max(0, 240 * 3 - 860) / 40) * 40);
+});
+
+t('미승인이 없으면 승인 재고 = 가용 재고', () => {
+  const s = buildPlanChartSeries({ useEvents: [], prodEvents: [], stockNow: 500, demand: 200, asOf: AS_OF });
+  assert.strictEqual(s.pendingNow, 0);
+  assert.strictEqual(s.availNow, 500);
+  assert.strictEqual(s.lastApproved, null, '승인 기록이 없으면 null — 지어내지 않는다');
 });
 
 /* ── 4. 종단 — 원본 판매행에서 배치까지 ─────────────────────────────────── */
