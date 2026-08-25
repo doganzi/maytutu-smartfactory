@@ -174,10 +174,10 @@ t('향후 계획 — 목표를 채우는 배치만 만들고, 넘치면 0을 낸
   });
   assert.strictEqual(s.labels.length, 15, '과거 8 + 지금 1 + 미래 6');
   assert.strictEqual(s.splitIndex, 8);
-  assert.deepStrictEqual([...s.prod].slice(9), [0, 160, 280, 240, 240, 240], '넘치는 첫 주는 0배치');
-  assert.deepStrictEqual([...s.stock].slice(9), [590, 501, 531, 521, 512, 502]);
+  assert.deepStrictEqual([...s.prod].slice(9), [40, 240, 240, 280, 240, 240], '이번 주 남은 소비까지 반영한 계획');
+  assert.deepStrictEqual([...s.stock].slice(9), [523, 514, 504, 534, 525, 515]);
   assert.strictEqual(s.safety[0], 499, '안전재고 2주선(봉)');
-  assert.strictEqual(s.nextBatches, 0, '다음 주 권장 배치');
+  assert.strictEqual(s.recBatches, 0, '이번 주 권장 배치');
   assert.strictEqual(s.steadyBatches, 6.2, '안정 구간 배치/주');
   assert.ok(s.stock.slice(10).every(v => v >= s.safety[0]), '계획대로면 안전재고선 아래로 안 떨어진다');
   assert.deepStrictEqual([...s.use].slice(9), [250, 250, 250, 250, 250, 250], '미래 사용량 = 예측 소비');
@@ -189,8 +189,8 @@ t('재고가 마른 상태에서 시작하면 첫 주부터 배치가 나온다'
     useEvents: [], prodEvents: [], stockNow: 200, demand: 250,
     asOf: AS_OF, weeksBack: 4, weeksAhead: 2,
   });
-  assert.strictEqual(s.nextBatches, 14, '(250×3 − 200) ÷ 40 → 올림 14배치');
-  assert.strictEqual(s.nextPacks, 560, '화면에 크게 띄우는 값은 «봉»이다');
+  assert.strictEqual(s.recBatches, 14, '(250×3 − 200) ÷ 40 → 올림 14배치');
+  assert.strictEqual(s.recPacks, 560, '화면에 크게 띄우는 값은 «봉»이다');
   assert.ok(s.stock[s.splitIndex + 1] >= s.safety[0], '한 주 만에 안전재고선 위로 올라온다');
 });
 
@@ -202,11 +202,11 @@ t('기본 구간은 앞뒤 4주씩 — 예측 관측창(8주)과 별개다', () 
   assert.strictEqual(s.splitIndex, 4);
   assert.strictEqual(s.labels[s.splitIndex], '8월 17일주차', '진행 중인 주(2026-08-17 시작)');
   // 「바로 다음 주」 = 강조 칸. 관측창이 8주 그대로라 예측값은 안 흔들린다.
-  assert.strictEqual(s.nextIndex, 5);
-  assert.strictEqual(s.labels[s.nextIndex], '8월 24일주차', '바로 다음 주(2026-08-24 시작)');
-  assert.strictEqual(s.nextPacks, 0, '지금은 재고가 넘쳐 0봉');
-  assert.strictEqual(s.prod[s.nextIndex], s.nextPacks, '강조 칸의 막대와 강조 수치가 같아야 한다');
-  assert.deepStrictEqual([...s.prod].slice(5), [0, 160, 280, 240], '4주치 계획');
+  assert.strictEqual(s.recIndex, s.splitIndex, '권장은 «이번 주» 칸에 붙는다');
+  assert.strictEqual(s.labels[s.recIndex], '8월 17일주차', '권장 칸 = 진행 중인 주');
+  assert.strictEqual(s.recPacks, 0, '지금은 재고가 넘쳐 0봉');
+  assert.strictEqual(s.prod[s.recIndex], 0, '권장 칸의 막대는 «실적» — 권장은 밴드 수치로 따로 보여준다');
+  assert.deepStrictEqual([...s.prod].slice(5), [40, 240, 240, 280], '이번 주 권장(0봉) + 남은 소비를 반영한 4주 계획');
 });
 
 t('과거 재고 역산은 0 밑으로 안 내려간다', () => {
