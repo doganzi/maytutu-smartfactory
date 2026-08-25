@@ -2432,26 +2432,29 @@ function buildPlanChartSeries({ useEvents, prodEvents, stockNow, demand, asOf, w
   ends[wks.length - 1] = Math.max(0, (parseFloat(stockNow) || 0) + (U.get(cur) || 0) - (P.get(cur) || 0));
   for (let i = wks.length - 1; i >= 1; i--) ends[i - 1] = Math.max(0, ends[i] - (P.get(wks[i]) || 0) + (U.get(wks[i]) || 0));
   const labels = wks.map(planWeekLabel), use = wks.map(w => Math.round(U.get(w) || 0)), prod = wks.map(w => Math.round(P.get(w) || 0)), stock = ends.map(v => Math.round(v));
-  const splitIndex = labels.length;                       // 「지금」 위치
+  const splitIndex = labels.length;                       // 「지금」 = 진행 중인 주(권장 생산이 붙는 칸)
   // 「지금」 = 진행 중인 주. 지금까지의 실적을 그대로 넣는다 — 단, 반쪽짜리라 **예측 평균에서는 여전히 뺀다**(planWeeklySeries).
   labels.push(planWeekLabel(cur));
   use.push(Math.round(U.get(cur) || 0)); prod.push(Math.round(P.get(cur) || 0)); stock.push(Math.round(parseFloat(stockNow) || 0));
   const target = d * (sw + 1);
-  let s = parseFloat(stockNow) || 0;
-  const plan = [];
+  const stock0 = parseFloat(stockNow) || 0;
+  // 권장은 **이번 주**에 붙인다 — 현장이 돌리는 건 지금 있는 주다. 가용재고가 목표에 모자라는 만큼.
+  //   가용재고엔 이번 주에 이미 만든 몴(냉동중 포함)이 들어 있으므로 이 값은 **앞으로 더** 만들 양이다.
+  const recPacks = Math.ceil(Math.max(0, target - stock0) / bp) * bp;
+  // 이번 주 남은 소비만큼은 더 빠진다 — 월요일이면 거의 한 주치, 금요일이면 얼마 안 남음(날 단위로 세야 하루 안에서 숫자가 안 바뀐다).
+  const restDays = Math.max(0, 7 - Math.min(7, Math.floor((now.getTime() - cur) / DAY)));
+  let s = Math.max(0, stock0 + recPacks - d * restDays / 7);
   for (let i = 1; i <= ahead; i++) {
     const p = Math.ceil(Math.max(0, target - s) / bp) * bp;
     s = s + p - d;
-    plan.push(p);
     labels.push(planWeekLabel(cur + i * 7 * DAY)); use.push(Math.round(d)); prod.push(p); stock.push(Math.round(Math.max(0, s)));
   }
   return {
     labels, use, prod, stock, splitIndex,
     safety: labels.map(() => Math.round(d * sw)),
     demand: d, safetyWeeks: sw, batchPacks: bp, targetStock: target,
-    nextIndex: splitIndex + 1,                                       // 「바로 다음 주」 — 화면에서 강조하는 칸
-    nextPacks: plan.length ? plan[0] : 0,
-    nextBatches: plan.length ? plan[0] / bp : 0,
+    recIndex: splitIndex,                                            // 권장 생산을 붙이는 칸 = **진행 중인 주**
+    recPacks, recBatches: recPacks / bp,
     steadyBatches: Math.round(d / bp * 10) / 10,
     weeksOnHand: stock.map(v => Math.round(v / d * 100) / 100),
   };
@@ -2481,12 +2484,11 @@ function planSvgChart(s) {
   const ticks = tickVals.map(v =>
     `<line x1="${L}" y1="${cy(v).toFixed(1)}" x2="${W - R}" y2="${cy(v).toFixed(1)}" stroke="var(--gray-l)" stroke-width="0.5"/>
      <text x="${L - 5}" y="${(cy(v) + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--txt-l)">${Math.round(v)}</text>`).join('');
-  // 「바로 다음 주」 강조 — 이 그래프를 보는 이유가 사실상 이 칸 하나다
-  const ni = s.nextIndex, nx = cx(ni), nc = s.nextPacks > 0 ? 'var(--pri)' : 'var(--suc)';
-  const nowBand = `<rect x="${(cx(s.splitIndex) - cw / 2).toFixed(1)}" y="${T}" width="${cw.toFixed(1)}" height="${ih}" fill="var(--txt-l)" opacity="0.10"/>`;
+  // 「이번 주」(진행 중) 강조 — 이 그래프를 보는 이유가 사실상 이 칸 하나다
+  const ni = s.recIndex, nx = cx(ni), nc = s.recPacks > 0 ? 'var(--pri)' : 'var(--suc)';
   const hi = `<rect x="${(nx - cw / 2).toFixed(1)}" y="${T}" width="${cw.toFixed(1)}" height="${ih}" fill="${nc}" opacity="0.08"/>
-    <text x="${nx.toFixed(1)}" y="${T + 12}" text-anchor="middle" font-size="14" font-weight="800" fill="${nc}">${s.nextPacks}봉</text>
-    <text x="${nx.toFixed(1)}" y="${T + 24}" text-anchor="middle" font-size="9.5" fill="${nc}">${s.nextPacks > 0 ? s.nextBatches + '배치 · 다음 주' : '생산 없어도 됨'}</text>`;
+    <text x="${nx.toFixed(1)}" y="${T + 12}" text-anchor="middle" font-size="14" font-weight="800" fill="${nc}">${s.recPacks}봉</text>
+    <text x="${nx.toFixed(1)}" y="${T + 24}" text-anchor="middle" font-size="9.5" fill="${nc}">${s.recPacks > 0 ? s.recBatches + '배치 · 이번 주 생산' : '이번 주 생산 없어도 됨'}</text>`;
   // 한 줄짜리 키 — 별도 범례 블록 대신 그래프 안에 넣는다(카드가 설명문으로 길어지지 않게)
   let kx = L;
   const keyOf = (label, draw) => { const g = draw(kx) + `<text x="${kx + 15}" y="12" font-size="9" fill="var(--txt-l)">${label}</text>`; kx += 22 + label.length * 8; return g; };
@@ -2497,12 +2499,11 @@ function planSvgChart(s) {
     + keyOf(`안전 ${s.safetyWeeks}주`, x => ln_(x, 'var(--err)', true));
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" role="img" aria-label="주별 사용량·생산량·보유재고 추이">
     ${legend}
-    ${nowBand}
     ${hi}
     ${ticks}
-    <text x="${cx(s.splitIndex).toFixed(1)}" y="${T + 12}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--txt-l)">지금 · 진행 중</text>
+    <text x="${cx(s.splitIndex).toFixed(1)}" y="${T + ih - 4}" text-anchor="middle" font-size="8" fill="var(--txt-l)">지금 · 진행 중</text>
     ${s.use.map((v, i) => bar(v, i, -bw * 0.6, 'var(--info)', i < s.splitIndex ? 0.85 : (i === s.splitIndex ? 0.5 : 0.35))).join('')}
-    ${s.prod.map((v, i) => bar(v, i, bw * 0.6, i <= s.splitIndex ? 'var(--suc)' : 'var(--pri)', i < s.splitIndex ? 0.85 : (i === s.splitIndex ? 0.5 : (i === ni ? 1 : 0.5)))).join('')}
+    ${s.prod.map((v, i) => bar(v, i, bw * 0.6, i <= s.splitIndex ? 'var(--suc)' : 'var(--pri)', i < s.splitIndex ? 0.85 : 0.5)).join('')}
     <line x1="${L}" y1="${cy(s.safety[0]).toFixed(1)}" x2="${W - R}" y2="${cy(s.safety[0]).toFixed(1)}" stroke="var(--err)" stroke-width="1.5" stroke-dasharray="6 4"/>
     <text x="${L + 4}" y="${(cy(s.safety[0]) - 5).toFixed(1)}" font-size="9" fill="var(--err)">안전재고 ${s.safetyWeeks}주 · ${s.safety[0]}봉</text>
     <path d="${line(0, s.splitIndex)}" fill="none" stroke="var(--txt)" stroke-width="2"/>
@@ -2556,9 +2557,9 @@ async function loadHomeProdPlan() {
     if (!cards.length) return;
     el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 생산 계획 (주별 · 실적 → 예측)</div>' + cards.map(c => {
       const p = c.plan, s = c.chart, tr = p.trend;
-      const key = s.nextPacks > 0
-        ? `다음 주 <b class="c-pri" style="font-size:15px">${s.nextPacks}봉</b>(${s.nextBatches}배치) 생산`
-        : `다음 주 <b class="c-suc">생산 없어도 됨</b>`;
+      const key = s.recPacks > 0
+        ? `이번 주 <b class="c-pri" style="font-size:15px">${s.recPacks}봉</b>(${s.recBatches}배치) 생산`
+        : `이번 주 <b class="c-suc">생산 없어도 됨</b>`;
       return `
         <div class="card">
           <div class="fs-14 fw-6">${c.name}</div>
