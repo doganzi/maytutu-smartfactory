@@ -1863,6 +1863,29 @@ function renderBottomNav() {
 /* ═══════════════════════════════════════════════
    HEADER RENDERER
    ═══════════════════════════════════════════════ */
+/* 📲 «앱으로 설치» (2026-09-07 사용자 «각 진입점에서 크롬 앱으로 설치») — 프롬프트는 최상위에서 붙잡아 둔다(부팅 뒤에 붙이면 이미 지나간 뒤).
+   크롬·엣지·안드로이드 = 헤더 📲 로 prompt()(클릭 안에서 동기 · 1회용) · 아이폰 = 3단계 안내 · 이미 앱으로 열렸으면(standalone) 버튼 없음 ·
+   데스크톱에서 프롬프트가 없으면(이미 설치·미지원) 버튼도 없음 — 못 지키는 약속은 안 한다. */
+let _installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); _installPrompt = e; paintInstallBtn(); });
+window.addEventListener('appinstalled', () => { _installPrompt = null; const b = document.getElementById('installBtn'); if (b) b.remove(); });
+function isStandaloneApp() { return window.navigator.standalone === true || !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); }
+function installBtnHtml() {
+  if (isStandaloneApp()) return '';
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  if (!_installPrompt && !ios) return '';
+  return `<div id="installBtn" title="앱으로 설치" onclick="installApp()" style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;margin-left:6px">📲</div>`;
+}
+function paintInstallBtn() {   // 프롬프트가 헤더를 그린 뒤에 오면 그 자리에 끼워 넣는다
+  const row = document.querySelector('#header .h-row');
+  if (!row || row.querySelector('#installBtn')) return;
+  const html = installBtnHtml(); if (html) row.insertAdjacentHTML('beforeend', html);
+}
+function installApp() {
+  const p = _installPrompt;
+  if (p) { _installPrompt = null; const b = document.getElementById('installBtn'); if (b) b.remove(); try { p.prompt(); } catch (e) { console.warn('[install]', e); } return; }
+  confirm('📲 앱으로 설치', '① 아래 공유 버튼 ⬆️ 를 누르세요 → ② 「홈 화면에 추가」 → ③ 「추가」. 홈 화면 아이콘으로 열면 앱처럼 씁니다.', null, null);
+}
 function renderHeader(title, sub, opts = {}) {
   const backBtn = opts.back ? `<span class="h-back" onclick="Router.go('${opts.back}')">←</span>` : '';
   const refreshBtn = opts.noRefresh ? '' : `<div style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer" onclick="LiveSync.manualRefresh()" title="새로고침">🔄</div>`;
@@ -1876,7 +1899,7 @@ function renderHeader(title, sub, opts = {}) {
           ${sub ? `<div class="h-sub">${sub}</div>` : ''}
         </div>
       </div>
-      ${right}
+      ${right}${installBtnHtml()}
     </div>
   `;
 }
