@@ -1134,12 +1134,19 @@ const SheetsAPI = {
   },
 
   // Get all rows (캐시 적용)
+  /* 표시 서식에 잘리면 안 되는 탭 — Sheets API 는 valueRenderOption 을 안 주면 FORMATTED_VALUE 를 준다.
+     SOP레시피 배합비 셀은 저장값이 0.588235294117647(=10/17) 인데 셀 서식이 소수 3자리라 화면엔 0.588 로 뜨고,
+     앱은 그 «표시 문자열» 을 받아 배합비 합을 0.999 로 알고 있었다(2026-09-08 실측). 잔량 0 배치가 안 맞던 원인.
+     ⚠️ 날짜가 있는 탭은 절대 넣지 말 것 — UNFORMATTED 는 날짜를 serial 숫자로 돌려준다. */
+  _UNFORMATTED_TABS: new Set(['SOP레시피']),
+
   async getAll(tab, useCache = true) {
     if (useCache) {
       const cached = this._getCached(`getAll:${tab}`);
       if (cached) return JSON.parse(JSON.stringify(cached)); // deep copy
     }
-    const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}`);
+    const rawQ = this._UNFORMATTED_TABS.has(tab) ? '?valueRenderOption=UNFORMATTED_VALUE' : '';
+    const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}${rawQ}`);
     if (!res.ok) throw new Error(`Sheets GET ${tab}: ${res.status}`);
     const data = await res.json();
     const rows = data.values ? data.values.slice(1) : [];
@@ -2353,6 +2360,21 @@ const PLAN_CFG = {
   CHART_BACK: 2,     // 그래프 기본 구간(과거) — 예측 관측창(WEEKS=8)과 별개다.
   CHART_AHEAD: 2,    // 그래프 기본 구간(미래) — 폰에서 막대가 가늘어지지 않게 5칸(2 + 지금 + 2). 넓은 화면은 호출 측에서 늘려 쓴다.
 };
+
+// <batch-cfg>
+/* 배치 산식 상수 — 근거 = docs/FACTORY_MASTER_DATA.md §6 설비 · 2026-09-08 공정기록 실측 4배치
+   YIELD_FACTOR  투입 안전계수. 옛 값 1.01 은 등록 문서에 근거가 없는 사내 관행이었고, 실측 공정 로스는 0.3% 였다
+                 (평균 투입 204.64kg → 40봉 200kg. 그 차 4.64kg 중 4.0kg 은 로스가 아니라 믹스 12포대가 40.8봉을
+                 만들어 생기는 «구조적 잔량» 이다). 1.01 은 floor() 와 맞물려 권장 배치를 늘 한 봉씩 밀어냈고,
+                 그 탓에 잔량 0 조합(51봉=믹스 15포대)이 후보에서 통째로 사라져 있었다. → 1.00 고정.
+   MIXER_KG      반죽기 520L = 300kg. 옛 상한 350kg 은 설비보다 커서 «만들 수 없는 배치» 를 3건이나 추천하고 있었다.
+   MIN_KG        하한 — 현행 운영 관행(1일 2배치) 유지.                                                        */
+const BATCH_CFG = { YIELD_FACTOR: 1.00, MIXER_KG: 300, MIN_KG: 200, PACK_KG: 5 };
+
+/* 작업지시 프리셋 봉수 — 사용자 확정 2026-09-08. 봉수만 여기 두고 포대·판·잔량은 전부 레시피에서 뽑는다
+   (배합비나 포장규격이 바뀌면 카드 숫자가 저절로 따라간다). */
+const BATCH_PRESET_PACKS = [40, 47, 51];
+// </batch-cfg>
 function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
 function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
 /** 주 라벨 — 「M월 D일주차」(그 주가 **시작하는 월요일 날짜**).
@@ -2596,6 +2618,8 @@ async function loadHomeProdPlan() {
       if (chart) cards.push({ name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan, chart });
     }
     if (!cards.length) return;
+    // 작업지시서 생성 화면의 프리셋 카드가 「이번 주 권장」을 띄울 때 쓴다(홈을 거친 세션에서만 채워진다 — 없으면 그 줄만 빠진다)
+    State.prodPlan = { at: Date.now(), items: cards.map(c => ({ name: c.name, recPacks: c.chart.recPacks, recBatches: c.chart.recBatches })) };
     el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 생산 계획 (주별 · 실적 → 예측)</div>' + cards.map(c => {
       const p = c.plan, s = c.chart, tr = p.trend;
       const key = s.recPacks > 0
@@ -8413,13 +8437,13 @@ function renderBomResult() {
     if (mainSkuP && mainSkuP.perUnit > 0 && mainRatio > 0) {
       for (let units = 1; units <= 50; units++) {
         const totalMixKg = units * mainSkuP.perUnit;
-        const maxFinishedKg = totalMixKg / (mainRatio * 1.01);
+        const maxFinishedKg = totalMixKg / (mainRatio * BATCH_CFG.YIELD_FACTOR);
         if (maxFinishedKg < 200) continue;
-        if (maxFinishedKg > 360) break;
+        if (maxFinishedKg > BATCH_CFG.MIXER_KG + 20) break;
         const bags = Math.floor(maxFinishedKg / 5);
         const finishedKg = bags * 5;
-        if (finishedKg < 200 || finishedKg > 350) continue;
-        const mixUsed = mainRatio * finishedKg * 1.01;
+        if (finishedKg < BATCH_CFG.MIN_KG || finishedKg > BATCH_CFG.MIXER_KG) continue;
+        const mixUsed = mainRatio * finishedKg * BATCH_CFG.YIELD_FACTOR;
         const waste = totalMixKg - mixUsed;
         candidates.push({ units, totalMixKg, finishedKg, bags, waste });
       }
@@ -8431,7 +8455,7 @@ function renderBomResult() {
       recEl.innerHTML = `
         <div class="card" style="background:#f0f7ff;border-left:3px solid var(--pri);margin-top:12px">
           <div class="fs-13 fw-7 mb-4">📐 권장 배치 (${mainRecipe[2]} 정수 ${mainSkuP.unitName} 단위)</div>
-          <div class="fs-11 c-txt-l mb-8">200~350kg 범위 · 잔여 자재 최소 순 상위 3건</div>
+          <div class="fs-11 c-txt-l mb-8">${BATCH_CFG.MIN_KG}~${BATCH_CFG.MIXER_KG}kg(반죽기 용량) · 잔여 자재 최소 순 상위 3건</div>
           ${top3.map((r, i) => {
             const isCurrent = (curBags === r.bags);
             const applyVal = unit === 'bag' ? r.bags : r.finishedKg;
@@ -8449,7 +8473,7 @@ function renderBomResult() {
         </div>
       `;
     } else if (mainSkuP && mainSkuP.perUnit > 0) {
-      recEl.innerHTML = `<div class="card bl-warn" style="background:#fff8e1;margin-top:12px;padding:10px"><div class="fs-12 c-warn">⚠ 200~350kg 범위에서 ${mainRecipe[2]} 정수 ${mainSkuP.unitName} 조합 없음</div></div>`;
+      recEl.innerHTML = `<div class="card bl-warn" style="background:#fff8e1;margin-top:12px;padding:10px"><div class="fs-12 c-warn">⚠ ${BATCH_CFG.MIN_KG}~${BATCH_CFG.MIXER_KG}kg 범위에서 ${mainRecipe[2]} 정수 ${mainSkuP.unitName} 조합 없음</div></div>`;
     }
   }
 
@@ -8462,7 +8486,7 @@ function renderBomResult() {
     const rmCode = r[1];
     const rmName = r[2];
     const ratio = parseFloat(r[3]) || 0;
-    const needKg = ratio * targetKg * 1.01;  // index.html:4570 동일 공식
+    const needKg = ratio * targetKg * BATCH_CFG.YIELD_FACTOR;  // index.html:4570 동일 공식
     const item = rmItems.find(i => i[0] === rmCode);
     const sku = item?.[3] || '';
     const skuP = parseSkuUnit(sku);
@@ -8522,7 +8546,7 @@ function renderBomResult() {
         <span>kg당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg).toLocaleString() : 0}원</b> · 봉(5kg)당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg * 5).toLocaleString() : 0}원</b></span>
         <span>박스(15kg)당 <b>${targetKg > 0 ? Math.round(totalCost / targetKg * 15).toLocaleString() : 0}원</b></span>
       </div>
-      ${anyNoPrice ? '<div class="fs-11 c-warn mt-4">⚠ 매입단가 미입력 자재가 있어 원가가 과소 산정됩니다 — 원재료 품목 화면에서 단가를 입력하세요</div>' : '<div class="fs-10 c-txt-l mt-4">단가 = 원재료 품목 매입단가(원/kg) × 필요량(배합비×1.01). 배송·포장 제외 재료비만.</div>'}
+      ${anyNoPrice ? '<div class="fs-11 c-warn mt-4">⚠ 매입단가 미입력 자재가 있어 원가가 과소 산정됩니다 — 원재료 품목 화면에서 단가를 입력하세요</div>' : '<div class="fs-10 c-txt-l mt-4">단가 = 원재료 품목 매입단가(원/kg) × 필요량(배합비×kg). 배송·포장 제외 재료비만.</div>'}
     </div>
 
     <div class="card" style="padding:0;overflow:hidden;margin-top:8px">
@@ -8536,7 +8560,7 @@ function renderBomResult() {
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
             <div>
-              <div class="fs-11 c-txt-l">필요량 (배합비 × kg × 1.01)</div>
+              <div class="fs-11 c-txt-l">필요량 (배합비 × kg)</div>
               <div class="fs-13 fw-7">${r.needKg.toFixed(2)} kg</div>
               ${r.needConv !== '—' ? `<div class="fs-11 c-txt-l">≈ ${r.needConv}</div>` : ''}
             </div>
@@ -8680,13 +8704,13 @@ function renderSopStepPreview(step, recipes, targetKg, packCount) {
   if (stepType === 'input') {
     const rmCode = step[4] || '';
     const recipe = recipes.find(r => r[1] === rmCode);
-    const target = recipe ? (parseFloat(recipe[3]) * targetKg * 1.01).toFixed(2) : '0';
+    const target = recipe ? (parseFloat(recipe[3]) * targetKg * BATCH_CFG.YIELD_FACTOR).toFixed(2) : '0';
     const isWater = rmCode === 'RM002';
     let n = 1;
     body += `
       <div class="fs-14 fw-7" style="margin-bottom:6px;margin-top:4px">Step ${n++}. 투입 목표량 확인</div>
       <div class="info-box suc">
-        <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetKg}kg × 1.01)</div>
+        <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetKg}kg)</div>
         <div class="fs-20 fw-8 c-suc mt-4">${target} kg</div>
         <div class="fs-11 c-txt-l">자재 코드: ${rmCode}${isWater ? ' (수도 공급 · 추적 외)' : ''}</div>
       </div>
@@ -11440,6 +11464,8 @@ Screens['wo-create'] = async () => {
     if (!State.rawMaterialLots?.length) {
       State.rawMaterialLots = await SheetsAPI.getAll('원재료LOT').catch(() => []);
     }
+    // 프리셋 카드의 「오늘 N배치 · 이번 주 N배치」 — 작업자가 오늘 얼마나 더 만들지 정하는 근거
+    State.workOrders = await SheetsAPI.getAll('작업지시서').catch(() => State.workOrders || []);
   } catch(e) {}
 
   const activeSops = State.sops.filter(s => s[4] === '활성');
@@ -11454,8 +11480,10 @@ Screens['wo-create'] = async () => {
         </select>
       </div>
 
+      <div id="wo-presets"></div>
+
       <div class="input-group">
-        <label>생산 목표 수량 (총 수량)</label>
+        <label>생산 목표 수량 (총 수량) — 직접 입력</label>
           <input type="number" id="wo-qty" placeholder="수량 입력" oninput="updateWOCalc()">
         </div>
 
@@ -11505,7 +11533,105 @@ function selectSOP(sopId) {
     `<div style="padding:4px 0;border-bottom:1px solid var(--bg)">${s[1]}. ${s[2]||''}</div>`
   ).join('');
 
+  renderBatchPresets();
   updateWOCalc();
+}
+
+// <batch-presets>
+/* 「오늘 만들 양」 프리셋 카드 — 사용자 확정 2026-09-08
+   숫자를 전부 «정수 포대» 기준으로 낸다. 현장이 목표 무게를 달지 않고 포대·판째로 넣기 때문이다
+   (공정기록 실측 4배치 전건: 믹스 12포대 120kg · 계란 24판 36kg — 화면이 시킨 118.78/35.55 가 아니다).
+   그래서 배치를 정하는 것은 봉수가 아니라 **포대수** 이고, 실제로 나오는 양 = 포대kg ÷ 주자재 배합비 다.
+   40봉을 지시해도 12포대가 204kg(40.8봉)을 만들어 **0.8봉(4kg)이 봉에 안 담긴다** — 이 손실을 카드에 적는다.
+   주 자재는 코드를 박지 않고 «배합비 최대» 로 찾는다(RM003→RM011 교체 전례). */
+function batchPresetCalc(bags, recipes, rmItems) {
+  if (!recipes || !recipes.length) return null;
+  const main = recipes.reduce((a, b) => (parseFloat(a[3]) || 0) > (parseFloat(b[3]) || 0) ? a : b, recipes[0]);
+  const mainRatio = parseFloat(main[3]) || 0;
+  const mainSkuP = parseSkuUnit(rmItems.find(i => i[0] === main[1])?.[3] || '');
+  if (!mainRatio || !mainSkuP || !(mainSkuP.perUnit > 0)) return null;
+  const P = BATCH_CFG.PACK_KG;
+  const needKg = mainRatio * bags * P * BATCH_CFG.YIELD_FACTOR;
+  // ⚠️ 1e-9 은 부동소수점 흡수용이다. 배합비가 10/17 이라 51봉의 필요량은 «정확히» 15포대인데,
+  //    시트에서 온 값이 10/17 보다 1비트라도 크면 15.0000000000001 → ceil 이 16포대로 튄다(잔량 0 이 깨진다).
+  const units = Math.ceil(needKg / mainSkuP.perUnit - 1e-9);   // 실제로 뜯는 포대 수
+  const totalIn = units * mainSkuP.perUnit / mainRatio;        // 그 포대로 만들어지는 총 투입량
+  const realBags = totalIn / P;
+  const leftoverKg = totalIn - bags * P;                       // 봉에 안 담기는 양
+  const lines = recipes.map(r => {
+    const kg = (parseFloat(r[3]) || 0) * totalIn;
+    const p = parseSkuUnit(rmItems.find(i => i[0] === r[1])?.[3] || '');
+    let pack = null;
+    if (p && p.perUnit > 0) { const n = kg / p.perUnit; if (Math.abs(n - Math.round(n)) < 0.02) pack = Math.round(n) + p.unitName; }
+    return { name: r[2] || '', code: r[1] || '', kg, pack };
+  });
+  return { bags, units, unitName: mainSkuP.unitName, mainName: main[2] || main[1], totalIn, realBags, leftoverKg,
+           lines, fill: totalIn / BATCH_CFG.MIXER_KG, overMixer: totalIn > BATCH_CFG.MIXER_KG };
+}
+// </batch-presets>
+
+/* 「오늘 몇 배치 했나」 — 작업자가 더 만들지 말지 정하는 근거. 실적은 작업지시서에서, 권장은 홈 생산계획에서. */
+function batchTodayLine() {
+  const wos = (State.workOrders || []).filter(w => w && w[12] !== '삭제');
+  const pad = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const wkStart = planWeekStart(now);
+  const packs = a => a.reduce((t, w) => t + (parseFloat(w[7]) || 0), 0);
+  const today = wos.filter(w => String(w[9] || '').startsWith(todayStr));
+  const week = wos.filter(w => { const d = planDate(w[9]); return d && d >= wkStart; });
+  let out = `오늘 <b>${today.length}배치 ${packs(today)}봉</b> · 이번 주 <b>${week.length}배치 ${packs(week)}봉</b>`;
+  const p = State.prodPlan?.items?.[0];
+  if (p) {
+    const left = Math.max(0, p.recPacks - packs(week));
+    out += ` · 이번 주 권장 <b class="c-pri">${p.recPacks}봉</b>` + (left > 0 ? ` (남은 ${left}봉)` : ' <span class="c-suc">(달성)</span>');
+  }
+  return out;
+}
+
+function renderBatchPresets() {
+  const el = $id('wo-presets'); if (!el) return;
+  const recipes = State.sopRecipes.filter(r => r[0] === _selectedSopId);
+  const rmItems = State.rawMaterialItems || [];
+  const cards = BATCH_PRESET_PACKS.map(b => batchPresetCalc(b, recipes, rmItems)).filter(Boolean);
+  if (!cards.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="card" style="background:#f0f7ff;border-left:3px solid var(--pri);margin-bottom:12px">
+      <div class="fs-14 fw-7 mb-2">📐 오늘 만들 양 고르기</div>
+      <!-- ⚠️ .card 안에서 fs-11+c-txt-l 조합은 CSS 가 한 줄로 잘라 버린다(text-overflow:ellipsis) — 색은 인라인으로 준다 -->
+      <div class="fs-11 mb-8" style="color:var(--txt-l);white-space:normal">${batchTodayLine()}</div>
+      ${cards.map(c => `
+        <div class="card" style="background:#fff;margin:8px 0;padding:10px;${c.overMixer ? 'opacity:.5' : ''}">
+          <div class="row between" style="align-items:center">
+            <div>
+              <span class="fs-18 fw-8">${c.bags}봉</span>
+              <span class="fs-13 c-txt-l"> · ${c.bags * BATCH_CFG.PACK_KG}kg</span>
+              ${c.leftoverKg < 0.05 ? '<span class="badge badge-suc" style="margin-left:6px">남는 것 없음</span>' : ''}
+              ${c.overMixer ? '<span class="badge badge-err" style="margin-left:6px">반죽기 초과</span>' : ''}
+            </div>
+            <button class="btn btn-sm ${c.leftoverKg < 0.05 ? 'btn-suc' : 'btn-pri'}" ${c.overMixer ? 'disabled' : ''}
+              onclick="startPresetWO(${c.bags})" style="white-space:nowrap">이 양으로 시작</button>
+          </div>
+          <div class="fs-12" style="margin-top:6px;line-height:1.8">
+            ${c.lines.map(l => `<span style="display:inline-block;margin-right:12px">${l.name}
+              <b>${l.pack || (l.kg.toFixed(1) + 'kg')}</b>${l.pack ? ` <span class="c-txt-l">(${l.kg.toFixed(0)}kg)</span>` : ''}</span>`).join('')}
+          </div>
+          <div class="fs-11" style="margin-top:4px;color:var(--txt-l);white-space:normal">
+            ${c.units}${c.unitName} 투입 → ${c.totalIn.toFixed(0)}kg = ${c.realBags.toFixed(1)}봉 ·
+            ${c.leftoverKg < 0.05 ? '<b class="c-suc">봉에 안 담기는 양 없음</b>' : `<b class="c-warn">봉에 안 담기는 양 ${c.leftoverKg.toFixed(1)}kg</b>`} ·
+            반죽기 ${(c.fill * 100).toFixed(0)}%
+          </div>
+        </div>`).join('')}
+      <div class="fs-11" style="color:var(--txt-l);white-space:normal">숫자는 «정수 포대·판» 기준입니다 — 현장이 무게를 달지 않고 포대째 넣기 때문입니다. 반죽기 ${BATCH_CFG.MIXER_KG}kg.</div>
+    </div>`;
+}
+
+/* 카드 한 번 눌러 바로 시작 — 수량을 채우고 기존 startWorkOrder 를 그대로 탄다(생성 경로를 두 벌 만들지 않는다) */
+async function startPresetWO(bags) {
+  const q = $id('wo-qty'); if (q) q.value = bags;
+  const u = $id('wo-unit'); if (u) u.value = String(BATCH_CFG.PACK_KG);
+  updateWOCalc();
+  await startWorkOrder();
 }
 
 function updateWOCalc() {
@@ -11538,10 +11664,10 @@ function updateWOCalc() {
   calcEl.style.display = '';
   calcEl.innerHTML = `
     <div class="card info-box suc">
-      <div class="fs-13 fw-7 c-suc mb-8">원재료 투입 목표 (배합비 × ${totalKg}kg × 1.01)</div>
-      <div class="fs-12 c-txt-l mb-4">+1% 여유분 자동 반영</div>
+      <div class="fs-13 fw-7 c-suc mb-8">원재료 투입 목표 (배합비 × ${totalKg}kg)</div>
+      <div class="fs-12 c-txt-l mb-4">현장은 포대·판째로 넣습니다 — 아래 「오늘 만들 양」 카드의 포대·판 수를 기준으로 하세요</div>
       ${recipes.map(r => {
-        const target = (parseFloat(r[3]) || 0) * totalKg * 1.01;
+        const target = (parseFloat(r[3]) || 0) * totalKg * BATCH_CFG.YIELD_FACTOR;
         const isEgg = (r[1]||'') === 'RM001';
         const eggCnt = isEgg ? Math.ceil(target * 1000 / 50) : 0;
         const eggPan = Math.floor(eggCnt / 30);
@@ -11584,7 +11710,7 @@ function updateWOBomCheck() {
   const checks = recipes.map(r => {
     const code = r[1];
     const ratio = parseFloat(r[3]) || 0;
-    const need = ratio * totalKg * 1.01;
+    const need = ratio * totalKg * BATCH_CFG.YIELD_FACTOR;
     const isWater = code === 'RM002';
     if (isWater) {
       return { code, name: r[2], ratio, need, stock: Infinity, isShort: false, shortKg: 0, isWater: true };
@@ -11608,21 +11734,22 @@ function updateWOBomCheck() {
     for (let units = 1; units <= 50; units++) {
       const totalMixKg = units * mainSkuP.perUnit;
       // 이 포대 수로 만들 수 있는 최대 완제품 kg
-      const maxFinishedKg = totalMixKg / (mainRatio * 1.01);
+      const maxFinishedKg = totalMixKg / (mainRatio * BATCH_CFG.YIELD_FACTOR);
       if (maxFinishedKg < 200) continue;
-      if (maxFinishedKg > 360) break;  // 후보 초과
+      if (maxFinishedKg > BATCH_CFG.MIXER_KG + 20) break;  // 후보 초과
       // 정수 봉수 (내림) — 잔여 자재 발생
       const bags = Math.floor(maxFinishedKg / unitSize);
       const finishedKg = bags * unitSize;
-      if (finishedKg < 200 || finishedKg > 350) continue;
-      const mixUsed = mainRatio * finishedKg * 1.01;
+      if (finishedKg < BATCH_CFG.MIN_KG || finishedKg > BATCH_CFG.MIXER_KG) continue;
+      const mixUsed = mainRatio * finishedKg * BATCH_CFG.YIELD_FACTOR;
       const waste = totalMixKg - mixUsed;
       recommendations.push({ units, totalMixKg, finishedKg, bags, mixUsed, waste });
     }
     // 잔여 최소 → bags 큰 순으로 동률 분리
     recommendations.sort((a, b) => (a.waste - b.waste) || (b.bags - a.bags));
   }
-  const top3 = recommendations.slice(0, 3);
+  // 「오늘 만들 양」 프리셋 카드가 이미 떠 있으면 같은 정보를 두 번 보여주지 않는다
+  const top3 = ($id('wo-presets')?.innerHTML || '') ? [] : recommendations.slice(0, 3);
 
   bomEl.style.display = '';
   bomEl.innerHTML = `
@@ -11647,7 +11774,7 @@ function updateWOBomCheck() {
     ${top3.length > 0 ? `
       <div class="card" style="background:#f0f7ff;border-left:3px solid var(--pri);margin-top:8px">
         <div class="fs-13 fw-7 mb-4">📐 권장 배치 (${main[2]} 정수 ${mainSkuP.unitName} 단위)</div>
-        <div class="fs-11 c-txt-l mb-8">200~350kg 범위 · 잔여 자재 최소 순 상위 3건</div>
+        <div class="fs-11 c-txt-l mb-8">${BATCH_CFG.MIN_KG}~${BATCH_CFG.MIXER_KG}kg(반죽기 용량) · 잔여 자재 최소 순 상위 3건</div>
         ${top3.map((r, i) => {
           const isCurrent = (qty === r.bags);
           return `
@@ -11662,9 +11789,9 @@ function updateWOBomCheck() {
           `;
         }).join('')}
       </div>
-    ` : (mainSkuP && mainSkuP.perUnit > 0 ? `
+    ` : (!($id('wo-presets')?.innerHTML || '') && mainSkuP && mainSkuP.perUnit > 0 ? `
       <div class="card bl-warn" style="background:#fff8e1;margin-top:8px;padding:10px">
-        <div class="fs-12 c-warn">⚠ 200~350kg 범위에서 ${main[2]} 정수 ${mainSkuP.unitName} 조합이 없습니다</div>
+        <div class="fs-12 c-warn">⚠ ${BATCH_CFG.MIN_KG}~${BATCH_CFG.MIXER_KG}kg 범위에서 ${main[2]} 정수 ${mainSkuP.unitName} 조합이 없습니다</div>
         <div class="fs-11 c-txt-l mt-4">SOP·SKU 조합 또는 안전계수 확인 필요</div>
       </div>
     ` : '')}
@@ -11861,7 +11988,7 @@ function renderStepContent(step, stepType) {
   if (stepType === 'input') {
     const rmCode = step[4] || '';
     const recipe = recipes.find(r => r[1] === rmCode);
-    const target = recipe ? (parseFloat(recipe[3]) * targetQty * 1.01).toFixed(2) : '0';
+    const target = recipe ? (parseFloat(recipe[3]) * targetQty * BATCH_CFG.YIELD_FACTOR).toFixed(2) : '0';
     const isWater = rmCode === 'RM002';
     const checks = (step[6] || '').split(',').filter(c => c.trim());
 
@@ -11874,7 +12001,7 @@ function renderStepContent(step, stepType) {
     html += `
       <div class="fs-14 fw-7" style="color:#111;margin-bottom:6px;margin-top:4px">Step ${inputStepNum++}. 투입 목표량 확인</div>
       <div class="info-box suc">
-        <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetQty}kg × 1.01)</div>
+        <div class="fs-12 fw-6 c-suc">투입 목표량 (배합비 × ${targetQty}kg)</div>
         <div class="fs-20 fw-8 c-suc mt-4">${target} kg${eggLabel ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:2px 8px;font-size:13px;color:#e65100;font-weight:700;margin-left:8px;vertical-align:middle">🥚 ${eggLabel}</span>` : ''}</div>
       </div>
     `;
