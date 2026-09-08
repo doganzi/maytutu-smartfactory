@@ -2371,9 +2371,15 @@ const PLAN_CFG = {
    MIN_KG        하한 — 현행 운영 관행(1일 2배치) 유지.                                                        */
 const BATCH_CFG = { YIELD_FACTOR: 1.00, MIXER_KG: 300, MIN_KG: 200, PACK_KG: 5 };
 
-/* 작업지시 프리셋 봉수 — 사용자 확정 2026-09-08. 봉수만 여기 두고 포대·판·잔량은 전부 레시피에서 뽑는다
-   (배합비나 포장규격이 바뀌면 카드 숫자가 저절로 따라간다). */
-const BATCH_PRESET_PACKS = [40, 47, 51];
+/* 작업지시 프리셋 봉수 — 사용자 확정 2026-09-08. 목적은 «한 배치 생산량을 늘리는 것» 이다.
+   믹스가 10kg 포대 단위로만 들어가므로 배치는 포대수로 정해지고, 나오는 양 = 1.7 × 믹스kg 다.
+   5kg 봉으로 안 떨어지는 나머지는 **마지막 봉지째 버려진다**(현장 확인 — 40봉 지시는 여유 버퍼였고
+   제작 시 마지막 봉지를 버려 40봉이 나왔다). 그 폐기가 곧 계란 손실이다 — 계란은 5,600원/kg 로
+   반죽 재료비의 43%를 차지하는 최고가 원료다.
+   반죽기 300kg 안에서 «봉수 ↑ · 폐기 ↓» 둘 다에서 안 밀리는 것은 51·54·57봉 셋뿐이고,
+   현행 40봉(12포대·폐기 4kg)은 51봉(15포대·폐기 0)에 **양쪽 다** 밀린다.
+   봉수만 여기 두고 포대·판·폐기·원가는 전부 레시피에서 뽑는다. */
+const BATCH_PRESET_PACKS = [51, 54, 57];
 // </batch-cfg>
 function planWeekStart(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t; }
 function planDate(v) { const s = String(v || '').trim(); if (!s) return null; const d = new Date(s.replace(/-/g, '/')); return isFinite(d) ? d : null; }
@@ -11565,8 +11571,14 @@ function batchPresetCalc(bags, recipes, rmItems) {
     if (p && p.perUnit > 0) { const n = kg / p.perUnit; if (Math.abs(n - Math.round(n)) < 0.02) pack = Math.round(n) + p.unitName; }
     return { name: r[2] || '', code: r[1] || '', kg, pack };
   });
+  // 버리는 마지막 봉지의 값어치 — 원재료품목[13] 매입단가(원/kg)로 잰다. 계란이 제일 비싸므로
+  // 이 금액의 대부분이 계란이다(반죽 재료비의 43%). 단가가 비어 있으면 0 이 되어 조용히 과소 표시된다.
+  const wonPerKg = recipes.reduce((t, r) =>
+    t + (parseFloat(r[3]) || 0) * (parseFloat(rmItems.find(i => i[0] === r[1])?.[13]) || 0), 0);
+  const wasteCost = leftoverKg * wonPerKg;
+  const hasPrice = wonPerKg > 0;
   return { bags, units, unitName: mainSkuP.unitName, mainName: main[2] || main[1], totalIn, realBags, leftoverKg,
-           lines, fill: totalIn / BATCH_CFG.MIXER_KG, overMixer: totalIn > BATCH_CFG.MIXER_KG };
+           wasteCost, hasPrice, lines, fill: totalIn / BATCH_CFG.MIXER_KG, overMixer: totalIn > BATCH_CFG.MIXER_KG };
 }
 // </batch-presets>
 
@@ -11606,7 +11618,7 @@ function renderBatchPresets() {
             <div>
               <span class="fs-18 fw-8">${c.bags}봉</span>
               <span class="fs-13 c-txt-l"> · ${c.bags * BATCH_CFG.PACK_KG}kg</span>
-              ${c.leftoverKg < 0.05 ? '<span class="badge badge-suc" style="margin-left:6px">남는 것 없음</span>' : ''}
+              ${c.leftoverKg < 0.05 ? '<span class="badge badge-suc" style="margin-left:6px">버리는 것 없음</span>' : ''}
               ${c.overMixer ? '<span class="badge badge-err" style="margin-left:6px">반죽기 초과</span>' : ''}
             </div>
             <button class="btn btn-sm ${c.leftoverKg < 0.05 ? 'btn-suc' : 'btn-pri'}" ${c.overMixer ? 'disabled' : ''}
@@ -11618,11 +11630,12 @@ function renderBatchPresets() {
           </div>
           <div class="fs-11" style="margin-top:4px;color:var(--txt-l);white-space:normal">
             ${c.units}${c.unitName} 투입 → ${c.totalIn.toFixed(0)}kg = ${c.realBags.toFixed(1)}봉 ·
-            ${c.leftoverKg < 0.05 ? '<b class="c-suc">봉에 안 담기는 양 없음</b>' : `<b class="c-warn">봉에 안 담기는 양 ${c.leftoverKg.toFixed(1)}kg</b>`} ·
+            ${c.leftoverKg < 0.05 ? '<b class="c-suc">버리는 마지막 봉지 없음</b>'
+              : `<b class="c-err">마지막 봉지 ${c.leftoverKg.toFixed(1)}kg 폐기${c.hasPrice ? ` · ${Math.round(c.wasteCost).toLocaleString()}원` : ''}</b>`} ·
             반죽기 ${(c.fill * 100).toFixed(0)}%
           </div>
         </div>`).join('')}
-      <div class="fs-11" style="color:var(--txt-l);white-space:normal">숫자는 «정수 포대·판» 기준입니다 — 현장이 무게를 달지 않고 포대째 넣기 때문입니다. 반죽기 ${BATCH_CFG.MIXER_KG}kg.</div>
+      <div class="fs-11" style="color:var(--txt-l);white-space:normal">믹스가 10kg 포대 단위로만 들어가서 배치는 포대수로 정해집니다. 5kg 봉으로 안 떨어지는 나머지는 <b>마지막 봉지째 버려집니다</b> — 그 손실의 43%가 계란입니다. 반죽기 ${BATCH_CFG.MIXER_KG}kg.</div>
     </div>`;
 }
 

@@ -12,7 +12,10 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+/* ⚠️ 줄바꿈을 LF 로 정규화한 뒤 자른다. 작업 사본은 CRLF(core.autocrlf=true) 인데 CI 체크아웃은 LF 라,
+   '\r\n}' 로 함수 끝을 찾으면 CI 에서만 indexOf 가 -1 → 빈 문자열을 잘라 와 «parseSkuUnit is not defined» 로 죽는다.
+   (로컬에서만 초록이던 실제 사고 — 2026-09-08) */
+const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').replace(/\r\n/g, '\n');
 function block(name) {
   const i = SRC.indexOf(`// <${name}>`);
   const j = SRC.indexOf(`// </${name}>`);
@@ -22,8 +25,10 @@ function block(name) {
 // parseSkuUnit 은 마커가 없는 공용 함수라 선언부만 잘라 온다
 const pi = SRC.indexOf('function parseSkuUnit(sku) {');
 assert.ok(pi !== -1, 'parseSkuUnit 을 찾지 못함');
-const pj = SRC.indexOf('\r\n}', pi);
-const parseSkuSrc = SRC.slice(pi, pj + 3);
+const pj = SRC.indexOf('\n}', pi);
+assert.ok(pj > pi, 'parseSkuUnit 의 끝을 찾지 못함 — 잘라 온 소스가 비었다');
+const parseSkuSrc = SRC.slice(pi, pj + 2);
+assert.ok(/return\s*\{/.test(parseSkuSrc), '잘라 온 parseSkuUnit 이 온전하지 않다');
 
 const ctx = vm.createContext({ Math, parseFloat, console });
 vm.runInContext(block('batch-cfg') + '\n' + parseSkuSrc + '\n' + block('batch-presets'), ctx);
@@ -45,11 +50,15 @@ const RECIPES = [
   ['SOP-002', 'RM011', '앙브레드호두과자 전용믹스', 0.588235294117647, 'kg', '3'],
   ['SOP-002', 'RM006', '콩기름(대두유)', 0.0588235294117647, 'kg', '4'],
 ];
+// [13] = 매입단가(원/kg). 계란이 최고가라 폐기 손실의 대부분을 차지한다.
+const px = (code, name, sku, won) => { const r = [code, name, '', sku, 'kg']; r[13] = won; return r; };
 const RM = [
-  ['RM001', '계란', 'egg', '30알/판', 'kg'],
-  ['RM006', '콩기름(대두유)', 'oil', '18L/통', 'kg'],
-  ['RM011', '앙브레드호두과자 전용믹스', 'premix', '10kg/포대', 'kg'],
+  px('RM001', '계란', '30알/판', 5600),
+  px('RM006', '콩기름(대두유)', '18L/통', 2500),
+  px('RM011', '앙브레드호두과자 전용믹스', '10kg/포대', 2000),
 ];
+// 반죽 1kg 재료비 = (10×2000 + 3×5600 + 3×0 + 1×2500) / 17
+const DOUGH_WON = (10 * 2000 + 3 * 5600 + 3 * 0 + 1 * 2500) / 17;   // 2311.76…
 const packOf = (c, code) => c.lines.find(l => l.code === code)?.pack;
 const kgOf = (c, code) => c.lines.find(l => l.code === code)?.kg;
 
@@ -60,9 +69,25 @@ t('안전계수는 1.00 이다 (옛 1.01 은 근거 없는 관행이었고 잔�
 t('반죽기 상한은 300kg 이다 (520L 설비. 옛 350kg 은 설비보다 컸다)', () => {
   assert.strictEqual(BATCH_CFG.MIXER_KG, 300);
 });
-t('프리셋은 40·47·51봉 3종', () => {
+t('프리셋은 51·54·57봉 — 반죽기 300kg 안에서 「봉수↑·폐기↓」 파레토 집합', () => {
   // vm 밖으로 나온 배열은 프로토타입이 달라 deepStrictEqual 이 실패한다 — 값으로 본다
-  assert.strictEqual(Array.from(BATCH_PRESET_PACKS).join(','), '40,47,51');
+  assert.strictEqual(Array.from(BATCH_PRESET_PACKS).join(','), '51,54,57');
+});
+t('프리셋 3종은 실제로 파레토다 — 반죽기 안의 어떤 포대수도 이들을 양쪽에서 이기지 못한다', () => {
+  const cand = [];
+  for (let u = 1; u <= 20; u++) {
+    const inKg = u * 10 * 17 / 10;
+    if (inKg > BATCH_CFG.MIXER_KG) break;
+    cand.push({ bags: Math.floor(inKg / 5), waste: inKg - Math.floor(inKg / 5) * 5 });
+  }
+  const par = cand.filter(a => !cand.some(b => b !== a && b.bags >= a.bags && b.waste <= a.waste
+    && (b.bags > a.bags || b.waste < a.waste))).map(x => x.bags).sort((x, y) => x - y);
+  assert.strictEqual(par.join(','), '51,54,57', `실제 파레토=${par.join(',')}`);
+});
+t('현행 40봉은 51봉에 봉수·폐기 양쪽에서 밀린다', () => {
+  const a = batchPresetCalc(40, RECIPES, RM), b = batchPresetCalc(51, RECIPES, RM);
+  assert.ok(b.bags > a.bags && b.leftoverKg < a.leftoverKg,
+    `40봉(${a.bags}봉/${a.leftoverKg}kg) vs 51봉(${b.bags}봉/${b.leftoverKg}kg)`);
 });
 
 /* ── 2. 현행 40봉 — 공정기록 실측과 일치해야 한다 ───────────────────────────── */
@@ -103,9 +128,35 @@ t('51봉 → 15포대 · 255kg · 정확히 51.0봉 · 남는 양 0 · 계란 30
   near(c.leftoverKg, 0, 0.001, '남는 양은 0 이어야 한다');
   assert.strictEqual(packOf(c, 'RM001'), '30판');
 });
-t('51봉만 잔량 0 이다 — 40·47봉은 반드시 남는다', () => {
+t('54봉 → 16포대 · 272kg · 2.0kg 폐기 / 57봉 → 17포대 · 289kg · 4.0kg 폐기', () => {
+  const a = batchPresetCalc(54, RECIPES, RM), b = batchPresetCalc(57, RECIPES, RM);
+  assert.strictEqual(a.units, 16); near(a.totalIn, 272, 0.01, '54봉 투입'); near(a.leftoverKg, 2.0, 0.01, '54봉 폐기');
+  assert.strictEqual(b.units, 17); near(b.totalIn, 289, 0.01, '57봉 투입'); near(b.leftoverKg, 4.0, 0.01, '57봉 폐기');
+  assert.strictEqual(a.overMixer, false); assert.strictEqual(b.overMixer, false);
+});
+t('프리셋 3종 중 51봉만 폐기 0 이다', () => {
   const left = Array.from(BATCH_PRESET_PACKS).map(b => batchPresetCalc(b, RECIPES, RM).leftoverKg);
-  assert.strictEqual(left.map(v => v < 0.05).join(','), 'false,false,true');
+  assert.strictEqual(left.map(v => v < 0.05).join(','), 'true,false,false');
+});
+
+/* ── 폐기 원가 — 계란이 가장 비싸므로 이 금액이 곧 계란 손실이다 ─────────────── */
+t('폐기 원가 = 폐기kg × 반죽 1kg 재료비 (2,311.8원)', () => {
+  near(batchPresetCalc(40, RECIPES, RM).wasteCost, 4 * DOUGH_WON, 1, '40봉 폐기 원가');
+  near(batchPresetCalc(54, RECIPES, RM).wasteCost, 2 * DOUGH_WON, 1, '54봉');
+  near(batchPresetCalc(57, RECIPES, RM).wasteCost, 4 * DOUGH_WON, 1, '57봉');
+  // 51봉의 폐기는 부동소수점 잔재(1e-11 수준)라 정확히 0 은 아니다 — 화면 판정선(0.05kg)보다 훨씬 작으면 된다
+  near(batchPresetCalc(51, RECIPES, RM).wasteCost, 0, 1, '51봉 폐기 원가');
+});
+t('계란이 반죽 재료비의 43% — 폐기 손실의 최대 항목이다', () => {
+  const eggShare = (3 * 5600 / 17) / DOUGH_WON;
+  near(eggShare, 0.43, 0.01, '계란 비중');
+  assert.ok(eggShare > (10 * 2000 / 17) / DOUGH_WON / 1.3, '계란이 단일 최고가 원료 축이어야 한다');
+});
+t('매입단가가 비어 있으면 hasPrice=false 로 알린다 (조용히 0원으로 속이지 않는다)', () => {
+  const noPx = RM.map(r => { const c = [...r]; c[13] = ''; return c; });
+  const c = batchPresetCalc(40, RECIPES, noPx);
+  assert.strictEqual(c.hasPrice, false);
+  assert.strictEqual(c.wasteCost, 0);
 });
 
 /* ── 4. 반죽기 한계 ────────────────────────────────────────────────────────── */
