@@ -1906,6 +1906,15 @@ function installApp() {
   confirm('📲 앱으로 설치', '① 아래 공유 버튼 ⬆️ 를 누르세요 → ② 「홈 화면에 추가」 → ③ 「추가」. 홈 화면 아이콘으로 열면 앱처럼 씁니다.', null, null);
 }
 
+// 설치 안내의 버튼 — 권유는 1회용이라, 쓰고 나면(설치든 취소든) 곧바로 메뉴 경로 안내로 다시 그린다.
+//   installApp() 을 그대로 부르면 권유가 없을 때 아이폰 안내(confirm)로 떨어진다 — PC 인데 아이폰 안내가 뜬다(리뷰 지적 2026-09-14).
+function installFromLanding() {
+  const p = _installPrompt;
+  _installPrompt = null;
+  const b = document.getElementById('installBtn'); if (b) b.remove();
+  if (p) { try { p.prompt(); } catch (e) { console.warn('[install]', e); } }
+  renderInstallLanding();
+}
 /* ── ?install=1 설치 안내 오버레이 (ERP 상단 «📲 앱 설치» 진입점) ──
    로그인 화면 위에서도 떠야 하므로 #app·#header 같은 재렌더 컨테이너에 넣지 않고
    document.body 에 직접 붙인다. 분기 판단은 순수 함수 installLandingMode() 하나로 뗀다. */
@@ -1947,7 +1956,7 @@ function installLandingBodyHtml(mode) {
   }
   if (mode === 'prompt') {
     return `<div class="d-actions" style="flex-direction:column">
-        <button class="btn btn-pri" style="width:100%;padding:14px;font-size:16px" onclick="installApp()">📲 바탕화면 앱으로 설치</button>
+        <button class="btn btn-pri" style="width:100%;padding:14px;font-size:16px" onclick="installFromLanding()">📲 바탕화면 앱으로 설치</button>
         <button class="btn btn-sm btn-outline btn-gray mt-8" onclick="closeInstallLanding()">닫기</button>
       </div>`;
   }
