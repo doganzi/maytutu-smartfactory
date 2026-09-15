@@ -277,6 +277,9 @@ maytutu-appnav{--appnav-bg:rgba(255,255,255,0.15);--appnav-fg:#fff;--appnav-line
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+<!-- 🧭 공용 메뉴(ERP app/appnav.mjs)의 «?install=1» 설치 안내 자리 — 로그인 화면엔 머리가 없어, 이 요소로 «라이트 전용 화면» 을 알린다.
+     없으면 OS 가 다크일 때 흰 화면 위에 어두운 설치 창이 뜬다(2026-09-15 운영 실측). email 이 없어 버튼은 그리지 않는다 — 버튼은 머리의 요소가 그린다. -->
+<maytutu-appnav app="smartfactory" theme="light"></maytutu-appnav>
 
 <!-- ═══════════════════════════════════════════════
      APP SHELL
