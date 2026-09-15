@@ -9,6 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>메이투투 스마트팩토리</title>
 <link rel="manifest" href="manifest.json">
+<script type="module" src="https://maytutu-erp.vercel.app/app/appnav.mjs"></script>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">  <!-- 아이폰 홈 화면 아이콘 — 없으면 화면 캡처가 아이콘이 된다. 앱 패밀리 A 안(오리 + 남색 띠 「팩토리」) 2026-09-07 -->
 <style>
 /* ═══════════════════════════════════════════════
@@ -269,6 +270,8 @@ a { text-decoration:none; color:inherit; }
 .printer-setting-row label { font-size:12px; font-weight:600; min-width:70px; color:var(--txt-l); }
 .printer-setting-row select, .printer-setting-row input { font-size:13px; padding:6px 8px; border:1px solid var(--gray-l); border-radius:6px; flex:1; }
 .printer-info-box { background:#f0f7ff; border:1px solid #cce0ff; border-radius:8px; padding:10px 12px; font-size:11px; color:#1a5276; line-height:1.5; margin-top:8px; }
+maytutu-appnav{--appnav-bg:rgba(255,255,255,0.15);--appnav-fg:#fff;--appnav-line:transparent;--appnav-radius:16px;--appnav-pad:4px 10px;--appnav-font-size:12px;--appnav-h:32px;--appnav-bg-hover:rgba(255,255,255,0.25)}
+@media (max-width:420px){maytutu-appnav{--appnav-text-display:none}}
 </style>
 <!-- Google Identity Services — GIS 토큰 클라이언트 (silent SSO + FedCM, 1회 동의 후 무화면 세션 유지) -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -1871,147 +1874,13 @@ function renderBottomNav() {
 /* ═══════════════════════════════════════════════
    HEADER RENDERER
    ═══════════════════════════════════════════════ */
-/* 📲 «앱으로 설치» (2026-09-07 사용자 «각 진입점에서 크롬 앱으로 설치») — 프롬프트는 최상위에서 붙잡아 둔다(부팅 뒤에 붙이면 이미 지나간 뒤).
-   크롬·엣지·안드로이드 = 헤더 📲 로 prompt()(클릭 안에서 동기 · 1회용) · 아이폰 = 3단계 안내 · 이미 앱으로 열렸으면(standalone) 버튼 없음 ·
-   데스크톱에서 프롬프트가 없으면(이미 설치·미지원) 버튼도 없음 — 못 지키는 약속은 안 한다. */
 // 서비스워커 등록 — 캐시는 안 만든다(sw.js 머리 주석 참조). 크롬 PC 설치 권유는 이게 있어야 뜬다.
 // GitHub Pages 하위 경로이므로 상대 경로로 등록한다.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-let _installPrompt = null;
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); _installPrompt = e; paintInstallBtn(); updateInstallLanding(); });
-window.addEventListener('appinstalled', () => {
-  _installPrompt = null;
-  const b = document.getElementById('installBtn'); if (b) b.remove();
-  if (document.getElementById('install-landing-overlay')) {
-    toast('✅ 설치됐습니다 — 바탕화면·시작 메뉴의 «메이투투 스마트팩토리» 로 여세요', 'suc', 4000);
-    closeInstallLanding();
-  }
-});
-function isStandaloneApp() { return window.navigator.standalone === true || !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); }
-function installBtnHtml() {
-  if (isStandaloneApp()) return '';
-  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  if (!_installPrompt && !ios) return '';
-  return `<div id="installBtn" title="앱으로 설치" onclick="installApp()" style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;margin-left:6px">📲</div>`;
-}
-function paintInstallBtn() {   // 프롬프트가 헤더를 그린 뒤에 오면 그 자리에 끼워 넣는다
-  const row = document.querySelector('#header .h-row');
-  if (!row || row.querySelector('#installBtn')) return;
-  const html = installBtnHtml(); if (html) row.insertAdjacentHTML('beforeend', html);
-}
-function installApp() {
-  const p = _installPrompt;
-  if (p) { _installPrompt = null; const b = document.getElementById('installBtn'); if (b) b.remove(); try { p.prompt(); } catch (e) { console.warn('[install]', e); } return; }
-  confirm('📲 앱으로 설치', '① 아래 공유 버튼 ⬆️ 를 누르세요 → ② 「홈 화면에 추가」 → ③ 「추가」. 홈 화면 아이콘으로 열면 앱처럼 씁니다.', null, null);
-}
-
-// 설치 안내의 버튼 — 권유는 1회용이라, 쓰고 나면(설치든 취소든) 곧바로 메뉴 경로 안내로 다시 그린다.
-//   installApp() 을 그대로 부르면 권유가 없을 때 아이폰 안내(confirm)로 떨어진다 — PC 인데 아이폰 안내가 뜬다(리뷰 지적 2026-09-14).
-function installFromLanding() {
-  const p = _installPrompt;
-  _installPrompt = null;
-  const b = document.getElementById('installBtn'); if (b) b.remove();
-  if (p) { try { p.prompt(); } catch (e) { console.warn('[install]', e); } }
-  renderInstallLanding();
-}
-/* ── ?install=1 설치 안내 오버레이 (ERP 상단 «📲 앱 설치» 진입점) ──
-   로그인 화면 위에서도 떠야 하므로 #app·#header 같은 재렌더 컨테이너에 넣지 않고
-   document.body 에 직접 붙인다. 분기 판단은 순수 함수 installLandingMode() 하나로 뗀다. */
-const INSTALL_GUIDE = {
-  chrome: [
-    '주소창 오른쪽 끝의 «설치» 아이콘을 누르세요',
-    '안 보이면 ⋮(더보기) → «전송, 저장 및 공유» → «페이지를 앱으로 설치...»',
-    '«설치» 를 누르면 바탕화면·시작 메뉴에 «메이투투 스마트팩토리» 아이콘이 생깁니다',
-  ],
-  edge: [
-    '주소창 오른쪽의 앱 설치 아이콘을 누르세요',
-    '안 보이면 ⋯(설정 및 기타) → «앱» → «이 사이트를 앱으로 설치»', // ERP 사내 가이드 erp.app.install 에 공개된 엣지 문구와 같게
-    '«설치» 를 누르면 시작 메뉴에 «메이투투 스마트팩토리» 가 생깁니다',
-  ],
-  tail: '이미 설치했다면 바탕화면·시작 메뉴의 «메이투투 스마트팩토리» 아이콘으로 여세요',
-};
-
-// 순수 함수 — 시험하기 쉽도록 그리기 코드와 분리.
-function installLandingMode({ standalone, hasPrompt, ios, edge }) {
-  if (standalone) return 'standalone';
-  if (hasPrompt) return 'prompt';
-  if (ios) return 'ios';
-  return edge ? 'desktop-edge' : 'desktop-chrome';
-}
-
-function _installLandingCtx() {
-  return {
-    standalone: isStandaloneApp(),
-    hasPrompt: !!_installPrompt,
-    ios: /iPad|iPhone|iPod/.test(navigator.userAgent),
-    edge: /Edg\//.test(navigator.userAgent),
-  };
-}
-
-function installLandingBodyHtml(mode) {
-  if (mode === 'standalone') {
-    return `<div class="d-msg">✅ 이미 앱으로 열려 있습니다</div>
-      <div class="d-actions"><button class="btn btn-sm btn-pri" onclick="closeInstallLanding()">닫기</button></div>`;
-  }
-  if (mode === 'prompt') {
-    return `<div class="d-actions" style="flex-direction:column">
-        <button class="btn btn-pri" style="width:100%;padding:14px;font-size:16px" onclick="installFromLanding()">📲 바탕화면 앱으로 설치</button>
-        <button class="btn btn-sm btn-outline btn-gray mt-8" onclick="closeInstallLanding()">닫기</button>
-      </div>`;
-  }
-  if (mode === 'ios') {
-    return `<div class="d-msg">① 아래 공유 버튼 ⬆️ 를 누르세요 → ② 「홈 화면에 추가」 → ③ 「추가」. 홈 화면 아이콘으로 열면 앱처럼 씁니다.</div>
-      <div class="d-actions"><button class="btn btn-sm btn-pri" onclick="closeInstallLanding()">닫기</button></div>`;
-  }
-  const steps = mode === 'desktop-edge' ? INSTALL_GUIDE.edge : INSTALL_GUIDE.chrome;
-  const list = steps.map((s, i) => `<div class="fs-12 mb-6">${i + 1}. ${s}</div>`).join('');
-  return `<div class="d-msg">${list}<div class="fs-11 c-txt-l mt-8">${INSTALL_GUIDE.tail}</div></div>
-    <div class="d-actions"><button class="btn btn-sm btn-outline btn-gray" onclick="closeInstallLanding()">닫기</button></div>`;
-}
-
-function renderInstallLanding() {
-  const overlay = document.getElementById('install-landing-overlay');
-  if (!overlay) return;
-  const mode = installLandingMode(_installLandingCtx());
-  overlay.querySelector('.d-body').innerHTML = installLandingBodyHtml(mode);
-}
-
-// 기존 beforeinstallprompt/appinstalled 핸들러가 부른다 — 열려 있는 동안 권유가 오면 즉시 갱신.
-function updateInstallLanding() {
-  if (document.getElementById('install-landing-overlay')) renderInstallLanding();
-}
-
-function closeInstallLanding() {
-  const overlay = document.getElementById('install-landing-overlay');
-  if (overlay) overlay.remove();
-}
-
-function openInstallLanding() {
-  if (document.getElementById('install-landing-overlay')) return;
-  const overlay = document.createElement('div');
-  overlay.id = 'install-landing-overlay';
-  overlay.className = 'dialog-overlay';
-  overlay.style.zIndex = '99999';
-  overlay.innerHTML = `
-    <div class="dialog" style="max-width:360px">
-      <div class="d-title">📲 앱으로 설치</div>
-      <div class="d-body"></div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  renderInstallLanding();
-}
-
-// ?install=1 진입 — ERP 상단 «📲 앱 설치» 가 이 파라미터로 들어온다.
-(function initInstallLanding() {
-  const params = new URLSearchParams(location.search);
-  if (params.get('install') !== '1') return;
-  openInstallLanding();
-  params.delete('install');
-  const qs = params.toString();
-  history.replaceState(null, '', location.pathname + (qs ? `?${qs}` : '') + location.hash);
-})();
+// 설치 권유 붙잡기 — 그리는 것은 ERP 공용 부품 app/appnav.mjs 가 한다.
+// 늦게 올라와도 놓치지 않게 최상위에서 여기서 먼저 잡아 둔다.
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.__maytutuBip = e; });
 
 function renderHeader(title, sub, opts = {}) {
   const backBtn = opts.back ? `<span class="h-back" onclick="Router.go('${opts.back}')">←</span>` : '';
@@ -2026,7 +1895,7 @@ function renderHeader(title, sub, opts = {}) {
           ${sub ? `<div class="h-sub">${sub}</div>` : ''}
         </div>
       </div>
-      ${right}${installBtnHtml()}
+      ${right}<maytutu-appnav app="smartfactory" theme="light"${(State.user && State.user.email) ? ' email="' + HS_ESC(State.user.email) + '"' : ''}></maytutu-appnav>
     </div>
   `;
 }
