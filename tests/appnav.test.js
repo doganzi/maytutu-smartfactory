@@ -14,9 +14,7 @@ const path = require('path');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 // 있음 검사는 주석을 걷어낸 사본으로 — 설명 주석에 같은 글자가 있으면 코드가 없어도 초록이 된다. 없음 검사는 주석까지 본다(SRC).
-const CODE = SRC.replace(/<!--[sS]*?-->/g, '').replace(//*[sS]*?*//g, '').split('
-').filter((l) => !l.trim().startsWith('//')).join('
-');
+const CODE = SRC.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 const ok = [];
 const t = (n, f) => { f(); ok.push(n); };
@@ -37,7 +35,7 @@ t('로그인 이메일은 HS_ESC 로 이스케이프해 email 속성에 넣는�
 });
 
 t('최상위에서 beforeinstallprompt 를 먼저 붙잡아 window.__maytutuBip 에 둔다', () => {
-  assert.ok(/window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.__maytutuBip = e; });/.test(CODE), '최상위 beforeinstallprompt 붙잡기(__maytutuBip)를 못 찾음');
+  assert.ok(/window\.addEventListener\('beforeinstallprompt', \(e\) => \{ e\.preventDefault\(\); window\.__maytutuBip = e; \}\);/.test(CODE), '최상위 beforeinstallprompt 붙잡기(__maytutuBip)를 못 찾음');
 });
 
 t('버튼 모양 CSS 변수를 둔다', () => {
