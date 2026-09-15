@@ -1,4 +1,4 @@
-/* 메이투투 스마트팩토리 — 최소 서비스워커
+/* 메이투투 공장(옛 이름 메이투투 스마트팩토리) — 최소 서비스워커
    목적: 캐시를 만들지 않는다. main 브랜치 푸시 = GitHub Pages 즉시 배포이므로,
    sw 가 응답을 캐시해 두면 옛 화면이 고착된다(재고·LOT·HACCP 판정이 낡은 코드로 도는 사고).
    그럼에도 이 파일이 있어야 하는 이유: 크롬(153~)은 «fetch 핸들러가 있는 서비스워커»가
@@ -9,7 +9,7 @@
 const OFFLINE_HTML = `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>오프라인 — 메이투투 스마트팩토리</title>
+<title>오프라인 — 메이투투 공장</title>
 <style>
   body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
     background:#f5f6f8; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
