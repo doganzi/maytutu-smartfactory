@@ -17,6 +17,12 @@
     "business",
     "productivity"
   ],
+  "prefer_related_applications": false,
+  "related_applications": [
+    { "platform": "webapp", "url": "https://maytutu-erp.vercel.app/app/manifest.json" },
+    { "platform": "webapp", "url": "https://maytutu-meeting.vercel.app/app/meeting.webmanifest" },
+    { "platform": "webapp", "url": "https://anghodu-sales.vercel.app/app/sales.webmanifest" }
+  ],
   "icons": [
     {
       "src": "icon-192.png",
