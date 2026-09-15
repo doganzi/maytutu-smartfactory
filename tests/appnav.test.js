@@ -13,33 +13,36 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+// 있음 검사는 주석을 걷어낸 사본으로 — 설명 주석에 같은 글자가 있으면 코드가 없어도 초록이 된다. 없음 검사는 주석까지 본다(SRC).
+const CODE = SRC.replace(/<!--[sS]*?-->/g, '').replace(//*[sS]*?*//g, '').split('
+').filter((l) => !l.trim().startsWith('//')).join('
+');
 
 const ok = [];
 const t = (n, f) => { f(); ok.push(n); };
 
 t('부품 module script 를 <head> 에 싣는다', () => {
   assert.ok(
-    SRC.includes('<script type="module" src="https://maytutu-erp.vercel.app/app/appnav.mjs"></script>'),
+    CODE.includes('<script type="module" src="https://maytutu-erp.vercel.app/app/appnav.mjs"></script>'),
     'appnav.mjs module script 를 못 찾음'
   );
 });
 
 t('머리에 <maytutu-appnav app="smartfactory"> 요소를 둔다', () => {
-  assert.ok(/<maytutu-appnav app="smartfactory"/.test(SRC), 'maytutu-appnav 요소를 못 찾음');
+  assert.ok(/<maytutu-appnav app="smartfactory"/.test(CODE), 'maytutu-appnav 요소를 못 찾음');
 });
 
 t('로그인 이메일은 HS_ESC 로 이스케이프해 email 속성에 넣는다', () => {
-  assert.ok(SRC.includes("HS_ESC(State.user.email)"), 'email 속성 이스케이프 배선을 못 찾음');
+  assert.ok(CODE.includes("HS_ESC(State.user.email)"), 'email 속성 이스케이프 배선을 못 찾음');
 });
 
 t('최상위에서 beforeinstallprompt 를 먼저 붙잡아 window.__maytutuBip 에 둔다', () => {
-  assert.ok(SRC.includes("window.addEventListener('beforeinstallprompt'"), 'beforeinstallprompt 리스너를 못 찾음');
-  assert.ok(SRC.includes('window.__maytutuBip = e'), '__maytutuBip 캡처를 못 찾음');
+  assert.ok(/window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.__maytutuBip = e; });/.test(CODE), '최상위 beforeinstallprompt 붙잡기(__maytutuBip)를 못 찾음');
 });
 
 t('버튼 모양 CSS 변수를 둔다', () => {
-  assert.ok(SRC.includes('maytutu-appnav{--appnav-bg:'), 'maytutu-appnav CSS 변수 블록을 못 찾음');
-  assert.ok(SRC.includes('--appnav-text-display:none'), '420px 이하 텍스트 숨김 규칙을 못 찾음');
+  assert.ok(CODE.includes('maytutu-appnav{--appnav-bg:'), 'maytutu-appnav CSS 변수 블록을 못 찾음');
+  assert.ok(CODE.includes('--appnav-text-display:none'), '420px 이하 텍스트 숨김 규칙을 못 찾음');
 });
 
 t('옛 설치 UI 코드가 파일 어디에도(주석 포함) 남지 않았다', () => {
@@ -54,7 +57,7 @@ t('옛 설치 UI 코드가 파일 어디에도(주석 포함) 남지 않았다',
 });
 
 t('서비스워커 등록 줄은 그대로 남아 있다', () => {
-  assert.ok(SRC.includes("navigator.serviceWorker.register('sw.js')"), '서비스워커 등록 줄이 사라짐 — 지우면 안 된다');
+  assert.ok(CODE.includes("navigator.serviceWorker.register('sw.js')"), '서비스워커 등록 줄이 사라짐 — 지우면 안 된다');
 });
 
 console.log(`✅ appnav 연결 검증 ${ok.length}건 통과`);
