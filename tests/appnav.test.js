@@ -30,6 +30,11 @@ t('머리에 <maytutu-appnav app="smartfactory" theme="light"> 요소를 둔다(
   assert.ok(CODE.includes('<maytutu-appnav app="smartfactory" theme="light"'), 'theme=light 인 maytutu-appnav 요소를 못 찾음');
 });
 
+t('로그인 화면(머리 없음)에도 설치 안내 자리 요소가 있다 — 라이트 전용 화면이라 theme=light', () => {
+  const body = CODE.slice(CODE.indexOf('<body>'), CODE.indexOf('<body>') + 400);
+  assert.ok(body.includes('<maytutu-appnav app="smartfactory" theme="light"></maytutu-appnav>'), '<body> 맨 앞의 설치 안내 자리 요소가 없다 — OS 다크에서 로그인 화면 설치 창이 어둡게 뜬다');
+});
+
 t('로그인 이메일은 HS_ESC 로 이스케이프해 email 속성에 넣는다', () => {
   assert.ok(CODE.includes("HS_ESC(State.user.email)"), 'email 속성 이스케이프 배선을 못 찾음');
 });
