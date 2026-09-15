@@ -27,13 +27,23 @@ t('부품 module script 를 <head> 에 싣는다', () => {
   );
 });
 
-t('머리에 <maytutu-appnav app="smartfactory" theme="light"> 요소를 둔다(라이트 전용 화면 — OS 다크에서 검은 메뉴 방지)', () => {
-  assert.ok(CODE.includes('<maytutu-appnav app="smartfactory" theme="light"'), 'theme=light 인 maytutu-appnav 요소를 못 찾음');
+t('머리에 <maytutu-appnav app="smartfactory"> 요소를 둔다 · theme 속성은 없다(부품 창이 라이트 한 벌 — 2026-09-16)', () => {
+  assert.ok(CODE.includes('<maytutu-appnav app="smartfactory"${(State.user && State.user.email)'), '머리의 maytutu-appnav 요소를 못 찾음');
+  assert.ok(!/<maytutu-appnav[^>]*\btheme=/.test(CODE), '옛 theme 속성이 남았다');
 });
 
-t('로그인 화면(머리 없음)에도 설치 안내 자리 요소가 있다 — 라이트 전용 화면이라 theme=light', () => {
+t('로그인 화면(머리 없음)에도 설치 안내 자리 요소가 있다', () => {
   const body = CODE.slice(CODE.indexOf('<body>'), CODE.indexOf('<body>') + 400);
-  assert.ok(body.includes('<maytutu-appnav app="smartfactory" theme="light"></maytutu-appnav>'), '<body> 맨 앞의 설치 안내 자리 요소가 없다 — OS 다크에서 로그인 화면 설치 창이 어둡게 뜬다');
+  assert.ok(body.includes('<maytutu-appnav app="smartfactory"></maytutu-appnav>'), '<body> 맨 앞의 설치 안내 자리 요소가 없다');
+});
+
+t('앱 이름 «메이투투 공장»(2026-09-16 사내 앱 이름 통일) — 매니페스트 name·short_name · 탭 제목 · 머리 · 로그인 제목이 같은 글자 · 옛 이름 없음', () => {
+  const m = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.json'), 'utf8'));
+  assert.deepStrictEqual([m.name, m.short_name], ['메이투투 공장', '메이투투 공장'], '홈 화면 이름이 사내 앱 목록 이름과 다르다');
+  assert.ok(CODE.includes('<title>메이투투 공장</title>'), '탭 제목');
+  assert.ok(CODE.includes("renderHeader('메이투투 공장',"), '머리 제목');
+  assert.ok(CODE.includes('margin-bottom:4px">메이투투 공장</div>'), '로그인 화면 제목');
+  assert.ok(!SRC.includes('메이투투 스마트팩토리'), '옛 이름 «메이투투 스마트팩토리» 가 남았다');
 });
 
 t('로그인 이메일은 HS_ESC 로 이스케이프해 email 속성에 넣는다', () => {

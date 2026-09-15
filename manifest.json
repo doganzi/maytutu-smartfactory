@@ -1,6 +1,6 @@
 {
-  "name": "메이투투 스마트팩토리",
-  "short_name": "스마트팩토리",
+  "name": "메이투투 공장",
+  "short_name": "메이투투 공장",
   "description": "HACCP 기반 호두과자 반죽 스마트팩토리 관리 시스템",
   "start_url": "./index.html",
   "scope": "./",

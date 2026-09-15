@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a237e">
 <meta name="mobile-web-app-capable" content="yes">
-<title>메이투투 스마트팩토리</title>
+<title>메이투투 공장</title>
 <link rel="manifest" href="manifest.json">
 <script type="module" src="https://maytutu-erp.vercel.app/app/appnav.mjs"></script>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">  <!-- 아이폰 홈 화면 아이콘 — 없으면 화면 캡처가 아이콘이 된다. 앱 패밀리 A 안(오리 + 남색 띠 「팩토리」) 2026-09-07 -->
@@ -279,7 +279,7 @@ maytutu-appnav{--appnav-bg:rgba(255,255,255,0.15);--appnav-fg:#fff;--appnav-line
 <body>
 <!-- 🧭 공용 메뉴(ERP app/appnav.mjs)의 «?install=1» 설치 안내 자리 — 로그인 화면엔 머리가 없어, 이 요소로 «라이트 전용 화면» 을 알린다.
      없으면 OS 가 다크일 때 흰 화면 위에 어두운 설치 창이 뜬다(2026-09-15 운영 실측). email 이 없어 버튼은 그리지 않는다 — 버튼은 머리의 요소가 그린다. -->
-<maytutu-appnav app="smartfactory" theme="light"></maytutu-appnav>
+<maytutu-appnav app="smartfactory"></maytutu-appnav>
 
 <!-- ═══════════════════════════════════════════════
      APP SHELL
@@ -1898,7 +1898,7 @@ function renderHeader(title, sub, opts = {}) {
           ${sub ? `<div class="h-sub">${sub}</div>` : ''}
         </div>
       </div>
-      ${right}<maytutu-appnav app="smartfactory" theme="light"${(State.user && State.user.email) ? ' email="' + HS_ESC(State.user.email) + '"' : ''}></maytutu-appnav>
+      ${right}<maytutu-appnav app="smartfactory"${(State.user && State.user.email) ? ' email="' + HS_ESC(State.user.email) + '"' : ''}></maytutu-appnav>
     </div>
   `;
 }
@@ -1913,7 +1913,7 @@ Screens.login = () => {
   $id('content').innerHTML = `
     <div id="screen-login">
       <div style="font-size:48px;margin-bottom:12px">🏭</div>
-      <div class="fs-20 fw-8 c-pri" style="margin-bottom:4px">메이투투 스마트팩토리</div>
+      <div class="fs-20 fw-8 c-pri" style="margin-bottom:4px">메이투투 공장</div>
       <div class="fs-13 c-txt-l" style="margin-bottom:32px">HACCP 기반 스마트 생산관리 시스템</div>
       <button onclick="Auth.login()" style="display:flex;align-items:center;gap:10px;padding:12px 28px;border-radius:8px;background:var(--white);border:1px solid var(--gray-l);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
         <div style="width:20px;height:20px;background:#4285f4;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700">G</div>
@@ -1930,7 +1930,7 @@ Screens.dashboard = async () => {
   const isAdmin = role === 'admin';
   const today = new Date();
 
-  renderHeader('메이투투 스마트팩토리', `${isAdmin ? '관리자' : '작업자'} · ${displayDate(today)} (${dayOfWeek(today)})`,
+  renderHeader('메이투투 공장', `${isAdmin ? '관리자' : '작업자'} · ${displayDate(today)} (${dayOfWeek(today)})`,
     { right: `<div style="width:32px;height:32px;border-radius:16px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer" onclick="Router.go('settings')">👤</div>` });
 
   // Load data for dashboard
@@ -5403,7 +5403,7 @@ Screens.settings = () => {
       </div>
       <div class="card">
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
-        <div class="fs-12 c-txt-l">메이투투 스마트팩토리 v1.0</div>
+        <div class="fs-12 c-txt-l">메이투투 공장 v1.0</div>
         <div class="fs-12 c-txt-l">HACCP 기반 생산공정 관리 시스템</div>
         <div class="fs-11 c-txt-l mt-8" style="border-top:1px solid var(--gray-l);padding-top:8px">${buildVersionLabel()}</div>
       </div>
