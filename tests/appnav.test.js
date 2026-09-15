@@ -26,8 +26,8 @@ t('부품 module script 를 <head> 에 싣는다', () => {
   );
 });
 
-t('머리에 <maytutu-appnav app="smartfactory"> 요소를 둔다', () => {
-  assert.ok(/<maytutu-appnav app="smartfactory"/.test(CODE), 'maytutu-appnav 요소를 못 찾음');
+t('머리에 <maytutu-appnav app="smartfactory" theme="light"> 요소를 둔다(라이트 전용 화면 — OS 다크에서 검은 메뉴 방지)', () => {
+  assert.ok(CODE.includes('<maytutu-appnav app="smartfactory" theme="light"'), 'theme=light 인 maytutu-appnav 요소를 못 찾음');
 });
 
 t('로그인 이메일은 HS_ESC 로 이스케이프해 email 속성에 넣는다', () => {

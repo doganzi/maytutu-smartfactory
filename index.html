@@ -1895,7 +1895,7 @@ function renderHeader(title, sub, opts = {}) {
           ${sub ? `<div class="h-sub">${sub}</div>` : ''}
         </div>
       </div>
-      ${right}<maytutu-appnav app="smartfactory"${(State.user && State.user.email) ? ' email="' + HS_ESC(State.user.email) + '"' : ''}></maytutu-appnav>
+      ${right}<maytutu-appnav app="smartfactory" theme="light"${(State.user && State.user.email) ? ' email="' + HS_ESC(State.user.email) + '"' : ''}></maytutu-appnav>
     </div>
   `;
 }
