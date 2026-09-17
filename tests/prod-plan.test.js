@@ -3,7 +3,7 @@
 
    실행:  node tests/prod-plan.test.js
    기준선: 2026-08-21 실데이터 — 마켓봄 실판매 8주 [288,292,284,196,226,241,249,270],
-           재고 760봉 + 냉동중 80봉 → 예측 소비 249.6봉/주 · 3.36주치 · 권장 0배치.
+           재고 760봉 + 냉동중 80봉 → 수요 246.5봉/주(최근 4주 단순 평균 · 2026-09-17 사용자 결정 — 옛 8주 선형가중 249.6) · 3.41주치 · 권장 0배치.
            이 숫자가 바뀌면 산식이 바뀐 것이니, 바뀐 게 의도인지부터 확인할 것.        */
 const assert = require('assert');
 const fs = require('fs');
@@ -84,35 +84,36 @@ t('진행 중인 주는 빠지고, 안 판 주는 0 으로 채워진다', () => 
 const REAL = [288, 292, 284, 196, 226, 241, 249, 270];     // 마켓봄 실판매(봉) 06/22~08/10
 const ser = REAL.map((packs, k) => ({ week: k, packs }));
 
-t('실데이터 기준선 — 예측 249.6봉/주 · 3.36주치 · 권장 0배치', () => {
+t('실데이터 기준선 — 수요 246.5봉/주(최근 4주 단순 평균) · 3.41주치 · 권장 0배치', () => {
   const p = calcProductionPlan({ series: ser, stock: 760, pending: 80 });
   assert.strictEqual(p.weeks, 8);
-  near(p.demand, 249.64, 0.01, '선형가중 예측 소비');
-  near(p.mean, 255.75, 0.01, '단순평균(참고)');
-  assert.ok(p.demand < p.mean, '판매가 줄고 있으면 가중평균이 단순평균보다 낮아야 한다');
+  assert.strictEqual(PLAN_CFG.DEMAND_WEEKS, 4, '수요 창이 최근 4주가 아니다(2026-09-17 사용자 결정)');
+  near(p.demand, 246.5, 0.001, '최근 4주 단순 평균(226·241·249·270)');
+  near(p.mean, 255.75, 0.01, '8주 단순평균(참고)');
+  assert.ok(p.demand < p.mean, '판매가 줄고 있으면 최근 4주 평균이 8주 평균보다 낮아야 한다');
   near(p.trend, -0.0698, 0.0005, '최근 4주 대 직전 4주');
   assert.strictEqual(p.avail, 840);
-  near(p.weeksOnHand, 3.365, 0.001, '주치');
-  near(p.target, 748.92, 0.01, '목표 = 3D');
+  near(p.weeksOnHand, 3.408, 0.001, '주치');
+  near(p.target, 739.5, 0.01, '목표 = 3D');
   assert.strictEqual(p.need, 0, '재고가 목표보다 많으면 부족분 0');
   assert.strictEqual(p.batches, 0, '넘치면 0배치가 정답 — 늘 만들라고 하면 과잉재고가 굳는다');
-  near(p.surplus, 91.08, 0.01, '목표 대비 여유');
-  near(p.safetyLine, 499.28, 0.01, '안전재고 2주선');
-  near(p.daysToSafety, 9.55, 0.01, '2주선까지 남은 일수');
+  near(p.surplus, 100.5, 0.01, '목표 대비 여유');
+  near(p.safetyLine, 493, 0.01, '안전재고 2주선');
+  near(p.daysToSafety, 9.854, 0.01, '2주선까지 남은 일수');
   assert.strictEqual(p.balanceBatches, 6.2, '소비만큼 만들면 6.2배치');
 });
 
 t('재고가 마르면 배치 수가 나온다 (같은 수요, 재고만 300봉)', () => {
   const p = calcProductionPlan({ series: ser, stock: 300, pending: 0 });
-  near(p.need, 448.92, 0.01, '부족분');
-  assert.strictEqual(p.batches, 12, '448.9봉 ÷ 40봉 → 올림 12배치');
-  assert.strictEqual(p.produce, 480);
+  near(p.need, 439.5, 0.01, '부족분');
+  assert.strictEqual(p.batches, 11, '439.5봉 ÷ 40봉 → 올림 11배치');
+  assert.strictEqual(p.produce, 440);
   assert.ok(p.produce >= p.need, '배치 올림이 부족분을 못 덮으면 안 된다');
   assert.strictEqual(p.daysToSafety, 0, '이미 안전재고선 아래');
 });
 
 t('부족분이 배치 1개에 못 미쳐도 1배치는 나온다', () => {
-  const p = calcProductionPlan({ series: ser, stock: 740, pending: 0 });
+  const p = calcProductionPlan({ series: ser, stock: 730, pending: 0 });
   assert.ok(p.need > 0 && p.need < PLAN_CFG.BATCH_PACKS);
   assert.strictEqual(p.batches, 1);
 });
@@ -126,7 +127,7 @@ t('냉동보관중 물량은 가용재고로 친다 — 12시간 뒤 출하 가�
 
 t('안전재고 주수·배치 크기는 밖에서 바꿀 수 있다', () => {
   const p = calcProductionPlan({ series: ser, stock: 0, pending: 0, safetyWeeks: 1, batchPacks: 100 });
-  near(p.target, 499.28, 0.01, '1주 안전재고 + 다음 주 소비');
+  near(p.target, 493, 0.01, '1주 안전재고 + 다음 주 소비');
   assert.strictEqual(p.batches, 5);
   assert.strictEqual(p.produce, 500);
 });
@@ -135,7 +136,16 @@ t('관측 창은 최근 8주만 — 그 앞은 계획에 끼지 않는다', () =
   const long = [900, 900, 900, 900].concat(REAL).map((packs, k) => ({ week: k, packs }));
   const p = calcProductionPlan({ series: long, stock: 760, pending: 80 });
   assert.strictEqual(p.weeks, PLAN_CFG.WEEKS);
-  near(p.demand, 249.64, 0.01, '두 달 전 성수기가 예측을 끌어올리면 안 된다');
+  near(p.demand, 246.5, 0.001, '두 달 전 성수기가 예측을 끌어올리면 안 된다');
+});
+
+t('수요는 최근 4주만 — 관측 창(8주) 안이라도 5~8주 전 판매는 수요에 안 들어간다(추세 비교에만 쓴다)', () => {
+  const hot = [900, 900, 900, 900, 226, 241, 249, 270].map((packs, k) => ({ week: k, packs }));
+  const p = calcProductionPlan({ series: hot, stock: 760, pending: 80 });
+  near(p.demand, 246.5, 0.001, '5~8주 전 성수기가 수요에 섞였다(옛 8주 가중평균이면 481.3)');
+  assert.ok(p.trend < -0.7, '추세 비교(최근 4주 대 직전 4주)는 그대로 8주를 봐야 한다');
+  //  이력이 4주보다 짧으면 있는 만큼의 평균
+  near(calcProductionPlan({ series: [{ week: 0, packs: 100 }, { week: 1, packs: 300 }], stock: 0, pending: 0 }).demand, 200, 0.001, '짧은 이력의 평균이 틀렸다');
 });
 
 t('추세는 8주가 안 되면 안 낸다 (없는 근거를 지어내지 않는다)', () => {
@@ -250,7 +260,7 @@ t('마켓봄 판매행에서 배치 수까지 이어진다', () => {
   const rows = REAL.map((packs, k) => ({ date: new Date(cur - (8 - k) * 7 * DAY + 2 * DAY), packs }));
   const p = calcProductionPlan({ series: planWeeklySeries(rows, AS_OF), stock: 760, pending: 80 });
   assert.strictEqual(p.weeks, 8);
-  near(p.demand, 249.64, 0.01, '주 귀속이 어긋나면 여기서 틀어진다');
+  near(p.demand, 246.5, 0.001, '주 귀속이 어긋나면 여기서 틀어진다');
   assert.strictEqual(p.batches, 0);
 });
 
