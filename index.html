@@ -2328,8 +2328,8 @@ async function hsLoadHomeDocAlert() {
 /* ── 주간 생산량 제안 ──────────────────────────────────────────────────────────
    「이번 주 몇 배치 만들까」를 감이 아니라 실판매에서 뽑는다.
 
-     D(예측 주간소비) = 마켓봄 실판매 최근 8주 **선형가중** 이동평균(봉)
-                        최근 주에 더 무게를 준다 — 단순평균은 두 달 전 값이 지난주와 같은 힘을 갖는다.
+     D(예측 주간소비) = 마켓봄 실판매 최근 4주 **단순 평균**(봉) — 사용자 결정 2026-09-17(옛 8주 선형가중 대체)
+                        «안전재고 = 과거 4주간 평균 판매 × 2주» — 판매 추세가 바뀌면 4주 안에 따라간다(8주는 추세 비교에만).
      가용재고 S       = 완제품LOT 출하가능 잔량 + 냉동보관중·진행중 WO 예정 봉수(12h 뒤 합류)
      목표 T           = D × (안전재고 2주 + 다음 주 소비 1주) = 3D
      권장 생산        = max(0, T − S)  → 작업지시 1건 = 40봉(200kg) 단위로 올림
@@ -2344,7 +2344,8 @@ async function hsLoadHomeDocAlert() {
    검증: node tests/prod-plan.test.js                                             */
 // <prod-plan>
 const PLAN_CFG = {
-  WEEKS: 8,          // 수요 관측 창(완결주)
+  WEEKS: 8,          // 관측 창(완결주) — 추세(최근 4주 vs 직전 4주)를 잰다
+  DEMAND_WEEKS: 4,   // 수요 D = 최근 4주 **단순 평균**(사용자 결정 2026-09-17 «안전재고는 과거 4주간의 평균 판매 수량» — 옛 8주 선형가중 대체)
   SAFETY_WEEKS: 2,   // 본사 정책 「완제품은 2주치 안전재고 유지」
   BATCH_PACKS: 40,   // 작업지시 1건 = 40봉 = 200kg
   TREND_WEEKS: 4,    // 추세 비교 구간(최근 4주 vs 직전 4주)
@@ -2420,11 +2421,9 @@ function calcProductionPlan({ series, stock, pending, safetyWeeks, batchPacks })
   const all = (series || []).filter(x => x && isFinite(parseFloat(x.packs)));
   if (!all.length) return null;
   const packs = all.slice(-PLAN_CFG.WEEKS).map(x => parseFloat(x.packs) || 0);
-  let num = 0, den = 0;
-  packs.forEach((v, i) => { num += v * (i + 1); den += (i + 1); });   // 선형가중 — 최근 주가 무겁다
-  const demand = num / den;
-  if (!(demand > 0)) return null;
   const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const demand = avg(packs.slice(-PLAN_CFG.DEMAND_WEEKS));   // 최근 4주 단순 평균 — 판매 추세가 바뀌면 4주 안에 따라간다
+  if (!(demand > 0)) return null;
   const k = PLAN_CFG.TREND_WEEKS;
   const trend = packs.length >= 2 * k ? (avg(packs.slice(-k)) / avg(packs.slice(-2 * k, -k)) - 1) : null;
   const sw = parseFloat(safetyWeeks) > 0 ? parseFloat(safetyWeeks) : PLAN_CFG.SAFETY_WEEKS;
