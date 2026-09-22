@@ -76,3 +76,16 @@ KONLEN Tuya WiFi 온도센서 → smartfactory 동결온도 로그 자동 적재
 | status에 온도 code 없음 | 기기 첫 보고 전 → 수 분 후 재실행 |
 
 > 비용 운영: Trial은 6개월마다 **Cloud → My Services → Extend Trial Period** 무료 연장. 가동 안정화 후 만료 알림용 함수도 추가 예정.
+
+---
+
+## PART E — 공장 기기 상태(온라인·공인 IP) · 2026-09-22 추가
+
+사무실 이전으로 공장 망 안에 관제 기기가 없어졌다. Tuya 클라우드가 아는 **온라인 여부 · 마지막 보고 시각 · 기기가 붙은 공인 IP** 를 워크북 탭 **`기기상태`** 에 1기기 1행으로 덮어쓴다(30분 간격 · 온도 기록 뒤에 같은 10분 트리거에서). ERP 시스템 관제의 공장 칸이 이 탭을 읽는다.
+
+1. Apps Script 편집기에서 `tuya_temp_logger.gs` 를 **이 파일 전체로 교체** → 저장.
+2. (선택) 온도계가 아닌 Tuya 기기까지 보려면 `discoverAllDevices()` 1회 실행 → 로그 마지막 줄의 `TUYA_HEALTH_IDS = …` 를 스크립트 속성에 추가. 없으면 `TUYA_DEVICE_IDS`(온도계)만 본다.
+3. `logDeviceHealthNow()` 1회 실행 → 워크북에 `기기상태` 탭이 생기고 기기마다 `online/offline` · 공인 IP 가 찍히는지 확인.
+4. 트리거는 그대로(10분 `logTemperatures`). 기기상태는 그 안에서 30분에 한 번만 호출한다 — 5대면 월 ≈7,200회(무료 26,000회 안).
+
+판정: 전 기기 동시 `offline` = 공장 인터넷·전원 · 한 대만 = 그 기기 · `공인IP` 가 바뀜 = 회선 변경.
