@@ -903,6 +903,12 @@ const Auth = {
     Router.go('login');
   },
 
+  // Workspace 주 도메인 확장 선행작업(2026-09-12): Google 신원 email 을 anghodu.com/maytutu.com
+  //   → anghodu.biz 로 정규화한다. '사용자' 시트(데이터)는 .biz 그대로 둔다.
+  normEmail(e) {
+    return String(e || "").trim().toLowerCase().replace(/@(anghodu|maytutu)\.com$/, "@anghodu.biz");
+  },
+
   async loadUserInfo() {
     try {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -910,7 +916,7 @@ const Auth = {
       });
       if (!res.ok) { this.logout(); return; }
       const data = await res.json();
-      State.user = { email: data.email, name: data.name, picture: data.picture, role: 'worker' };
+      State.user = { email: this.normEmail(data.email), name: data.name, picture: data.picture, role: 'worker' };
       localStorage.setItem('mt_user', JSON.stringify(State.user));
       await this.checkRole();
     } catch (e) {
