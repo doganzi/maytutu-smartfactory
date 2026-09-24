@@ -396,6 +396,20 @@ const CONFIG = {
   API_KEY: '',
 };
 
+/* 🏭 ERP 배포 새 주소 (2026-09-24 사용자 결정 «스마트팩토리 안 2 — ERP 클라이언트로 통합»)
+   이 파일의 정본은 여전히 이 저장소(GitHub Pages)다. ERP 배포가 maytutu-factory.vercel.app/app/factory/ 에서
+   이 페이지를 **대신 전달**한다(ERP vercel.json 전달 규칙). 그 주소에는 ERP 서버 세션 창구(/api/auth/*)가 같은 주소로
+   있어, 한 번 로그인하면 90일(쓸 때마다 연장) 동안 토큰을 조용히 받는다 — 아이폰 홈 화면 앱도 1시간마다 다시 묻지 않는다.
+   ⚠️ 드라이브 **전체** 범위는 공장 주소에서 시작한 로그인에만 붙는다(ERP scopesFor("factory")).
+   옛 GitHub Pages 주소로 들어오면 새 주소로 넘긴다(설치 앱은 새 주소로 한 번 다시 설치). */
+const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/';
+const ON_ERP_HOST = location.hostname === 'maytutu-factory.vercel.app';
+if (location.hostname === 'doganzi.github.io') {
+  //  #access_token 은 옛 로그인 복귀 조각이다 — 새 주소로 들고 가지 않는다(다른 클라이언트 토큰).
+  const keep = /access_token|error=/.test(location.hash) ? '' : location.hash;
+  location.replace(ERP_HOME + keep);
+}
+
 /* ═══════════════════════════════════════════════
    STATE MANAGEMENT
    ═══════════════════════════════════════════════ */
@@ -646,6 +660,8 @@ const Auth = {
   _silentRefreshing: false,  // 동시 갱신 방지
 
   init() {
+    //  🏭 서버 로그인에서 돌아온 표식(#auth=…)은 지운다 — 주소창·공유 링크에 남지 않게.
+    if (/^#auth=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
     // GIS 토큰 클라이언트 백그라운드 초기화 + 탭 복귀 시 토큰 신선도 재확인 (런처 동일 패턴)
     this.ensureTokenClient().catch(e => console.warn('[Auth] GIS init deferred:', e && e.message));
     this._wireVisibility();
@@ -781,8 +797,35 @@ const Auth = {
     return this._tokenClientPromise;
   },
 
+  /* 🏭 ERP 서버 세션에서 토큰 받기(같은 주소 창구) — 팝업·화면 이동 없음. 실패는 false(로그인 화면으로). */
+  async _srvToken() {
+    try {
+      const r = await fetch('/api/auth/token', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (!j || !j.ok || !j.access_token) return false;
+      State.token = j.access_token;
+      const expiresIn = Number(j.expires_in) || 3600;
+      this._tokenExpiry = Date.now() + expiresIn * 1000;
+      localStorage.setItem('mt_token', State.token);
+      localStorage.setItem('mt_token_expiry', String(this._tokenExpiry));
+      this._scheduleRefresh(expiresIn);
+      return true;
+    } catch (e) { return false; }
+  },
+
   // prompt:'' — Google 세션 살아있고 동의 끝났으면 무화면으로 새 access_token (첫 1회만 동의 화면)
   async signInSilently() {
+    if (ON_ERP_HOST) {
+      //  🏭 새 주소 — GIS 대신 서버 세션. 사파리·설치 앱도 된다(같은 주소 쿠키).
+      const ok = await this._srvToken();
+      if (!ok) return;
+      if (State.user) { try { SheetsAPI.invalidateAllCache(); } catch (e) {} return; }
+      if (this._bootInProgress) return;
+      await this.loadUserInfo();
+      if (State.user) Router.go('dashboard');
+      return;
+    }
     try {
       await this.ensureTokenClient();
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -847,6 +890,7 @@ const Auth = {
   // 성공: _onToken 이 토큰 저장(부팅 중이라 화면이동은 initApp 이 담당) → true.
   // 실패/미동의/Safari·standalone(PWA): false → 호출측이 로그인 화면 노출.
   async trySilentBoot() {
+    if (ON_ERP_HOST) return this._srvToken();   // 🏭 새 주소 — 서버 세션이 곧 부팅 로그인(사파리·설치 앱 포함)
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     if (isSafari || this._isStandalone()) return false;   // silent 불가 환경 → 로그인 버튼 화면
     this._bootInProgress = true;
@@ -872,6 +916,8 @@ const Auth = {
   },
 
   async login() {
+    //  🏭 새 주소 — 서버 로그인(한 번 하면 90일 · 쓸 때마다 연장). 돌아오면 #auth=complete → init 이 지우고 부팅 로그인이 받는다.
+    if (ON_ERP_HOST) { window.location.href = '/api/auth/start?app=factory'; return; }
     // iOS 홈화면 PWA(standalone): GIS 팝업이 Safari 브라우저로 빠져 callback 유실 → 전체 리다이렉트 로그인(webview 내 유지)
     if (this._isStandalone()) { this._redirectLogin(); return; }
     try {
@@ -898,6 +944,8 @@ const Auth = {
   },
 
   logout() {
+    //  🏭 새 주소 — 서버 세션도 지운다(안 지우면 다음 부팅이 조용히 다시 로그인한다).
+    if (ON_ERP_HOST) { try { fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true }); } catch (e) {} }
     if (this._refreshTimer) clearTimeout(this._refreshTimer);
     State.token = null;
     State.user = null;
