@@ -17,7 +17,7 @@ const ok = [];
 const t = (n, f) => { f(); ok.push(n); };
 
 t('① 새 주소 판정 · 옛 주소는 새 주소로', () => {
-  assert.ok(SRC.includes("const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/';"));
+  assert.ok(SRC.includes("const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/home';"));
   assert.ok(SRC.includes("const ON_ERP_HOST = location.hostname === 'maytutu-factory.vercel.app';"));
   assert.ok(/if \(location\.hostname === 'doganzi\.github\.io'\) \{[\s\S]{0,300}location\.replace\(ERP_HOME \+ keep\);/.test(SRC), '옛 주소에서 새 주소로 넘기지 않는다');
   assert.ok(SRC.includes("/access_token|error=/.test(location.hash) ? '' : location.hash"), '옛 로그인 조각을 새 주소로 들고 간다');
@@ -43,7 +43,7 @@ t('④ 주소 이동이 한 곳에서 멈춘다 — 무한 왕복 없음', () =>
   const guard = SRC.match(/\(function enforceCanonicalOrigin\(\) \{[\s\S]*?\n\}\)\(\);/);
   const old = SRC.match(/if \(location\.hostname === 'doganzi\.github\.io'\) \{[\s\S]*?location\.replace\(ERP_HOME \+ keep\);\n\}/);
   assert.ok(guard && old, '주소 고정 블록을 찾지 못했다');
-  const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/';
+  const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/home';
   const step = (href) => {
     const u = new URL(href);
     let next = null;
@@ -52,13 +52,13 @@ t('④ 주소 이동이 한 곳에서 멈춘다 — 무한 왕복 없음', () =>
     return next;
   };
   for (const start of [
-    'https://maytutu-factory.vercel.app/app/factory/#home',
+    'https://maytutu-factory.vercel.app/app/factory/home#home',
     'https://doganzi.github.io/maytutu-smartfactory/#home',
     'https://maytutu-smartfactory.vercel.app/#home',
   ]) {
     let href = start, hops = 0;
     for (let n; (n = step(href)) != null; href = n) assert.ok(++hops <= 2, start + ' 에서 주소가 끝없이 오간다');
-    assert.strictEqual(new URL(href).hostname, 'maytutu-factory.vercel.app', start + ' 가 새 주소에 닿지 않는다');
+    assert.strictEqual(new URL(href).origin + new URL(href).pathname, ERP_HOME, start + ' 가 새 주소(/app/factory/home)에 닿지 않는다');
     assert.strictEqual(new URL(href).hash, '#home', start + ' 의 딥링크가 사라졌다');
   }
 });
