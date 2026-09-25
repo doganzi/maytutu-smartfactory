@@ -326,13 +326,13 @@ maytutu-appnav{--appnav-bg:rgba(255,255,255,0.15);--appnav-fg:#fff;--appnav-line
    redirect_uri 가 클라이언트 화이트리스트에 없어 400 redirect_uri_mismatch
    발생. 정식 운영 주소로 즉시 이동 — 모든 OAuth 로직보다 먼저
    실행되어야 하므로 스크립트 최상단에 배치. hash(#login 등 딥링크) 보존.
-   ⚠️ 정식 주소는 2026-09-24 부터 maytutu-factory.vercel.app/app/factory/ 다(아래 ERP_HOME).
+   ⚠️ 정식 주소는 2026-09-24 부터 maytutu-factory.vercel.app/app/factory/home 이다(아래 ERP_HOME).
       종전처럼 GitHub Pages 로 보내면 github.io 쪽이 다시 새 주소로 보내 **두 주소를 끝없이 오간다**
       (2026-09-25 사용자 신고 «공장이랑 번갈아가면서 혼선»). 정식 주소 자신은 절대 넘기지 않는다.
    ═══════════════════════════════════════════════ */
 (function enforceCanonicalOrigin() {
   var CANONICAL_HOST = 'maytutu-factory.vercel.app';
-  var CANONICAL = 'https://' + CANONICAL_HOST + '/app/factory/';
+  var CANONICAL = 'https://' + CANONICAL_HOST + '/app/factory/home';
   try {
     if (location.hostname.endsWith('.vercel.app') && location.hostname !== CANONICAL_HOST) {
       // location.replace — 잘못된 vercel URL 을 history 에 남기지 않음 (뒤로가기 튕김 방지)
@@ -405,8 +405,12 @@ const CONFIG = {
    이 페이지를 **대신 전달**한다(ERP vercel.json 전달 규칙). 그 주소에는 ERP 서버 세션 창구(/api/auth/*)가 같은 주소로
    있어, 한 번 로그인하면 90일(쓸 때마다 연장) 동안 토큰을 조용히 받는다 — 아이폰 홈 화면 앱도 1시간마다 다시 묻지 않는다.
    ⚠️ 드라이브 **전체** 범위는 공장 주소에서 시작한 로그인에만 붙는다(ERP scopesFor("factory")).
-   옛 GitHub Pages 주소로 들어오면 새 주소로 넘긴다(설치 앱은 새 주소로 한 번 다시 설치). */
-const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/';
+   옛 GitHub Pages 주소로 들어오면 새 주소로 넘긴다(설치 앱은 새 주소로 한 번 다시 설치).
+   ⚠️ 끝이 «/home» 인 이유(2026-09-25): ERP 배포는 trailingSlash:false·cleanUrls 라 «/app/factory/» 와 «…/index.html» 을
+      «/app/factory» 로 308 한다. 그 주소에선 manifest.json·sw.js·아이콘 같은 상대 경로가 /app/ 로 풀려 **ERP 매니페스트와
+      ERP 서비스워커**를 읽는다(공장을 깔면 «메이투투 ERP» 가 깔린다). «/app/factory/home» 은 둘 다 안 걸리고 상대 경로가
+      /app/factory/ 로 풀린다 — ERP vercel.json 이 이 주소를 GitHub Pages 첫 화면으로 전달한다. */
+const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/home';
 const ON_ERP_HOST = location.hostname === 'maytutu-factory.vercel.app';
 if (location.hostname === 'doganzi.github.io') {
   //  #access_token 은 옛 로그인 복귀 조각이다 — 새 주소로 들고 가지 않는다(다른 클라이언트 토큰).
