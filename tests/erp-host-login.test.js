@@ -35,4 +35,32 @@ t('③ #auth= 표식을 지운다', () => {
   assert.ok(SRC.includes("if (/^#auth=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }"));
 });
 
-console.log(ok.map((n) => '✓ ' + n).join('\n') + '\n' + ok.length + '/3 통과');
+
+/* ④ 주소 고정 두 곳이 서로를 되돌려 보내지 않는다 (2026-09-25 사용자 신고 «공장이랑 번갈아가면서 혼선»)
+   맨 위 CANONICAL ORIGIN GUARD 가 *.vercel.app 을 전부 GitHub Pages 로 보내고, github.io 는 다시 새 주소로 보내
+   두 주소를 끝없이 오갔다. 두 블록을 실제로 잘라 돌려 «몇 번 안에 멈추는가» 를 본다. */
+t('④ 주소 이동이 한 곳에서 멈춘다 — 무한 왕복 없음', () => {
+  const guard = SRC.match(/\(function enforceCanonicalOrigin\(\) \{[\s\S]*?\n\}\)\(\);/);
+  const old = SRC.match(/if \(location\.hostname === 'doganzi\.github\.io'\) \{[\s\S]*?location\.replace\(ERP_HOME \+ keep\);\n\}/);
+  assert.ok(guard && old, '주소 고정 블록을 찾지 못했다');
+  const ERP_HOME = 'https://maytutu-factory.vercel.app/app/factory/';
+  const step = (href) => {
+    const u = new URL(href);
+    let next = null;
+    const location = { hostname: u.hostname, hash: u.hash, replace: (to) => { if (next == null) next = to; } };
+    new Function('location', 'ERP_HOME', guard[0] + '\n' + old[0])(location, ERP_HOME);
+    return next;
+  };
+  for (const start of [
+    'https://maytutu-factory.vercel.app/app/factory/#home',
+    'https://doganzi.github.io/maytutu-smartfactory/#home',
+    'https://maytutu-smartfactory.vercel.app/#home',
+  ]) {
+    let href = start, hops = 0;
+    for (let n; (n = step(href)) != null; href = n) assert.ok(++hops <= 2, start + ' 에서 주소가 끝없이 오간다');
+    assert.strictEqual(new URL(href).hostname, 'maytutu-factory.vercel.app', start + ' 가 새 주소에 닿지 않는다');
+    assert.strictEqual(new URL(href).hash, '#home', start + ' 의 딥링크가 사라졌다');
+  }
+});
+
+console.log(ok.map((n) => '✓ ' + n).join('\n') + '\n' + ok.length + '/4 통과');
