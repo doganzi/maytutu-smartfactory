@@ -106,6 +106,7 @@ function installScreen(env, name, tabs) {
     for (const t of env.tabs[name]) env.reads[t] = Array.from(await env.SheetsAPI.getAll(t), r => r.join(',')); // 호스트 배열로(vm 영역이 다르면 deepStrictEqual 이 프로토타입에서 갈린다)
     env.silentAfterReads = !!env.ctx.State._silent;
     if (env.showLoadingAfterReads) env.ctx.showLoading(); // 읽은 «뒤» 에 로딩 막을 켜는 화면(네트워크를 탄 뒤에도 조용해야 한다)
+    if (env.renderGate) await env.renderGate; // 그리는 «도중» 에 매달리는 화면 — 조용히 그리는 중인 상태를 붙들어 둔다(시험이 열어 줄 때까지)
     if (env.onRender) env.onRender();
     env.ctx.toast('화면 안내', 'err'); // 오류형 — 홈의 «시험성적서 만료» 같은 상시 알림이 이 종류다(실단말기 2026-10-04: 조용히 다시 그릴 때마다 떴다)
     env.els.content.scrollTop = 0;
@@ -1169,6 +1170,63 @@ process.on('exit', code => {
     console.log('✔ ⑬ 매달린 동기화 놓기 · 표는 자기 것만 · 처음 손댄 순간 기준 · 실패하면 표지 되돌리기');
   }
 
+  // ═══ ⑭ 적대적 리뷰어 3차(fix8 diff) — 놓인 낡은 실행이 늦게 깨어나도 지금 실행을 흔들지 못한다 · 실패 복원은 비교 기준도 ═══
+  {
+    const STUCK = 61000;
+    // ① 낡은 실행이 «읽기» 에서 깨어나면 그리지 않고 접는다 — 지금 실행이 그린다(겹쳐 그리면 화면이 두 번 바뀐다)
+    const s = await opened(SHEETS());
+    s.sheets.B = [['3', 'z']];
+    let g1; s.gate = new Promise(r => { g1 = r; });
+    s.LiveSync._lastSyncTs = 0;
+    const staleA = s.LiveSync.sync('poll'); await settle();       // 첫 읽기가 돌아오지 않는다
+    s.LiveSync._syncSince = Date.now() - STUCK;                   // 60초 넘게 매달렸다
+    let g2; s.gate = new Promise(r => { g2 = r; });
+    s.LiveSync._lastSyncTs = 0;
+    const freshB = s.LiveSync.sync('poll'); await settle();       // 낡은 것을 놓고 새로 시작 — 이 읽기도 아직 안 돌아온다
+    assert.strictEqual(s.LiveSync._syncGen, 1, '낡은 것을 놓았다');
+    g1(); await staleA; await settle();                           // 낡은 첫 실행이 이제 깨어난다
+    assert.strictEqual(s.renders.length, 0, '놓인 낡은 실행은 깨어나도 그리지 않는다 — 지금 실행이 그린다');
+    g2(); await freshB; await settle();
+    assert.strictEqual(s.renders.length, 1, '지금 실행이 한 번 그린다');
+
+    // ② 낡은 실행이 «그리는 도중» 매달렸다 늦게 끝나도 지금 실행의 조용함을 지우지 못한다
+    const t = await opened(SHEETS());
+    t.sheets.B = [['3', 'z']];
+    let r1; t.renderGate = new Promise(r => { r1 = r; });
+    t.LiveSync._lastSyncTs = 0;
+    const staleC = t.LiveSync.sync('poll'); await settle();       // 그리는 도중(화면 함수 안)에서 매달렸다
+    assert.strictEqual(t.ctx.State._silent, true, '낡은 실행이 조용히 그리는 중');
+    t.LiveSync._syncSince = Date.now() - STUCK;
+    t.sheets.B = [['4', 'w']];                                    // 지금 실행이 그릴 새 값
+    let r2; t.renderGate = new Promise(r => { r2 = r; });
+    t.LiveSync._lastSyncTs = 0;
+    const freshD = t.LiveSync.sync('poll'); await settle();       // 놓고 새로 시작해 그리는 도중에 매달린다
+    assert.strictEqual(t.ctx.State._silent, true, '지금 실행이 조용히 그리는 중');
+    r1(); await staleC; await settle();                           // 낡은 실행의 그리기가 이제 끝난다
+    assert.strictEqual(t.ctx.State._silent, true, '낡은 실행의 뒤처리는 지금 실행의 조용함을 못 지운다(세대)');
+    r2(); await freshD; await settle();
+    assert.strictEqual(t.ctx.State._silent, false, '지금 실행이 끝나면 풀린다');
+
+    // ③ 그리기가 실패하면 비교 기준(_domBase)도 되돌린다 — 안 그러면 그리는 도중의 손놀림이 «이미 바뀐 값» 을 새 기준으로 찍어
+    //    JS 가 바꾼 값이 보호를 잃는다
+    const f = await opened(SHEETS());
+    f.sheets.B = [['3', 'z']];
+    f.LiveSync.init();
+    const q1 = { type: 'number', tagName: 'INPUT', value: '3', defaultValue: '0', isConnected: true };
+    f.controls.push(q1);
+    f.listeners['doc:touchstart'][0]({ type: 'touchstart' });     // 처음 손댄다 — 이 순간 값 3 이 기준
+    q1.value = '4';                                               // + 를 눌렀다(input 이벤트 없이 JS 만 값을 바꾼다)
+    f.LiveSync._lastTouchTs = 0;
+    assert.ok(/입력한 값 보존/.test(f.LiveSync._busyReason('dashboard')), '처음 손댄 순간(3)과 다르니 보존');
+    f.onRender = () => { f.listeners['doc:touchstart'][0]({ type: 'touchstart' }); throw new Error('그리다 실패'); }; // 그리는 도중 또 손댄다 → 옛 DOM(4)이 새 기준으로 찍힌다
+    await f.sync('manual');
+    f.LiveSync._lastTouchTs = 0;
+    assert.strictEqual(f.SheetsAPI._userAfterRender, true, '그리기가 실패해도 손댄 표지는 그대로');
+    // _busyReason 은 쓰지 않는다 — 그리다 실패한 🔄 는 hideLoading 전에 던져 «불러오는 중» 이 먼저 나온다. 비교 기준 자체를 본다
+    assert.strictEqual(f.LiveSync._domDirty(), true, '실패하면 비교 기준도 되돌아가 JS 가 바꾼 값(4≠3)이 여전히 보호된다');
+    console.log('✔ ⑭ 놓인 낡은 실행은 지금 실행을 못 흔든다 · 실패하면 비교 기준도 되돌린다');
+  }
+
   // ═══ 소스 형태(주석 제거 사본 · 호출 형태) ═══
   {
     const live = strip(LIVE_SRC);
@@ -1176,7 +1234,7 @@ process.on('exit', code => {
     const silent = between('async _silentSync(', 'async _renderScreen(');
     assert.ok(!/invalidateAllCache|toast\(/.test(silent), '조용한 경로는 캐시 전체 무효화·토스트를 부르지 않는다');
     assert.ok(/SheetsAPI\.getAll\(arg, false, false\)/.test(silent) && /SheetsAPI\.getRange\(arg, false, false\)/.test(silent), '선읽기는 track=false');
-    assert.ok(/State\._silent = true;/.test(silent) && /finally \{ State\._silent = false; this\._lateCarry = null; \}/.test(silent), '_silent 와 이어받기 상자는 함께 finally 로 해제');
+    assert.ok(/State\._silent = true;/.test(silent) && /finally \{ if \(gen === this\._syncGen\) \{ State\._silent = false; this\._lateCarry = null; \} \}/.test(silent), '_silent 와 이어받기 상자는 함께 finally 로 해제(같은 세대일 때만)');
     assert.ok(/this\._lateCarry = \{\};[\s\S]*querySelectorAll\('\[data-late-slot\]'\)[\s\S]*await this\._renderScreen\(screen\)/.test(silent), '옛 칸 내용은 다시 그리기 «전» 에 모은다');
     const manual = between('async _manualSync(', 'async _silentSync(');
     assert.ok(/SheetsAPI\.invalidateAllCache\(\)/.test(manual) && /toast\(/.test(manual), '수동 경로는 예전처럼 전체 무효화 + 토스트');
@@ -1218,7 +1276,11 @@ process.on('exit', code => {
     assert.ok(/const owns = !this\._isSyncing;/.test(live) && /if \(owns\) \{ this\._isSyncing = true; this\._syncSince = now; \}/.test(live), '자동의 표가 이미 있으면 🔄 는 그 표를 건드리지 않는다');
     assert.ok(/setInterval\(\(\) => \{\s*if \(document\.visibilityState === 'visible'\) this\.sync\('poll'\);/.test(live) && !/visible' && !this\._isSyncing/.test(live), '폴링은 도는 중이어도 sync 에 맡긴다(매달림 감시가 거기 있다)');
     assert.ok(/_snapDom\(\) \{[\s\S]*?this\._domBase = m;/.test(live) && /base && base\.has\(el\) \? this\._controlValue\(el\) !== base\.get\(el\) : this\._differsFromDefault\(el\)/.test(live), '입력 보존은 처음 손댄 순간 값과 비교하고, 그 뒤에 생긴 칸만 기본값과 비교한다');
-    assert.ok(/const userBefore = SheetsAPI\._userAfterRender;/.test(live) && /if \(userBefore\) SheetsAPI\._userAfterRender = true;/.test(live), '그리기가 실패하면 손댄 표지를 이전 값으로 되돌린다');
+    assert.ok(/const userBefore = SheetsAPI\._userAfterRender, baseBefore = this\._domBase;/.test(live) && /if \(userBefore\) \{ SheetsAPI\._userAfterRender = true; this\._domBase = baseBefore; \}/.test(live), '그리기가 실패하면 손댄 표지와 비교 기준을 이전 값으로 되돌린다');
+    // ⑭ 9차
+    assert.ok(/async _silentSync\(screen, trigger, retried\) \{\s*const gen = this\._syncGen;/.test(live) && /\}\)\);\s*if \(gen !== this\._syncGen\) \{[^}]*return; \}/.test(live), '낡은 실행은 읽기 뒤에 그리지 않고 접는다');
+    assert.ok(/finally \{ if \(gen === this\._syncGen\) \{ State\._silent = false; this\._lateCarry = null; \} \}/.test(live), '그리기 뒤처리는 같은 세대일 때만 조용함을 푼다');
+    assert.ok(/this\._manualRunning = false; State\._silent = false; this\._lateCarry = null;/.test(live), '놓을 때 늦은 칸 이어받기도 비운다');
     console.log('✔ 소스 형태');
   }
 

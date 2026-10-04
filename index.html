@@ -1816,7 +1816,7 @@ const LiveSync = {
         return;
       }
       console.warn(`[LiveSync] 동기화가 ${Math.round(this._stuckMs / 1000)}초 넘게 끝나지 않아 낡은 것으로 보고 놓는다`);
-      this._syncGen++; this._isSyncing = false; this._manualRunning = false; State._silent = false;
+      this._syncGen++; this._isSyncing = false; this._manualRunning = false; State._silent = false; this._lateCarry = null;
     }
     const screen = State.currentScreen;
     if (!manual) {
@@ -1869,6 +1869,8 @@ const LiveSync = {
 
   /** 자동 갱신 — 보이지 않게 최신 값을 받아 «화면이 읽은 뒤 바뀐 것이 있을 때만» 조용히 다시 그린다 */
   async _silentSync(screen, trigger, retried) {
+    // sync() 가 막 올린 세대 — 매달려서 놓인 낡은 실행이 나중에 깨어나도 지금 실행의 «조용함»·늦은 칸 이어받기를 지우거나 겹쳐 그리지 못하게 한다
+    const gen = this._syncGen;
     // WO 실행 화면: 작업 중 데이터 보존하면서 records 만 갱신(화면은 그대로)
     if (screen === 'wo-execute') { if (State.woExec?.woId) await this._renderScreen(screen); return; } // 작업 상태가 없으면 전체 재그림(스캔·사진 유실)으로 새지 않는다
 
@@ -1884,6 +1886,7 @@ const LiveSync = {
       const p = kind === 'getRange' ? SheetsAPI.getRange(arg, false, false) : SheetsAPI.getAll(arg, false, false);
       return p.catch(() => { failed++; });
     }));
+    if (gen !== this._syncGen) { console.log('[LiveSync] 놓인 낡은 실행 — 접는다'); return; }
     // 하나라도 못 받았으면 이번엔 접는다 — 그대로 그리면 화면 함수가 그 탭을 다시 받으러 네트워크를 타고,
     // 기다리는 사이 사용자 손놀림이 끼어들어 입력이 지워질 수 있다. 캐시에 있는 값만 읽는 그리기는 한 호흡에 끝나 끼어들 틈이 없다
     if (failed) { console.log(`[LiveSync] 읽기 ${failed}건 실패 — 이번 자동 갱신은 접는다`); return; }
@@ -1906,7 +1909,7 @@ const LiveSync = {
     this._lateCarry = {};
     if (content) content.querySelectorAll('[data-late-slot]').forEach(n => { if (n.id) this._lateCarry[n.id] = n.innerHTML; });
     State._silent = true;
-    try { await this._renderScreen(screen); } finally { State._silent = false; this._lateCarry = null; }
+    try { await this._renderScreen(screen); } finally { if (gen === this._syncGen) { State._silent = false; this._lateCarry = null; } }
     this._restoreDetails(screen);
     const restore = () => {
       if (State.currentScreen !== screen) return;
@@ -1934,7 +1937,7 @@ const LiveSync = {
     State._screenKeys = State._screenKeys || {};
     const prevTrack = State._screenKeys[screen];
     SheetsAPI._track = State._screenKeys[screen] = new Map();
-    const userBefore = SheetsAPI._userAfterRender;
+    const userBefore = SheetsAPI._userAfterRender, baseBefore = this._domBase;
     SheetsAPI._userAfterRender = false;
     try {
       if (screen === 'wo-detail' && State._woDetailId) {
@@ -1947,7 +1950,7 @@ const LiveSync = {
     } catch (e) {
       // 그리다 실패하면 이전 «읽은 목록» 으로 되돌린다 — 비워 둔 채로 두면 다음 주기가 «읽은 게 없다» 로 보고 영영 재시도하지 않는다
       State._screenKeys[screen] = prevTrack;
-      if (userBefore) SheetsAPI._userAfterRender = true; // 그리기가 실패해 옛 화면이 그대로다 — JS 로 바꾼 값 보호도 그대로여야 한다
+      if (userBefore) { SheetsAPI._userAfterRender = true; this._domBase = baseBefore; } // 그리기가 실패해 옛 화면이 그대로다 — JS 로 바꾼 값 보호도(손댄 표지 + 처음 손댄 순간의 값) 그대로여야 한다
       if (State.currentScreen === screen) SheetsAPI._track = prevTrack || null; // 그 사이 다른 화면으로 갔다면 그 화면의 읽기 추적을 건드리지 않는다
       throw e;
     }
