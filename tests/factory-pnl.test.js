@@ -509,5 +509,66 @@ t('LINES 정의가 온전하다 — 키·라벨·색이 다 있고 중복이 없
   assert.deepStrictEqual(keys, ['rawMat', 'subMat', 'supplies', 'scrap', 'freight', 'labor', 'overhead']);
 });
 
-console.log(ok.map(n => '  ✓ ' + n).join('\n'));
-console.log(`\n✅ FactoryPnl ${ok.length}건 통과`);
+/* ── 반죽 세 채널(2026-10-04 물류 감사) — 손익 매출 = 마켓봄·자사몰 · 자사몰은 완제품품목[19] 코드로만 잡힌다 · 콜로는 뺀다 ──
+   10월부터 마켓봄 주문이 0건(자사몰 이행)이라 마켓봄만 세면 매출이 «추정» 으로 떨어진다.
+   자사몰 품명 «[점주용] 호두과자 전용반죽» 은 완제품 품명과 안 맞는다 → 코드가 1순위다. */
+const _dRows = () => [
+  { date: '2026-10-01', channel: '자사몰', code: 'ANG00276', mbCode: 'ANG00276', name: '[점주용] 호두과자 전용반죽', qty: 4, supply: 194320, packsPerBox: 3 },
+  { date: '2026-10-02', channel: '자사몰', code: 'ANG00223', mbCode: 'ANG00223', name: '[점주용] 붕어빵 전용반죽', qty: 2, supply: 160000, packsPerBox: null },
+  { date: '2026-10-02', channel: '콜로세움', code: 'ANG00179', mbCode: 'ANG00276', name: '전용반죽 [5kg*4EA/box]', qty: 2, supply: 172727, packsPerBox: 4 },
+];
+const _fgWith = (codes) => { const fg = fixture.fgItems[0].slice(); fg[FG_EXT.mbCodes] = codes; return fg; };
+
+t('자사몰 반죽 매출은 마켓봄코드(완제품품목[19])로 잡히고, 콜로·붕어빵은 빠진다 · 봉수는 코드표', () => {
+  const oct = FactoryPnl.build({ fgItems: [_fgWith('ANG00002,ANG00266,ANG00276')], mbRows: _dRows() }).find(r => r.ym === '2026-10');
+  assert.strictEqual(oct.mbRevenue, 194320, '자사몰 호두과자 반죽만 — 붕어빵·콜로 제외');
+  assert.strictEqual(oct.revenueSrc, 'marketbom', 'ERP 실매출 배지');
+  assert.strictEqual(oct.mbQty, 4, '택배비 박스수 — 콜로 박스는 본사 택배가 아니다');
+  assert.strictEqual(oct.mbPacks, 12, '봉수는 코드표(3봉) — 쿠폰 공급가 역산이면 8봉');
+  //  [19] 가 비면 자사몰 품명은 완제품 품명과 안 맞아 잡히지 않는다 — 코드가 1순위인 이유
+  const bare = FactoryPnl.build({ fgItems: [fixture.fgItems[0]], mbRows: _dRows() }).find(r => r.ym === '2026-10');
+  assert.strictEqual(bare, undefined, '잡힌 매출이 없어 10월 칸 자체가 생기지 않아야 한다');
+});
+
+t('matchReport 는 손익 채널(마켓봄·자사몰)만 세고 코드로 맞은 품목을 보여준다', () => {
+  const rep = FactoryPnl.matchReport(_dRows(), [_fgWith('ANG00276')]);
+  assert.strictEqual(rep.total, 2, '콜로 행은 손익 대상이 아니다');
+  assert.deepStrictEqual(rep.matched, ['[점주용] 호두과자 전용반죽']);
+});
+
+(async () => {
+  //  fetchDough — ?only=dough 를 부르고, 옛 서버(배포 전)면 marketbom 행으로 떨어진다. 실패는 [](추정 폴백).
+  const calls = [];
+  global.fetch = async (u) => { calls.push(String(u)); return { ok: true, json: async () => ({
+    channels: ['마켓봄', '자사몰', '콜로세움'],
+    dough: { rows: _dRows(), sources: { 자사몰: { lastDate: '2026-10-02' }, 마켓봄: { lastDate: '2026-09-30' } } } }) }; };
+  const d = await FactoryPnl.fetchDough();
+  assert.ok(/\/api\/logistics\?only=dough$/.test(calls[0]), '반죽 세 채널 엔드포인트가 아니다: ' + calls[0]);
+  assert.strictEqual(d.rows.length, 3);
+  assert.strictEqual(d.updated, '2026-10-02');
+  global.fetch = async () => ({ ok: true, json: async () => ({ marketbom: { rows: [{ code: 'ANG00276' }], deliveryByMonth: { '2026-09': 1 }, updated_at: '2026-09-30' } }) });
+  const old = await FactoryPnl.fetchDough();
+  assert.strictEqual(old.rows.length, 1, '옛 서버 응답에서 마켓봄 행을 못 읽었다');
+  assert.strictEqual(old.updated, '2026-09-30');
+  global.fetch = async () => ({ ok: false, status: 500 });
+  const bad = await FactoryPnl.fetchDough();
+  assert.deepStrictEqual(bad.rows, []);
+  assert.strictEqual(bad.err, 'ERP 500');
+  ok.push('fetchDough: ?only=dough → 옛 서버면 marketbom 행 → 실패는 빈 행 + 오류');
+
+  //  공장 정식 주소에서는 같은 출처 /api 로 부른다 — ERP 절대 주소는 CORS 에 막혀 «Failed to fetch» 였다(2026-10-04 라이브)
+  const seen = [];
+  global.fetch = async (u) => { seen.push(String(u)); return { ok: true, json: async () => ({ dough: { rows: [], sources: {} } }) }; };
+  global.location = { hostname: 'maytutu-factory.vercel.app' };
+  await FactoryPnl.fetchDough();
+  global.location = { hostname: 'doganzi.github.io' };
+  await FactoryPnl.fetchDough();
+  delete global.location;
+  await FactoryPnl.fetchDough();
+  assert.strictEqual(seen[0], '/api/logistics?only=dough', '공장 정식 주소에서 다른 출처(ERP 절대 주소)를 불렀다 — CORS 로 막힌다');
+  assert.strictEqual(seen[1], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '옛 Pages 주소는 ERP 절대 주소(CORS 허용 오리진)');
+  assert.strictEqual(seen[2], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '주소를 모르면(시험·로컬) 절대 주소');
+  ok.push('fetchDough: 공장 정식 주소는 같은 출처 /api · 옛 Pages 주소는 ERP 절대 주소');
+  console.log(ok.map(n => '  ✓ ' + n).join('\n'));
+  console.log(`\n✅ FactoryPnl ${ok.length}건 통과`);
+})().catch(e => { console.error(e); process.exit(1); });

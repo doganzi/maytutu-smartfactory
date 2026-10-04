@@ -1673,6 +1673,11 @@ const LiveSync = {
   _minSyncGap: 5000,   // 최소 5초 간격 (중복 방지)
   _isSyncing: false,
   _manualRunning: false, // 🔄 수동 새로고침이 도는 중(연타 방지) — 자동 갱신과는 따로 센다
+  _syncSince: 0,       // «도는 중» 표를 올린 시각 — 읽기가 끝나지 않고 매달리면(망 끊김) 영영 막히니 _stuckMs 가 넘으면 낡은 것으로 놓는다
+  _manualSince: 0,
+  _stuckMs: 60000,
+  _syncGen: 0,         // 매달려서 놓인 낡은 실행이 늦게 끝나도 지금 실행의 표를 못 내리게 — 놓을 때마다 오른다
+  _domBase: null,      // 사용자가 «처음 손댄 순간» 의 입력칸 값(WeakMap) — _domDirty 의 비교 기준
   _idleMs: 2000,       // 마지막 손놀림(터치·키·스크롤) 뒤 이만큼 조용해야 화면을 바꾼다
   _lastTouchTs: 0,
   _retryTimer: null,   // 보이게 됨·포커스 복귀가 미뤄졌을 때 한 번만 다시 시도하는 타이머
@@ -1700,7 +1705,7 @@ const LiveSync = {
     //   터치·키·휠은 푼다 — 조용한 재그림이 돌던 중에도 사용자가 누른 버튼의 로딩 막·토스트는 삼키지 않는다
     const mark = e => {
       this._lastTouchTs = Date.now();
-      if (!e || e.type !== 'scroll') { State._silent = false; SheetsAPI._userAfterRender = true; }
+      if (!e || e.type !== 'scroll') { State._silent = false; if (!SheetsAPI._userAfterRender) this._snapDom(); SheetsAPI._userAfterRender = true; }
     };
     ['touchstart', 'pointerdown', 'keydown', 'wheel', 'scroll'].forEach(ev =>
       document.addEventListener(ev, mark, { passive: true, capture: true }));
@@ -1748,9 +1753,7 @@ const LiveSync = {
   startPoll() {
     this.stopPoll(); // 중복 방지
     this._pollTimer = setInterval(() => {
-      if (document.visibilityState === 'visible' && !this._isSyncing) {
-        this.sync('poll');
-      }
+      if (document.visibilityState === 'visible') this.sync('poll'); // «도는 중» 이면 sync 가 알아서 건너뛴다 — 매달림 감시도 거기 있다
     }, this._pollInterval);
   },
 
@@ -1804,9 +1807,16 @@ const LiveSync = {
       console.log(`[LiveSync] 최소 간격 미충족, skip (${now - this._lastSyncTs}ms)`);
       return;
     }
-    if (manual ? this._manualRunning : this._isSyncing) {
-      console.log('[LiveSync] 이미 동기화 중, skip');
-      return;
+    const busy = manual ? this._manualRunning : (this._isSyncing || this._manualRunning); // 자동은 🔄 가 도는 중에도 쉰다(둘이 같은 #content 를 그리지 않게)
+    if (busy) {
+      // 읽기 하나가 끝나지 않고 매달리면(_fetch 에는 시간 제한이 없다) 영영 «동기화 중» 으로 막힌다 — 넘으면 낡은 실행으로 보고 놓는다
+      const since = manual ? this._manualSince : Math.max(this._isSyncing ? this._syncSince : 0, this._manualRunning ? this._manualSince : 0);
+      if (now - since <= this._stuckMs) {
+        console.log('[LiveSync] 이미 동기화 중, skip');
+        return;
+      }
+      console.warn(`[LiveSync] 동기화가 ${Math.round(this._stuckMs / 1000)}초 넘게 끝나지 않아 낡은 것으로 보고 놓는다`);
+      this._syncGen++; this._isSyncing = false; this._manualRunning = false; State._silent = false;
     }
     const screen = State.currentScreen;
     if (!manual) {
@@ -1818,8 +1828,10 @@ const LiveSync = {
       }
     }
 
-    this._isSyncing = true;
-    if (manual) this._manualRunning = true;
+    const gen = this._syncGen;
+    const owns = !this._isSyncing; // 자동 갱신이 도는 중에 눌린 🔄 는 자동의 표를 건드리지 않는다(먼저 끝났다고 «도는 중» 을 내리면 자동이 겹쳐 돈다)
+    if (owns) { this._isSyncing = true; this._syncSince = now; }
+    if (manual) { this._manualRunning = true; this._manualSince = now; }
     this._lastSyncTs = now;
     try {
       console.log(`[LiveSync] 동기화 시작 (trigger=${trigger}, screen=${screen})`);
@@ -1829,8 +1841,10 @@ const LiveSync = {
       console.error('[LiveSync] 동기화 실패:', e.message);
       // 동기화 실패해도 시스템 정상 동작 — 다음 주기에 재시도
     } finally {
-      if (manual) this._manualRunning = false;
-      this._isSyncing = false;
+      if (gen === this._syncGen) { // 매달려서 놓인 낡은 실행이 늦게 끝나도 지금 실행의 표를 내리지 않는다
+        if (manual) this._manualRunning = false;
+        if (owns) this._isSyncing = false;
+      }
     }
   },
 
@@ -1920,6 +1934,7 @@ const LiveSync = {
     State._screenKeys = State._screenKeys || {};
     const prevTrack = State._screenKeys[screen];
     SheetsAPI._track = State._screenKeys[screen] = new Map();
+    const userBefore = SheetsAPI._userAfterRender;
     SheetsAPI._userAfterRender = false;
     try {
       if (screen === 'wo-detail' && State._woDetailId) {
@@ -1932,6 +1947,7 @@ const LiveSync = {
     } catch (e) {
       // 그리다 실패하면 이전 «읽은 목록» 으로 되돌린다 — 비워 둔 채로 두면 다음 주기가 «읽은 게 없다» 로 보고 영영 재시도하지 않는다
       State._screenKeys[screen] = prevTrack;
+      if (userBefore) SheetsAPI._userAfterRender = true; // 그리기가 실패해 옛 화면이 그대로다 — JS 로 바꾼 값 보호도 그대로여야 한다
       if (State.currentScreen === screen) SheetsAPI._track = prevTrack || null; // 그 사이 다른 화면으로 갔다면 그 화면의 읽기 추적을 건드리지 않는다
       throw e;
     }
@@ -1962,7 +1978,24 @@ const LiveSync = {
     if (!SheetsAPI._userAfterRender) return false;
     const c = $id('content');
     if (!c) return false;
-    return Array.from(c.querySelectorAll('input,select,textarea')).some(el => el.type !== 'hidden' && this._differsFromDefault(el));
+    const base = this._domBase;
+    // 사용자가 처음 손댄 «순간» 에 이미 있던 칸은 그때 값과 비교한다 — 그리는 중 JS 가 채운 기본값(날짜·기간 select 등)을 사용자 변경으로
+    // 오탐하면 그 화면의 자동 갱신이 영영 보류된다. 그 뒤에 생긴 칸만 «처음 그려진 값» 과 비교한다.
+    return Array.from(c.querySelectorAll('input,select,textarea')).some(el => el.type !== 'hidden'
+      && (base && base.has(el) ? this._controlValue(el) !== base.get(el) : this._differsFromDefault(el)));
+  },
+
+  /** 사용자가 이 화면을 처음 손대는 «바로 그 순간» 의 입력칸 값들 — touchstart·keydown 은 버튼의 click·키 입력이 값을 바꾸기 «전» 이라 변경 전이 찍힌다 */
+  _snapDom() {
+    const m = new WeakMap(), c = $id('content');
+    if (c) c.querySelectorAll('input,select,textarea').forEach(el => m.set(el, this._controlValue(el)));
+    this._domBase = m;
+  },
+
+  _controlValue(el) {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? '1' : '0';
+    if (el.tagName === 'SELECT') return el.multiple ? Array.from(el.options || []).map(o => (o.selected ? '1' : '0')).join('') : String(el.selectedIndex);
+    return String(el.value);
   },
 
   /** 입력칸이 «처음 그려진 값» 과 다른가 — 사용자가 지웠거나 되돌렸으면 다시 그려도 잃을 것이 없다 */
@@ -2361,7 +2394,7 @@ Screens.dashboard = async () => {
 
   $id('content').innerHTML = `
     <div style="padding:16px">
-      <!-- 🏭 생산 계획 — 홈의 맨 위. 렌더 후 loadHomeProdPlan() 이 채운다(마켓봄 API 라 느리다) -->
+      <!-- 🏭 생산 계획 — 홈의 맨 위. 렌더 후 loadHomeProdPlan() 이 채운다(ERP 반죽 판매 API 라 느리다) -->
       ${LiveSync.lateSlot('home-prod-plan')}
 
       <!-- Summary Cards -->
@@ -2547,7 +2580,7 @@ Screens.dashboard = async () => {
     }
   }
 
-  loadHomeProdPlan();     // 마켓봄 실판매(ERP API) 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
+  loadHomeProdPlan();     // 반죽 실판매(ERP API) 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
   hsLoadHomeDocAlert();   // Drive 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
 };
 
@@ -2593,17 +2626,20 @@ async function hsLoadHomeDocAlert() {
 /* ── 주간 생산량 제안 ──────────────────────────────────────────────────────────
    「이번 주 몇 배치 만들까」를 감이 아니라 실판매에서 뽑는다.
 
-     D(예측 주간소비) = 마켓봄 실판매 최근 4주 **단순 평균**(봉) — 사용자 결정 2026-09-17(옛 8주 선형가중 대체)
+     D(예측 주간소비) = 반죽 실판매(마켓봄·자사몰·콜로) 최근 4주 **단순 평균**(봉) — 사용자 결정 2026-09-17(옛 8주 선형가중 대체)
                         «안전재고 = 과거 4주간 평균 판매 × 2주» — 판매 추세가 바뀌면 4주 안에 따라간다(8주는 추세 비교에만).
      가용재고 S       = 완제품LOT 출하가능 잔량 + 냉동보관중·진행중 WO 예정 봉수(12h 뒤 합류)
      목표 T           = D × (안전재고 2주 + 다음 주 소비 1주) = 3D
      권장 생산        = max(0, T − S)  → 작업지시 1건 = 40봉(200kg) 단위로 올림
 
    ⚠️ 재고가 목표보다 많으면 **0배치가 정답**이다. 늘 뭔가 만들라고 말하는 제안은 과잉재고를 굳힌다.
-   ⚠️ 수요는 **마켓봄 실판매**(가맹점 주문)를 쓴다. 공장 출하는 물류로 «밀어낸» 양이라 실수요보다
-      크고(2026-08 실측 주 17봉·12주 누적 207봉), 그 숫자로 계획하면 과잉생산이 스스로를 정당화한다.
-      마켓봄을 못 읽으면 출하 실적으로 떨어지고 화면에 「출하 기준」이라고 밝힌다.
-   ⚠️ 마켓봄↔완제품 연결은 **품명 추측이 아니라 `완제품품목[19] 마켓봄코드`**(쉼표구분)로만 한다.
+   ⚠️ 수요는 **가맹점 실판매** 세 채널(마켓봄·자사몰·콜로 — ERP `/api/logistics?only=dough`)을 쓴다. 공장 출하는
+      물류로 «밀어낸» 양이라 실수요보다 크고(2026-08 실측 주 17봉·12주 누적 207봉), 그 숫자로 계획하면 과잉생산이
+      스스로를 정당화한다. 판매를 못 읽으면 출하 실적으로 떨어지고 화면에 「출하 기준」이라고 밝힌다.
+   ⚠️ 마켓봄만 세지 말 것 — 2026-08-28 결정으로 자사몰(아임웹)이 마켓봄을 대체해 10월부터 마켓봄 주문이 0건이다.
+      마켓봄만 보면 D 가 몇 주 안에 0 으로 떨어지고 카드가 «판매 이력 없음» 으로 바뀐다(2026-10-04 물류 감사).
+   ⚠️ 판매↔완제품 연결은 **품명 추측이 아니라 `완제품품목[19] 마켓봄코드`**(쉼표구분)로만 한다.
+      자사몰은 마켓봄과 같은 ANG 번호, 콜로는 서버가 마켓봄 코드로 옮겨 준 `mbCode`(ANG00179 → ANG00276)로 맞춘다.
       품명은 실제로 안 맞는다 — 마켓봄 "앙호두 전용반죽" vs 마스터 "앙호두(호두과자 전용반죽)".
       앞글자 일치로 풀면 앞치마·모자·쿠폰 같은 굿즈가 반죽 수요로 딸려 들어온다.
    검증: node tests/prod-plan.test.js                                             */
@@ -2645,9 +2681,13 @@ function planDate(v) { const s = String(v || '').trim(); if (!s) return null; co
     「몇 번째 주」는 세는 기준이 사람마다 달라서 날짜로 박아 둔다 — 달을 걸치는 주도 시작일 하나로 정해진다. */
 function planWeekLabel(w) { const d = new Date(w); return (d.getMonth() + 1) + '월 ' + d.getDate() + '일주차'; }
 
-/** 마켓봄 판매행 1건의 **봉수/박스** — ① 품명의 규격 표기 `(5kg*3ea)` ② 없으면 박스 공급가 ÷ 봉당 단가 역산.
-    박스 규격이 SKU 마다 달라(ANG00266 4봉·20kg → ANG00276 3봉·15kg) 박스수만으로는 봉수를 못 낸다. */
+/** 판매행 1건의 **봉수/박스** — ① 서버 코드표 `packsPerBox`(ERP api/_dough_family.json · ?only=dough 가 행마다 붙인다)
+    ② 품명의 규격 표기 `(5kg*3ea)` ③ 없으면 박스 공급가 ÷ 봉당 단가 역산.
+    박스 규격이 SKU 마다 달라(ANG00266 4봉·20kg → ANG00276 3봉·15kg) 박스수만으로는 봉수를 못 낸다.
+    ⚠️ 코드표가 1순위다 — 자사몰 supply 는 쿠폰 배분값이라 공급가 역산이 갈린다(2026-09-28주 121 vs 122봉). */
 function planPacksPerBox(row) {
+  const k = parseFloat(row && row.packsPerBox);
+  if (k >= 1 && k <= 12) return k;
   const m = String(row && row.name || '').match(/\d+(?:\.\d+)?\s*kg\s*[*x×]\s*(\d+)\s*(?:ea|개|팩|pack)?/i);
   if (m) { const n = parseInt(m[1], 10); if (n >= 1 && n <= 12) return n; }
   const qty = parseFloat(row && row.qty) || 0, sup = parseFloat(row && row.supply) || 0;
@@ -2655,11 +2695,14 @@ function planPacksPerBox(row) {
   return 1;
 }
 
-/** 마켓봄 판매행 → {date, packs} 이벤트. 연결은 **마켓봄코드로만** 한다 — 품명 추측 금지. */
+/** 판매행 → {date, packs} 이벤트. 연결은 **마켓봄코드로만** 한다 — 품명 추측 금지.
+    채널이 셋(마켓봄·자사몰·콜로)이라 행의 `mbCode`(서버가 마켓봄 코드로 옮긴 값)로 맞춘다 — 없으면 `code`(옛 마켓봄 행).
+    콜로 코드를 옮길 곳이 없으면 서버가 mbCode '' 를 준다 → 어느 완제품에도 안 붙는다(다른 번호 체계의 우연한 겹침 차단). */
 function planSalesEvents(mbRows, mbCodes) {
   const codes = new Set((mbCodes || []).map(c => String(c).trim()).filter(Boolean));
   if (!codes.size) return [];
-  return (mbRows || []).filter(r => r && codes.has(String(r.code || '').trim()))
+  const key = r => String(r.mbCode != null ? r.mbCode : (r.code || '')).trim();
+  return (mbRows || []).filter(r => r && codes.has(key(r)))
     .map(r => ({ date: r.date, packs: (parseFloat(r.qty) || 0) * planPacksPerBox(r) }));
 }
 
@@ -2848,7 +2891,7 @@ async function loadHomeProdPlan() {
       SheetsAPI.getAll('완제품LOT').catch(() => []),
       SheetsAPI.getAll('작업지시서').catch(() => []),
       SheetsAPI.getAll('출하기록').catch(() => []),
-      FactoryPnl.fetchMarketbom().catch(() => ({ rows: [] })),
+      FactoryPnl.fetchDough().catch(() => ({ rows: [] })),
     ]);
     const asOf = new Date();
     const FG_DEAD = new Set(['출하완료', '폐기', '삭제', '소진', '채번예약']);
@@ -2860,7 +2903,8 @@ async function loadHomeProdPlan() {
       // 출하 = 재고를 실제로 깎은 양(그래프의 과거 사용량·재고 역산은 이걸 써야 앞뒤가 맞는다)
       const shipEv = ships.filter(s => s && myLots.has(s[1]) && !/테스트|E2E/i.test(String(s[3] || '') + String(s[7] || '')))
         .map(s => ({ date: s[6], packs: parseFloat(s[4]) || 1 }));
-      // 수요 예측 = 마켓봄 실판매(가맹점 주문). 연결이 없으면 출하로 떨어진다.
+      // 수요 예측 = 반죽 실판매 세 채널(마켓봄·자사몰·콜로 — 가맹점 주문). 연결이 없으면 출하로 떨어진다.
+      //   마켓봄만 세면 자사몰 이행(10월 마켓봄 0건)으로 D 가 0 이 된다(2026-10-04). 행의 mbCode·packsPerBox 는 ERP 코드표가 붙인다.
       const mbCodes = String(it[FG_EXT.mbCodes] || '').split(',').map(s => s.trim()).filter(Boolean);
       const saleEv = planSalesEvents(mb.rows, mbCodes);
       const src = saleEv.length ? '실판매' : '출하';
@@ -7745,7 +7789,8 @@ Screens['wo-pdfs'] = async () => {
      같은 가격을 어느 기준으로 적느냐의 문제일 뿐이다.
 
    출처 — 값마다 어디서 왔는지 화면에 배지로 찍는다. 추정을 실적처럼 보이게 하지 않는다.
-     매출     ① 마켓봄 반죽 실매출(ERP /api/logistics) = 실적
+     매출     ① 마켓봄·자사몰 반죽 실매출(ERP /api/logistics?only=dough) = 실적
+                (콜로 반죽 — 신제주 1곳 — 은 물류수수료 구조가 달라 아직 안 넣는다. 생산계획 수요에는 들어간다)
               ② 없는 달만 출하기록 × 완제품품목[18] 공급단가 = 추정
      재료비   = 공정기록 실투입량(kg) × 원재료품목[13] 매입단가 — 발생 기준
      (참고)   구매주문 totalAmt 합 = 실매입(현금) 기준. 나란히 보여주되 손익에는 안 넣는다
@@ -7790,8 +7835,23 @@ const PNL_EMPLOYER_INS_RATE = 0.102;
 /** ERP 재무 DB(회계·재무 05) — 결산 라인. 읽기 전용. */
 const ERP_FIN_SID = '1FbqWXusA6KCpJThwZ6f4tNSMw19kSjL7hL19byTrOVE';
 const ERP_CLOSING_TAB = 'Closing_Line';
-/** ERP 물류 API — 마켓봄 반죽 실매출. 인증 = 이 앱이 이미 가진 구글 토큰(hd=anghodu.biz). */
-const ERP_LOGI_API = 'https://maytutu-erp.vercel.app/api/logistics?only=marketbom';
+/** ERP 물류 API — 반죽 실판매 세 채널(마켓봄·자사몰·콜로). 인증 = 이 앱이 이미 가진 구글 토큰(hd=anghodu.biz).
+    행마다 ERP 코드표(api/_dough_family.json)의 packsPerBox·mbCode 가 붙어 온다 — 홈 생산계획(수요 D)과 손익 매출이 같이 읽는다.
+    ⚠️ 옛 `?only=marketbom` 은 마켓봄만 줘서 자사몰 이행(2026-10 마켓봄 0건) 뒤 수요·매출이 0 으로 떨어졌다(2026-10-04). */
+const ERP_LOGI_API = 'https://maytutu-erp.vercel.app/api/logistics?only=dough';
+/** 실제로 부를 주소 — 공장 정식 주소(maytutu-factory.vercel.app)는 **ERP 와 같은 Vercel 프로젝트**라 같은 출처 `/api/…` 로 부른다.
+    🔴 다른 출처(maytutu-erp.vercel.app)로 부르면 ERP CORS 허용목록(doganzi.github.io 만)에 없어 «Failed to fetch» 로 막힌다 —
+       2026-09-25 공장 주소 이전 뒤로 홈 생산계획은 **조용히 출하 기준**(실판매 아님)으로, 손익 매출은 «추정» 으로 떨어져 있었다
+       (2026-10-04 라이브 검수에서 발견: 공장 앱 375봉/주 · ERP 06 332봉/주). 같은 출처면 CORS·프리플라이트가 아예 없다.
+    옛 GitHub Pages 주소·로컬 파일에서는 종전대로 ERP 절대 주소(CORS 허용 오리진 doganzi.github.io). */
+function erpLogiUrl() {
+  const h = (typeof location !== 'undefined' && location && location.hostname) || '';
+  return (h === 'maytutu-factory.vercel.app' || h === 'maytutu-erp.vercel.app')
+    ? ERP_LOGI_API.replace(/^https:\/\/[^/]+/, '') : ERP_LOGI_API;
+}
+/** 손익 매출로 세는 채널 — 본사가 냉동택배로 직접 보내는 두 채널(박스당 택배비 모형이 맞는다).
+    콜로는 4PL 물류수수료(공급가 12.65%) 구조라 이 모형에 안 맞아 뺀다 — 넣으려면 수수료 줄을 따로 만들 것. */
+const PNL_SALE_CHANNELS = ['마켓봄', '자사몰'];
 
 const FactoryPnl = {
   _num(v) { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; },
@@ -7840,6 +7900,9 @@ const FactoryPnl = {
       ① 품명의 규격 표기(`(5kg*3ea)`) ② 없으면 박스 공급가 ÷ 봉당 기준단가로 역산.
       실제로 ANG00266(4봉·20kg) → ANG00276(3봉·15kg) 로 2026-07 에 바뀌었고, 옛 SKU 는 품명에 규격이 없다. */
   packsPerBoxOf(row) {
+    //  ① ERP 코드표(행의 packsPerBox) — 자사몰 supply 는 쿠폰 배분값이라 공급가 역산이 갈린다(2026-09-28주 121 vs 122봉)
+    const k = this._num(row && row.packsPerBox);
+    if (k >= 1 && k <= 12) return k;
     const m = String(row && row.name || '').match(/\d+(?:\.\d+)?\s*kg\s*[*x×]\s*(\d+)\s*(?:ea|개|팩|pack)?/i);
     if (m) { const n = parseInt(m[1], 10); if (n >= 1 && n <= 12) return n; }
     const qty = this._num(row && row.qty), sup = this._num(row && row.supply);
@@ -7861,15 +7924,38 @@ const FactoryPnl = {
     return fgNames.includes(n);
   },
 
+  /** 활성 완제품의 마켓봄코드(완제품품목[19] · 쉼표구분) 합집합 — 생산계획(<prod-plan> planSalesEvents)과 같은 연결 규칙. */
+  fgSaleCodes(fgItems) {
+    const out = new Set();
+    for (const r of (fgItems || [])) {
+      if (!r || !r[0] || r[7] === '비활성') continue;
+      String(r[FG_EXT.mbCodes] || '').split(',').map(x => x.trim()).filter(Boolean).forEach(c => out.add(c));
+    }
+    return out;
+  },
+
+  /** 이 판매행이 우리 공장 생산품인가 — ① 마켓봄코드(행의 mbCode, 없으면 code)가 완제품품목[19]에 있거나 ② 품명이 정확히 같을 때.
+      ⚠️ 자사몰 품명은 «[점주용] 호두과자 전용반죽» 이라 품명으로는 안 맞는다 — 코드가 1순위다(2026-10-04). */
+  isOurRow(r, fgNames, fgCodes) {
+    if (!r) return false;
+    const key = String(r.mbCode != null ? r.mbCode : (r.code || '')).trim();
+    if (key && fgCodes && fgCodes.has(key)) return true;
+    return this.isOurProduct(r.name, fgNames);
+  },
+
+  /** 손익 매출 대상 채널인가 — channel 이 없는 행(옛 ?only=marketbom 응답·시험 픽스처)은 마켓봄이다. */
+  isPnlChannel(r) { return PNL_SALE_CHANNELS.includes(String((r && r.channel) || '마켓봄')); },
+
   /** 매칭 진단 — 마켓봄 품목 중 몇 개가 우리 완제품으로 잡혔나. 0 이면 품명이 어긋난 것이다. */
   matchReport(mbRows, fgItems) {
     const fgNames = (fgItems || []).filter(r => r && r[0] && r[7] !== '비활성')
       .map(r => this.normName(r[1] || r[0])).filter(Boolean);
+    const fgCodes = this.fgSaleCodes(fgItems);
     const all = new Map(), hit = new Map();
     for (const r of (mbRows || [])) {
-      if (!r || !r.name) continue;
+      if (!r || !r.name || !this.isPnlChannel(r)) continue;
       all.set(r.code || r.name, r.name);
-      if (this.isOurProduct(r.name, fgNames)) hit.set(r.code || r.name, r.name);
+      if (this.isOurRow(r, fgNames, fgCodes)) hit.set(r.code || r.name, r.name);
     }
     return { total: all.size, matched: [...hit.values()], fgNames };
   },
@@ -7896,6 +7982,7 @@ const FactoryPnl = {
 
     const fgActive = fgItems.filter(r => r && r[0] && r[7] !== '비활성');
     const fgNames = fgActive.map(r => this.normName(r[1] || r[0])).filter(Boolean);
+    const fgCodes = this.fgSaleCodes(fgItems);                      // 완제품품목[19] 마켓봄코드 — 자사몰 행은 이걸로만 잡힌다
     const fgMeta = new Map(fgItems.filter(r => r && r[0]).map(r => [r[0], {
       name: r[1] || r[0],
       packsPerBox: this._num(r[8]) || 1,
@@ -7939,9 +8026,10 @@ const FactoryPnl = {
       else b.noPricePacks += packs;
     }
 
-    // 3) 마켓봄 반죽 실매출 — supply = 공급가(VAT 제외). 우리 완제품 품명과 맞는 행만.
+    // 3) 마켓봄·자사몰 반죽 실매출 — supply = 공급가(VAT 제외). 우리 완제품(마켓봄코드 또는 품명)과 맞는 행만.
+    //    자사몰 supply 는 쿠폰을 품목가 비율로 나눈 값 — 실제로 받은 돈 기준이라 그대로 매출이다.
     for (const r of mbRows) {
-      if (!r || !this.isOurProduct(r.name, fgNames)) continue;
+      if (!r || !this.isPnlChannel(r) || !this.isOurRow(r, fgNames, fgCodes)) continue;
       const ym = this.ym(r.date); if (!ym) continue;
       const b = at(ym), q = this._num(r.qty);
       b.mbRevenue += this._num(r.supply);
@@ -8028,7 +8116,7 @@ const FactoryPnl = {
     }
 
     return Object.values(M).sort((a, b) => a.ym < b.ym ? -1 : 1).map(b => {
-      // 매출 — 마켓봄 실적이 있으면 실적, 없으면 출하 × 단가 추정
+      // 매출 — 마켓봄·자사몰 실적이 있으면 실적, 없으면 출하 × 단가 추정
       if (b.mbRevenue > 0) { b.revenue = b.mbRevenue; b.revenueSrc = 'marketbom'; }
       else { b.revenue = b.estRevenue; b.revenueSrc = b.estRevenue > 0 ? 'estimate' : 'none'; }
 
@@ -8112,12 +8200,18 @@ const FactoryPnl = {
   /** 화면 표시용 — 최근 n개월만(데이터 없는 달은 애초에 버킷이 없다) */
   recent(rows, n) { return n > 0 ? rows.slice(-n) : rows; },
 
-  /** ERP 마켓봄 실매출 — 이 앱의 구글 토큰을 그대로 쓴다. 실패하면 [](추정으로 폴백). */
-  async fetchMarketbom() {
+  /** ERP 반죽 실판매(마켓봄·자사몰·콜로) — 이 앱의 구글 토큰을 그대로 쓴다. 실패하면 [](손익은 추정으로, 계획은 출하로 폴백).
+      ⚠️ 옛 서버(ERP 배포 전)는 only=dough 를 몰라 전체 원장을 준다 — 그때는 그 안의 marketbom 행으로 떨어진다. */
+  async fetchDough() {
     try {
-      const r = await fetch(ERP_LOGI_API, { headers: { Authorization: `Bearer ${State.token}` } });
+      const r = await fetch(erpLogiUrl(), { headers: { Authorization: `Bearer ${State.token}` } });
       if (!r.ok) return { rows: [], err: `ERP ${r.status}` };
       const j = await r.json();
+      if (j.dough) {
+        const src = j.dough.sources || {};
+        return { rows: j.dough.rows || [], delivery: {}, sources: src,
+                 updated: (src['자사몰'] && src['자사몰'].lastDate) || (src['마켓봄'] && src['마켓봄'].lastDate) || '' };
+      }
       return { rows: (j.marketbom && j.marketbom.rows) || [],
                delivery: (j.marketbom && j.marketbom.deliveryByMonth) || {},
                updated: j.marketbom && j.marketbom.updated_at };
@@ -8184,7 +8278,7 @@ Screens['pnl'] = async () => {
       SheetsAPI.getAll('원재료개별').catch(() => []),        // 폐기 손실(폐기일·수량 환산)
       SheetsAPI.getAll('소모품품목').catch(() => []),        // 소모품비 = 구매주문에서 가려낸다
       SheetsAPI.getAll(PNL_SHEET).catch(() => []),          // 없으면 [] — 첫 입력 때 자동 생성
-      FactoryPnl.fetchMarketbom(),                          // ERP 물류 API — 반죽 실매출 + 배송비
+      FactoryPnl.fetchDough(),                              // ERP 물류 API — 반죽 실매출(마켓봄·자사몰 · 콜로는 손익에서 뺀다)
       FactoryPnl.fetchErpClosing(),                         // ERP 재무DB — 인건비(공장)·공장경비·운반비
     ]);
     State._pnl = {
@@ -8242,12 +8336,12 @@ function renderPnlBody() {
   if (st.mbErr) warns.push(`<b>ERP 실매출을 못 읽었습니다</b> (${st.mbErr}) — 매출이 '출하량 × 단가' 추정으로 계산됩니다`);
   if (st.erpErr) warns.push(`<b>ERP 결산을 못 읽었습니다</b> (${st.erpErr}) — 노무비·제조경비는 수기 입력분만 반영됩니다`);
   if (!st.mbErr && st.match && st.match.total > 0 && st.match.matched.length === 0) {
-    warns.push(`ERP 마켓봄 ${st.match.total}품목 중 <b>우리 완제품과 품명이 맞는 게 하나도 없습니다</b> —
-      완제품품목의 품명(<span class="m">${(st.match.fgNames || []).join(', ') || '없음'}</span>)을
+    warns.push(`ERP 반죽 판매(마켓봄·자사몰) ${st.match.total}품목 중 <b>우리 완제품과 맞는 게 하나도 없습니다</b> —
+      완제품품목의 <b>마켓봄코드(T열)</b>를 채우거나 품명(<span class="m">${(st.match.fgNames || []).join(', ') || '없음'}</span>)을
       마켓봄 품명과 <b>똑같이</b> 맞춰야 실매출이 잡힙니다`);
   }
-  if (s.revenueSrc === 'estimate') warns.push(`이 달 매출은 <b>마켓봄 실적이 없어 추정</b>입니다 — 출하량 × 공급단가`);
-  if (s.revenueSrc === 'none') warns.push(`<b>매출 0</b> — 마켓봄 판매도 출하기록도 없는 달입니다`);
+  if (s.revenueSrc === 'estimate') warns.push(`이 달 매출은 <b>마켓봄·자사몰 실적이 없어 추정</b>입니다 — 출하량 × 공급단가`);
+  if (s.revenueSrc === 'none') warns.push(`<b>매출 0</b> — 마켓봄·자사몰 판매도 출하기록도 없는 달입니다`);
   if (s.revenueSrc !== 'marketbom' && s.noPricePacks > 0) warns.push(`출하 ${_pq(s.noPricePacks)}봉이 <b>공급단가 미입력</b> — 그만큼 매출이 빠져 있습니다`);
   if (s.noCostKg > 0) warns.push(`투입 ${_pq(s.noCostKg)}kg 자재가 <b>매입단가 미입력</b> — 재료비가 과소 산정됩니다`);
   if (!(s.labor > 0)) warns.push(`<b>노무비 없음</b> — ERP 결산에도 수기에도 공장 인건비가 없습니다`);
@@ -8390,7 +8484,8 @@ function pnlFootnote() {
     <div class="card mt-12" style="background:var(--bg)">
       <div class="fs-12 fw-7 mb-6">📌 이 숫자는 어디서 왔나</div>
       <div class="fs-11 c-txt-l" style="line-height:1.65">
-        · <b>매출</b> ① <span style="color:var(--suc)">ERP 실매출</span> = 마켓봄 반죽 판매 <b>공급가</b> 실적(ERP 물류 원장).
+        · <b>매출</b> ① <span style="color:var(--suc)">ERP 실매출</span> = 마켓봄·자사몰 반죽 판매 <b>공급가</b> 실적(ERP 물류 원장).
+          콜로(신제주 1곳)는 물류수수료 구조가 달라 아직 넣지 않습니다.
           ② 실적이 없는 달만 <span style="color:var(--warn)">추정</span> = 출하기록 × 완제품 공급단가.<br>
         · <b>원재료비 / 부재료·포장재비</b> = 공정기록 실투입량(kg) × 매입단가. 둘의 구분은 <b>원재료품목의 분류(category)</b>입니다.
           투입기록이 없는 달은 <span style="color:var(--warn)">매입 기준</span>(구매주문)으로 대신합니다.<br>
@@ -8411,9 +8506,9 @@ function pnlFootnote() {
           마켓봄 판매가 23,750원/봉(VAT 포함)이 곧 공급가 ${PNL_DEFAULT_PRICE.toLocaleString()}원/봉입니다.<br>
         · <b>물량 단위</b>는 전부 봉(1봉 ${PNL_KG_PER_PACK}kg)으로 환산합니다.<br>
         · 감가상각은 <b>넣지 않습니다</b>(사용자 확정). 판관비·이자도 제외 — 여기 이익은 <b>제조이익</b>이지 순이익이 아닙니다.<br>
-        · 대상 품목 = <b>완제품품목에 등록된 활성 품목과 품명이 정확히 같은</b> 마켓봄 판매행.
+        · 대상 품목 = 완제품품목(활성)의 <b>마켓봄코드(T열)가 같거나 품명이 정확히 같은</b> 마켓봄·자사몰 반죽 판매행.
           앞글자만 맞으면 안 잡습니다 — 그렇게 하면 앙호두 앞치마·모자·쿠폰까지 공장 매출이 됩니다.
-          ${m ? `현재 마켓봄 ${m.total}품목 중 <b>${[...new Set(m.matched)].length}품목</b>을 셉니다:
+          ${m ? `현재 반죽 판매 ${m.total}품목 중 <b>${[...new Set(m.matched)].length}품목</b>을 셉니다:
             <b>${[...new Set(m.matched)].join(' · ') || '없음'}</b>` : ''}
       </div>
     </div>`;
@@ -8428,7 +8523,7 @@ function openPnlPriceEditor() {
     <div class="dialog" style="max-width:380px">
       <div class="fs-16 fw-7 mb-4">💵 완제품 공급단가</div>
       <div class="fs-11 c-txt-l mb-8">1봉(${PNL_KG_PER_PACK}kg)당 <b>공급가 · VAT 제외</b>.
-        마켓봄 실매출이 있는 달은 실적을 쓰고, <b>없는 달만</b> 이 단가로 추정합니다.<br>
+        마켓봄·자사몰 실매출이 있는 달은 실적을 쓰고, <b>없는 달만</b> 이 단가로 추정합니다.<br>
         <span style="color:var(--info)">기본값 ${PNL_DEFAULT_PRICE.toLocaleString()}원 = 마켓봄 판매가 23,750원(VAT 포함) ÷ 1.1</span></div>
       <div style="max-height:46vh;overflow-y:auto">
       ${items.length ? items.map((it, i) => {

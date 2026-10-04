@@ -124,6 +124,13 @@ async function opened(sheets, tabs = ['A', 'B'], screen = 'dashboard') {
 }
 const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
 
+// 끝까지 돌았는지 지킨다 — 어느 await 가 영영 끝나지 않으면 Node 는 오류 없이 종료코드 0 으로 빠져나가
+// 시험이 «멈춘 채 초록» 이 된다(변이 `_stuckMs: 0` 에서 ⑬ 이 조용히 끊긴 채 통과로 보였다). 마지막 줄까지 못 가면 실패로 바꾼다
+let finished = false;
+process.on('exit', code => {
+  if (code === 0 && !finished) { console.error('✗ live-sync-silent: 끝까지 돌지 못했다 — 끝나지 않는 await 가 있다'); process.exitCode = 1; }
+});
+
 (async () => {
   // ═══ ① 캐시 번호 · invalidateCache 수리 ═══
   {
@@ -923,7 +930,7 @@ const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
       const el = { innerHTML: '<carried/>' };
       const ctx = vm.createContext({
         console: { log() {}, warn() {}, error() {} }, State: {}, $id: id => (id === 'home-prod-plan' ? el : null),
-        SheetsAPI: { getAll: async () => [] }, FactoryPnl: { fetchMarketbom: async () => ({ rows: [] }) },
+        SheetsAPI: { getAll: async () => [] }, FactoryPnl: { fetchDough: async () => ({ rows: [] }) },
       });
       vm.runInContext(PRODPLAN_SRC, ctx);
       await vm.runInContext('loadHomeProdPlan()', ctx);
@@ -932,7 +939,7 @@ const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
     console.log('✔ ⑪ 늦게 채워지는 칸 — 이어받기 · 늦은 토스트 조용히 · 낡은 칸 비우기');
   }
 
-  // ═══ ⑫ 리뷰어 지적 4건 — 읽기 실패 접기 · 오류 토스트 · 🔄 막히지 않음 · JS 가 바꾼 입력값 ═══
+  // ═══ ⑫ 리뷰어 지적 3건 — 읽기 실패 접기 · 🔄 막히지 않음 · JS 가 바꾼 입력값 (오류형 토스트 통과는 실단말기에서 회귀가 잡혀 되돌림) ═══
   {
     // 조용히 다시 그릴 때는 오류형 토스트도 삼킨다 — 홈의 «시험성적서 만료 3건» 같은 상시 알림이 오류형이라 종류로는 가를 수 없다
     // (사용자 동작의 토스트는 손댄 순간 조용함이 풀려 그대로 보인다: ⑧)
@@ -1004,6 +1011,164 @@ const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
     console.log('✔ ⑫ 읽기 실패 접기 · 오류형 상시 알림도 조용히 · 🔄 막히지 않음 · JS 가 바꾼 입력값');
   }
 
+  // ═══ ⑬ 적대적 리뷰어 2차 지적 — 매달린 동기화 놓기 · 표는 자기가 올린 것만 내리기 · 처음 손댄 순간의 값 기준 · 실패하면 표지 되돌리기 ═══
+  {
+    const STUCK = 61000;
+    // ① 읽기가 끝나지 않고 매달리면 «동기화 중» 이 영영 안 풀린다 — 60초 넘으면 낡은 것으로 놓고 다시 시작한다
+    const a = await opened(SHEETS());
+    a.sheets.B = [['3', 'z']];
+    let open1; a.gate = new Promise(r => { open1 = r; });
+    a.LiveSync._lastSyncTs = 0;
+    const hung = a.LiveSync.sync('poll');             // 망이 끊겨 첫 읽기가 돌아오지 않는다
+    await settle();
+    assert.strictEqual(a.LiveSync._isSyncing, true, '자동 갱신이 매달려 있다');
+    a.LiveSync._lastSyncTs = 0;
+    a.fetched.length = 0;
+    a.LiveSync._syncSince = Date.now() - 30000;       // 30초째 — 느린 망일 수 있다(한도 안)
+    await a.LiveSync.sync('poll');
+    assert.strictEqual(a.fetched.length, 0, '60초 안에는 겹쳐 돌지 않는다');
+    a.LiveSync._syncSince = Date.now() - STUCK;       // 60초 넘게 끝나지 않았다
+    a.LiveSync._lastSyncTs = 0;
+    a.gate = null;                                    // 이번 읽기는 정상으로 돌아온다
+    await a.LiveSync.sync('poll');
+    assert.ok(a.fetched.length > 0, '매달린 것을 놓고 새로 읽는다 — 자동 갱신이 영영 죽지 않는다');
+    assert.strictEqual(a.renders.length, 1, '새로 읽은 값으로 조용히 그린다');
+    assert.strictEqual(a.LiveSync._isSyncing, false, '새 실행이 끝나면 표가 풀린다');
+    // 매달렸던 낡은 실행이 늦게 끝나도 지금 실행의 표를 못 내린다
+    a.sheets.B = [['4', 'w']];
+    let open2; a.gate = new Promise(r => { open2 = r; });
+    a.LiveSync._lastSyncTs = 0;
+    const third = a.LiveSync.sync('poll');            // 세 번째 실행이 읽기를 기다리는 중
+    await settle();
+    assert.strictEqual(a.LiveSync._isSyncing, true);
+    open1(); await hung; await settle();              // 낡은 첫 실행이 이제 끝난다
+    assert.strictEqual(a.LiveSync._isSyncing, true, '낡은 실행의 finally 는 세 번째 실행의 표를 내리지 못한다(세대)');
+    open2(); await third; await settle();
+    assert.strictEqual(a.LiveSync._isSyncing, false);
+    // 🔄 도 매달리면 같다
+    const b = await opened(SHEETS());
+    b.LiveSync._manualRunning = true; b.LiveSync._manualSince = Date.now() - STUCK;
+    await b.LiveSync.sync('manual');
+    assert.ok(b.renders.length === 1, '매달린 🔄 표를 놓고 다시 돈다');
+
+    // ② 🔄 가 자동 갱신보다 먼저 끝나도 자동의 «도는 중» 표를 내리지 않는다 · 자동은 🔄 가 도는 중에도 쉰다
+    const c = await opened(SHEETS());
+    c.sheets.B = [['3', 'z']];
+    let gA; c.gate = new Promise(r => { gA = r; });
+    c.LiveSync._lastSyncTs = 0;
+    const autoP = c.LiveSync.sync('poll');            // 자동이 읽기를 기다린다
+    await settle();
+    c.gate = null;
+    await c.LiveSync.sync('manual');                  // 🔄 는 막히지 않고 먼저 끝난다
+    assert.strictEqual(c.LiveSync._manualRunning, false);
+    assert.strictEqual(c.LiveSync._isSyncing, true, '🔄 가 먼저 끝나도 아직 도는 자동 갱신의 표는 그대로 — 자동이 겹쳐 돌지 않는다');
+    c.fetched.length = 0; c.LiveSync._lastSyncTs = 0;
+    await c.LiveSync.sync('poll');
+    assert.strictEqual(c.fetched.length, 0, '자동 갱신이 아직 도는 중이니 또 시작하지 않는다');
+    gA(); await autoP; await settle();
+    assert.strictEqual(c.LiveSync._isSyncing, false, '자동이 끝나면 풀린다');
+    // 반대 — 자동이 먼저 끝나고 🔄 가 아직 도는 중이면 자동은 쉰다
+    const d = await opened(SHEETS());
+    d.sheets.B = [['3', 'z']];
+    let gP; d.gate = new Promise(r => { gP = r; });
+    d.LiveSync._lastSyncTs = 0;
+    const pollP = d.LiveSync.sync('poll'); await settle();
+    let gM; d.gate = new Promise(r => { gM = r; });
+    const manP = d.LiveSync.sync('manual'); await settle();
+    gP(); await pollP; await settle();                // 자동이 먼저 끝난다
+    assert.strictEqual(d.LiveSync._isSyncing, false);
+    assert.strictEqual(d.LiveSync._manualRunning, true, '🔄 는 아직 도는 중');
+    d.fetched.length = 0; d.LiveSync._lastSyncTs = 0;
+    await d.LiveSync.sync('poll');
+    assert.strictEqual(d.fetched.length, 0, '🔄 가 도는 중에는 자동이 겹쳐 돌지 않는다');
+    gM(); await manP; await settle();
+    assert.strictEqual(d.LiveSync._manualRunning, false);
+
+    // 🔄 연타는 자동 갱신이 없어도 막는다(두 번째는 건너뛴다)
+    const q = await opened(SHEETS());
+    let gq; q.gate = new Promise(r => { gq = r; });
+    const m1 = q.LiveSync.sync('manual'); await settle();
+    const n0 = q.fetched.length;
+    await q.LiveSync.sync('manual');
+    assert.strictEqual(q.fetched.length, n0, '🔄 가 도는 중에 또 누르면(연타) 건너뛴다');
+    gq(); await m1;
+
+    // 자동이 오래 매달려 있어도, 방금 시작한 🔄 는 낡은 것이 아니다 — 🔄 의 시각은 자동의 시각과 따로 잰다(연타는 건너뛴다)
+    const z = await opened(SHEETS());
+    z.sheets.B = [['3', 'z']];
+    let gz; z.gate = new Promise(r => { gz = r; });
+    z.LiveSync._lastSyncTs = 0;
+    const zAuto = z.LiveSync.sync('poll'); await settle();
+    z.LiveSync._syncSince = Date.now() - STUCK;       // 자동은 60초 넘게 매달렸다
+    const zMan = z.LiveSync.sync('manual'); await settle(); // 🔄 는 막히지 않고 시작한다 — 시작 시각은 방금
+    const nz = z.fetched.length;
+    await z.LiveSync.sync('manual');
+    assert.strictEqual(z.fetched.length, nz, '방금 시작한 🔄 는 낡은 것이 아니다 — 연타는 건너뛴다');
+    gz(); await Promise.all([zAuto, zMan]); await settle();
+
+    // 폴링은 «도는 중» 이어도 sync 에 맡긴다 — 매달림 감시가 거기 있어 폴링 쪽에서 먼저 막으면 영영 못 푼다
+    const p = await opened(SHEETS());
+    p.LiveSync.startPoll();
+    p.LiveSync._isSyncing = true; p.LiveSync._syncSince = Date.now() - STUCK;
+    p.LiveSync._lastSyncTs = 0;
+    p.intervals[p.intervals.length - 1].fn();
+    await settle();
+    assert.ok(p.LiveSync._syncGen >= 1, '폴링이 불렀고 sync 가 매달린 표를 놓았다');
+
+    // ③ 처음 손댄 «순간» 의 값과 비교한다 — 그리는 중 JS 가 채운 기본값은 사용자 변경이 아니다
+    const e = await opened(SHEETS());
+    e.sheets.B = [['3', 'z']];
+    e.LiveSync.init();
+    const range = { type: 'select-one', tagName: 'SELECT', multiple: false, selectedIndex: 2, options: [{ selected: false, defaultSelected: true }, { selected: false, defaultSelected: false }, { selected: true, defaultSelected: false }] };
+    const qty = { type: 'number', tagName: 'INPUT', value: '3', defaultValue: '0', isConnected: true };
+    const cb = { type: 'checkbox', tagName: 'INPUT', checked: false, defaultChecked: false };
+    e.controls.push(range, qty, cb);                  // JS 가 그리는 중 기간 select 를 «이번 달» 로, 수량을 3 으로 채웠다(기본값과 다르다)
+    e.listeners['doc:touchstart'][0]({ type: 'touchstart' }); // 사용자가 화면을 처음 만진다 — 이 순간 값을 찍는다
+    e.LiveSync._lastTouchTs = 0;                      // 손놀림 2초 대기는 따로 시험했다(⑤) — 여기선 입력값 판정만 본다
+    assert.strictEqual(e.LiveSync._busyReason('dashboard'), '', 'JS 가 채운 기본값은 처음 손댈 때 이미 그랬으니 변경이 아니다 — 자동 갱신을 영영 미루지 않는다');
+    await e.sync('poll');
+    assert.strictEqual(e.renders.length, 1, '그래서 값이 바뀌면 조용히 반영된다');
+    e.reset();
+    assert.strictEqual(e.SheetsAPI._userAfterRender, false, '조용히 다시 그렸으니 «손댔다» 표지는 꺼져 있다');
+    e.listeners['doc:touchstart'][0]({ type: 'touchstart' }); // 다시 만진다 — 이 순간 값이 새 기준
+    e.LiveSync._lastTouchTs = 0;
+    qty.value = '4';                                  // 사용자가 + 를 눌렀다
+    assert.ok(/입력한 값 보존/.test(e.LiveSync._busyReason('dashboard')), '처음 손댄 순간보다 바뀌었으면 미룬다');
+    qty.value = '3'; range.selectedIndex = 1;
+    assert.ok(/입력한 값 보존/.test(e.LiveSync._busyReason('dashboard')), 'select 도 처음 손댄 순간과 비교한다');
+    range.selectedIndex = 2;
+    assert.strictEqual(e.LiveSync._busyReason('dashboard'), '', '처음 손댄 순간 값으로 되돌렸으면 미룰 이유가 없다');
+    cb.checked = true;                                // 체크박스를 JS 가 켰다
+    assert.ok(/입력한 값 보존/.test(e.LiveSync._busyReason('dashboard')), '체크박스도 처음 손댄 순간과 비교한다');
+    cb.checked = false;
+    const late = { type: 'text', tagName: 'INPUT', value: 'abc', defaultValue: '' };
+    e.controls.push(late);                            // 만진 뒤에 생긴 칸(찍어 둔 값이 없다)은 «처음 그려진 값» 과 비교한다
+    assert.ok(/입력한 값 보존/.test(e.LiveSync._busyReason('dashboard')), '그 뒤에 생긴 칸은 기본값과 다르면 보존');
+    late.value = '';
+    // 다시 그리면 기준을 새로 잡는다 — 이어서 만지면 그때 값이 새 기준
+    e.State.currentScreen = 'dashboard'; e.Router.render(); await settle();
+    assert.strictEqual(e.SheetsAPI._userAfterRender, false, '다시 그리면 «손댔다» 표지가 꺼진다');
+    qty.value = '9';
+    e.listeners['doc:keydown'][0]({ type: 'keydown' });
+    e.LiveSync._lastTouchTs = 0;
+    assert.strictEqual(e.LiveSync._busyReason('dashboard'), '', '다시 만진 순간의 값이 새 기준이다');
+
+    // ④ 그리기가 실패하면 «손댔다» 표지를 되돌린다 — 옛 화면이 그대로니 JS 가 바꾼 값 보호도 그대로
+    const g = await opened(SHEETS());
+    g.sheets.B = [['3', 'z']];
+    g.SheetsAPI._userAfterRender = true;
+    g.ctx.Screens.dashboard = async () => { throw new Error('그리다 실패'); };
+    await g.sync('poll');
+    assert.strictEqual(g.SheetsAPI._userAfterRender, true, '그리기가 실패해도 손댄 표지가 꺼지지 않는다');
+    const h = await opened(SHEETS());
+    h.sheets.B = [['3', 'z']];
+    h.SheetsAPI._userAfterRender = false;
+    h.ctx.Screens.dashboard = async () => { throw new Error('그리다 실패'); };
+    await h.sync('poll');
+    assert.strictEqual(h.SheetsAPI._userAfterRender, false, '손대지 않았으면 그대로 꺼져 있다(실패가 표지를 켜지 않는다)');
+    console.log('✔ ⑬ 매달린 동기화 놓기 · 표는 자기 것만 · 처음 손댄 순간 기준 · 실패하면 표지 되돌리기');
+  }
+
   // ═══ 소스 형태(주석 제거 사본 · 호출 형태) ═══
   {
     const live = strip(LIVE_SRC);
@@ -1023,7 +1188,7 @@ const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
     assert.ok(/SheetsAPI\._track = State\._screenKeys\[s\] = new Map\(\)/.test(strip(ROUTER_SRC)), 'Router.render 가 화면마다 읽은 목록을 새로 건다');
     assert.ok(!/startsWith\(tab\)/.test(strip(SHEETS_SRC)), '옛 invalidateCache(startsWith(tab)) 가 없다');
     assert.ok(!/State\._silent\s*=/.test(strip(SHEETS_SRC)), '네트워크 계층(_fetch)은 조용함을 건드리지 않는다 — 풀 수 있는 건 사용자 손놀림뿐');
-    assert.ok(/const mark = e => \{[^}]*e\.type !== 'scroll'\) \{ State\._silent = false; SheetsAPI\._userAfterRender = true; \}/.test(live), '터치·키·휠 손놀림이 조용함을 풀고 «그린 뒤 손댐» 표지를 켠다(스크롤 제외)');
+    assert.ok(/const mark = e => \{[^}]*e\.type !== 'scroll'\) \{ State\._silent = false; if \(!SheetsAPI\._userAfterRender\) this\._snapDom\(\); SheetsAPI\._userAfterRender = true; \}/.test(live), '터치·키·휠 손놀림이 조용함을 풀고, 처음 손대는 순간의 입력값을 찍고(_snapDom), «그린 뒤 손댐» 표지를 켠다(스크롤 제외)');
     assert.ok(/if \(this\._userAfterRender && this\._track\.has\(key\)\) return;/.test(strip(SHEETS_SRC)), '그린 뒤 새로 읽은 값은 이미 적힌 키를 가리지 않는다');
     assert.strictEqual((strip(ROUTER_SRC).match(/SheetsAPI\._userAfterRender = false;/g) || []).length, 1, 'Router.render 가 표지를 끈다');
     assert.strictEqual((between('async _renderScreen(', '_carryFor() {').match(/SheetsAPI\._userAfterRender = false;/g) || []).length, 1, '_renderScreen 이 표지를 끈다');
@@ -1044,11 +1209,19 @@ const SHEETS = () => ({ A: [['1', 'x']], B: [['2', 'y']] });
     const uiSrc = strip(UI_SRC), toastSrc = uiSrc.slice(uiSrc.indexOf("function toast"));
     assert.ok(/if \(State\._silent\) return;/.test(toastSrc) && !/type !== 'err'/.test(toastSrc), '토스트: 조용한 구간은 오류형까지 삼킨다 — 홈의 상시 알림이 오류형이다');
     assert.ok(/if \(!manual && !retried && now - this\._lastSyncTs < this\._minSyncGap\)/.test(live), '최소 간격은 자동 갱신에만 — 🔄 는 안 막는다');
-    assert.ok(/if \(manual \? this\._manualRunning : this\._isSyncing\)/.test(live) && /if \(manual\) this\._manualRunning = true;/.test(live) && /if \(manual\) this\._manualRunning = false;/.test(live), '수동은 연타만 막고 자동 갱신 중에도 시작한다');
+    assert.ok(/const busy = manual \? this\._manualRunning : \(this\._isSyncing \|\| this\._manualRunning\);/.test(live) && /if \(manual\) \{ this\._manualRunning = true; this\._manualSince = now; \}/.test(live) && /if \(manual\) this\._manualRunning = false;/.test(live), '수동은 연타만 막고 자동 갱신 중에도 시작한다 · 자동은 🔄 가 도는 중에 쉰다');
     assert.ok(/return p\.catch\(\(\) => \{ failed\+\+; \}\);/.test(silent) && /if \(failed\) \{[\s\S]*?return; \}/.test(silent), '미리 읽기가 하나라도 실패하면 이번 갱신을 접는다');
     assert.ok(/if \(this\._domDirty\(\)\) return /.test(live) && /_domDirty\(\) \{\s*if \(!SheetsAPI\._userAfterRender\) return false;/.test(live) && /querySelectorAll\('input,select,textarea'\)/.test(live), 'JS 가 바꾼 입력칸 보존 — 만지기 전엔 보지 않는다');
+    // ⑬ 8차
+    assert.ok(/_stuckMs: 60000,/.test(live) && /this\._syncGen\+\+; this\._isSyncing = false; this\._manualRunning = false; State\._silent = false;/.test(live), '매달린 동기화는 60초 넘으면 놓는다(세대를 올린다)');
+    assert.ok(/if \(gen === this\._syncGen\) \{[^}]*if \(manual\) this\._manualRunning = false;[^}]*if \(owns\) this\._isSyncing = false;/.test(live), '표는 같은 세대·자기가 올린 것만 내린다');
+    assert.ok(/const owns = !this\._isSyncing;/.test(live) && /if \(owns\) \{ this\._isSyncing = true; this\._syncSince = now; \}/.test(live), '자동의 표가 이미 있으면 🔄 는 그 표를 건드리지 않는다');
+    assert.ok(/setInterval\(\(\) => \{\s*if \(document\.visibilityState === 'visible'\) this\.sync\('poll'\);/.test(live) && !/visible' && !this\._isSyncing/.test(live), '폴링은 도는 중이어도 sync 에 맡긴다(매달림 감시가 거기 있다)');
+    assert.ok(/_snapDom\(\) \{[\s\S]*?this\._domBase = m;/.test(live) && /base && base\.has\(el\) \? this\._controlValue\(el\) !== base\.get\(el\) : this\._differsFromDefault\(el\)/.test(live), '입력 보존은 처음 손댄 순간 값과 비교하고, 그 뒤에 생긴 칸만 기본값과 비교한다');
+    assert.ok(/const userBefore = SheetsAPI\._userAfterRender;/.test(live) && /if \(userBefore\) SheetsAPI\._userAfterRender = true;/.test(live), '그리기가 실패하면 손댄 표지를 이전 값으로 되돌린다');
     console.log('✔ 소스 형태');
   }
 
+  finished = true;
   console.log('\nlive-sync-silent: 전부 통과');
 })().catch(e => { console.error(e); process.exit(1); });
