@@ -2238,21 +2238,24 @@ Screens.dashboard = async () => {
   let certAlerts = [], openDevCount = 0;
 
   try {
-    const [woData, rmItems, rmLots, eqData, certData, devData] = await Promise.all([
+    const [woData, rmItems, rmLots, eqData, certData, devData, fgMaster] = await Promise.all([
       SheetsAPI.getAll('작업지시서').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
       SheetsAPI.getAll('원재료LOT').catch(() => []),
       SheetsAPI.getAll('기기관리').catch(() => []),
       SheetsAPI.getAll('시험성적서').catch(() => []),   // 시트 없으면 [] — 화면은 그대로 동작
       SheetsAPI.getAll('기준편차').catch(() => []),
+      SheetsAPI.getAll('완제품품목').catch(() => []),   // 품목제조보고번호 — 마스터에서만 읽는다
     ]);
+    const fgNo = FgReportNo.map(fgMaster);
 
     // 시험성적서 만료·임박 (검교정 알림과 동일 정책)
     certData.forEach(c => {
       if ((c[12] || '유효') === '폐기') return;
       const st = HaccpStd.certStatus(c[7]);
       if (st.badge === 'err' || st.badge === 'warn') {
-        certAlerts.push({ name: c[3] || c[2] || '-', code: c[2] || '', lab: c[4] || '', until: c[7] || '-', ...st });
+        certAlerts.push({ name: c[3] || c[2] || '-', code: c[2] || '', lab: c[4] || '', certNo: c[5] || '', until: c[7] || '-',
+                          rnHtml: FgReportNo.html(fgNo, c[2]), rnText: FgReportNo.of(fgNo, c[2]) || '', ...st });
       }
     });
     certAlerts.sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999));
@@ -2360,7 +2363,7 @@ Screens.dashboard = async () => {
     // 🔕 CertNotif.off() = 이 기기에서 껐다(FR-20260813-3ZC). 토스트만 멈추고 현황 카드는 남는다.
     if (certAlerts.length > 0 && !CertNotif.off()) {
       const expired = certAlerts.filter(a => a.badge === 'err');
-      if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${expired.map(a=>a.name).join(', ')}`, 'err', 6000);
+      if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${[...new Set(expired.map(a => a.name + (a.rnText ? ` (${a.rnText})` : '')))].join(', ')}`, 'err', 6000);
       const soon = certAlerts.filter(a => a.badge !== 'err');
       if (soon.length > 0) toast(`🧪 시험성적서 갱신 임박 ${soon.length}건: ${soon.map(a=>a.name).join(', ')}`, 'warn', 5000);
     }
@@ -2523,7 +2526,9 @@ Screens.dashboard = async () => {
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6" style="color:${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">${a.name}</div>
-                <div class="fs-12 c-txt-l">${a.code} ${a.lab} · 유효기한: ${a.until}</div>
+                <!-- .card 안의 fs-12+c-txt-l 은 CSS 가 한 줄로 잘라 12자리 번호 끝이 «…» 로 사라진다 — 줄바꿈을 허용해 번호가 끝까지 보이게 -->
+                <div class="fs-12 c-txt-l" style="white-space:normal">${a.code}${a.rnHtml ? ' · ' + a.rnHtml : ''}</div>
+                <div class="fs-12 c-txt-l" style="white-space:normal">${HS_ESC(a.lab)} ${HS_ESC(a.certNo)} · 유효기한: ${HS_ESC(a.until)}</div>
               </div>
               <span class="badge badge-${a.badge}">${a.label}</span>
             </div>
@@ -7499,6 +7504,40 @@ const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근�
 const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18, mbCodes: 19 };
 const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
                          '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가','마켓봄코드'];
+/** 품목제조보고번호 — 정본은 «완제품품목» 마스터 한 곳(FG_EXT.reportNo).
+    성적서·알림·점검 항목에는 번호를 복사해 두지 않고 제품코드로 마스터를 찾아 보여 준다 →
+    마스터를 고치면 LiveSync(30초) 한 번에 모든 화면이 같이 바뀐다(번호가 두 곳에 있으면 한쪽이 낡는다). */
+const FgReportNo = {
+  LABEL: '품목제조보고번호',
+  /** 완제품품목 행들 → Map(제품코드 → 번호). 번호가 빈 품목은 넣지 않는다. */
+  map(fgRows) {
+    const m = new Map();
+    (fgRows || []).forEach(r => {
+      const no = r && String(r[FG_EXT.reportNo] ?? '').trim();
+      if (no) m.set(String(r[0]), no);
+    });
+    return m;
+  },
+  /** 완제품 코드(FG###)인데 마스터에 번호가 없으면 null(«미등록») — 원·부재료 코드는 해당 없음('' 반환) */
+  of(map, code) {
+    const c = String(code || '');
+    if (map.has(c)) return map.get(c);
+    return /^FG\d+$/.test(c) ? null : '';
+  },
+  /** 화면용 조각(HTML) — 번호 있음: «품목제조보고번호 <b>번호</b>» · 미등록: 경고색 · 해당 없음: '' */
+  html(map, code) {
+    const no = this.of(map, code);
+    if (no === '') return '';
+    return no === null
+      ? `<span class="c-warn">${this.LABEL} 미등록</span>`
+      : `${this.LABEL} <b>${HS_ESC(no)}</b>`;
+  },
+  /** 글줄용(토스트·점검 항목 설명) — 해당 없으면 '' */
+  text(map, code) {
+    const no = this.of(map, code);
+    return no === '' ? '' : `${this.LABEL} ${no === null ? '미등록' : no}`;
+  },
+};
 /** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
 const CERT_WARN_DAYS = 30;
 
@@ -9618,6 +9657,7 @@ Screens['items-fg'] = async () => {
 
   const isAdmin = State.user?.role === 'admin';
   window._fgItemsCache = items;
+  const fgNoMap = FgReportNo.map(items);
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -9652,6 +9692,7 @@ Screens['items-fg'] = async () => {
                   ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
                 </div>
               </div>
+              <div class="fs-12 c-txt-l">🔖 ${FgReportNo.html(fgNoMap, code)}${isAdmin && !fgNoMap.has(String(code)) ? ' <span style="color:var(--pri)">· ✏️에서 입력</span>' : ''}</div>
               <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
               <div class="fs-12 c-txt-l">소비기한: 생산일+6개월 · 보관: ${storage || '-'}</div>
@@ -10482,6 +10523,8 @@ const HaccpStd = {
 
   /** 자동 준수 점검 — 지금 데이터로 판정 가능한 것만. 각 항목은 편차로 등록할 수 있다. */
   compliance({ std, certs, fgItems, rmItems, devs }) {
+    const fgNo = FgReportNo.map(fgItems);
+    const rnPart = code => { const t = FgReportNo.text(fgNo, code); return t ? ` · ${t}` : ''; };
     const out = [];
     const today = formatDate();
     const add = (sev, kind, title, detail, basis) => out.push({ sev, kind, title, detail, basis });
@@ -10510,8 +10553,8 @@ const HaccpStd = {
     certs.forEach(c => {
       if ((c[12] || '유효') === '폐기') return;
       const st = this.certStatus(c[7]);
-      if (st.badge === 'err') add('err', '성적서만료', `${c[3] || c[2]} 성적서 만료`, `유효기한 ${c[7]} (${st.label}) · ${c[4] || ''} ${c[5] || ''}`, '원·부재료 입고검사 기준');
-      else if (st.badge === 'warn') add('warn', '성적서만료', `${c[3] || c[2]} 성적서 ${st.label}`, `유효기한 ${c[7] || '미기재'} · ${c[4] || ''}`, '원·부재료 입고검사 기준');
+      if (st.badge === 'err') add('err', '성적서만료', `${c[3] || c[2]} 성적서 만료`, `유효기한 ${c[7]} (${st.label}) · ${c[4] || ''} ${c[5] || ''}${rnPart(c[2])}`, '원·부재료 입고검사 기준');
+      else if (st.badge === 'warn') add('warn', '성적서만료', `${c[3] || c[2]} 성적서 ${st.label}`, `유효기한 ${c[7] || '미기재'} · ${c[4] || ''}${rnPart(c[2])}`, '원·부재료 입고검사 기준');
     });
     const validCodes = new Set(certs.filter(c => (c[12] || '유효') !== '폐기' && this.certStatus(c[7]).badge !== 'err').map(c => c[2]));
     rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성').forEach(i => {
@@ -10526,7 +10569,7 @@ const HaccpStd = {
       if (!i[FG_EXT.foodType]) miss.push('식품유형');
       if (!i[FG_EXT.packSize]) miss.push('제조포장단위');
       if (!i[5]) miss.push('소비기한');
-      if (miss.length) add('warn', '완제품정보', `${i[1] || i[0]} 규제정보 누락`, `누락: ${miss.join(', ')}`, '품목제조보고서');
+      if (miss.length) add('warn', '완제품정보', `${i[1] || i[0]} 규제정보 누락`, `누락: ${miss.join(', ')}${i[FG_EXT.reportNo] ? rnPart(i[0]) : ''}`, '품목제조보고서');
       if (!i[9] && !i[FG_EXT.labelFile]) add('warn', '라벨', `${i[1] || i[0]} 라벨 미등록`, '라벨 이미지·원본 링크가 모두 없습니다.', '식품 등의 표시기준');
     });
 
@@ -10672,7 +10715,7 @@ function hsStandardTab(std, findings) {
           <div class="row between">
             <div style="flex:1">
               <div class="fs-13 fw-7" style="color:${sevColor(f.sev)}">${HS_ESC(f.title)}</div>
-              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5">${HS_ESC(f.detail)}</div>
+              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5;white-space:normal">${HS_ESC(f.detail)}</div>
               <div class="fs-11 c-txt-l mt-2">근거: ${HS_ESC(f.basis)}</div>
             </div>
             ${f.tracked
@@ -10685,6 +10728,7 @@ function hsStandardTab(std, findings) {
 
 function hsCertTab(certs, rmItems, fgItems) {
   const rows = certs.slice().sort((a, b) => String(a[7] || '').localeCompare(String(b[7] || '')));
+  const fgNo = FgReportNo.map(fgItems);
   const opts = [
     ...rmItems.filter(i => i[12] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '원재료' })),
     ...fgItems.filter(i => i[7] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '완제품' })),
@@ -10726,6 +10770,7 @@ function hsCertTab(certs, rmItems, fgItems) {
             <div class="row between">
               <div style="flex:1">
                 <div class="fs-13 fw-7">${HS_ESC(c[3] || c[2] || '-')} <span class="fs-11 c-txt-l">${HS_ESC(c[1] || '')} ${HS_ESC(c[2] || '')}</span></div>
+                ${FgReportNo.html(fgNo, c[2]) ? `<div class="fs-11 c-txt-l mt-2">${FgReportNo.html(fgNo, c[2])}</div>` : ''}
                 <div class="fs-11 c-txt-l mt-2">${HS_ESC(c[4] || '')} ${HS_ESC(c[5] || '')} · 발행 ${HS_ESC(c[6] || '-')} → 유효 ${HS_ESC(c[7] || '-')}</div>
                 <div class="fs-11 c-txt-l">판정 ${HS_ESC(c[8] || '-')} · 등록 ${HS_ESC((c[11] || '').substring(0, 10))} ${HS_ESC((c[10] || '').split('@')[0])}</div>
                 ${c[9] ? `<a href="${HS_ESC(c[9])}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">성적서 열기 ›</a>` : ''}
