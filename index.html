@@ -2526,8 +2526,9 @@ Screens.dashboard = async () => {
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6" style="color:${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">${a.name}</div>
-                <div class="fs-12 c-txt-l">${a.code}${a.rnHtml ? ' · ' + a.rnHtml : ''}</div>
-                <div class="fs-12 c-txt-l">${HS_ESC(a.lab)} ${HS_ESC(a.certNo)} · 유효기한: ${HS_ESC(a.until)}</div>
+                <!-- .card 안의 fs-12+c-txt-l 은 CSS 가 한 줄로 잘라 12자리 번호 끝이 «…» 로 사라진다 — 줄바꿈을 허용해 번호가 끝까지 보이게 -->
+                <div class="fs-12 c-txt-l" style="white-space:normal">${a.code}${a.rnHtml ? ' · ' + a.rnHtml : ''}</div>
+                <div class="fs-12 c-txt-l" style="white-space:normal">${HS_ESC(a.lab)} ${HS_ESC(a.certNo)} · 유효기한: ${HS_ESC(a.until)}</div>
               </div>
               <span class="badge badge-${a.badge}">${a.label}</span>
             </div>
@@ -10714,7 +10715,7 @@ function hsStandardTab(std, findings) {
           <div class="row between">
             <div style="flex:1">
               <div class="fs-13 fw-7" style="color:${sevColor(f.sev)}">${HS_ESC(f.title)}</div>
-              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5">${HS_ESC(f.detail)}</div>
+              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5;white-space:normal">${HS_ESC(f.detail)}</div>
               <div class="fs-11 c-txt-l mt-2">근거: ${HS_ESC(f.basis)}</div>
             </div>
             ${f.tracked

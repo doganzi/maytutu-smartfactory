@@ -97,6 +97,14 @@ t('점검 항목 — 성적서 만료·임박·규제정보 누락 설명에 번
   assert.ok(CODE.includes('${i[FG_EXT.reportNo] ? rnPart(i[0]) : \'\'}'), '규제정보 누락 설명');
 });
 
+t('잘림 방지 — 홈 알림 카드 두 줄·준수 점검 설명은 줄바꿈을 허용한다', () => {
+  // .card 안의 fs-11/12 + c-txt-l 은 전역 CSS 가 한 줄로 자른다 → 폰(360px)에서 «FG003 · 품목제조보고번호 20260273…» 으로
+  // 번호 끝이 사라졌다(2026-10-05 PM75 실측). 인라인 white-space:normal 로 번호 끝까지 보이게 한다.
+  assert.ok(CODE.includes('<div class="fs-12 c-txt-l" style="white-space:normal">${a.code}${a.rnHtml'), '홈 카드 제품코드·번호 줄이 잘린다');
+  assert.ok(CODE.includes('<div class="fs-12 c-txt-l" style="white-space:normal">${HS_ESC(a.lab)} ${HS_ESC(a.certNo)}'), '홈 카드 기관·성적서번호·유효기한 줄이 잘린다');
+  assert.ok(CODE.includes('style="line-height:1.5;white-space:normal">${HS_ESC(f.detail)}'), '준수 점검 설명(끝에 번호)이 잘린다');
+});
+
 t('성적서 탭 — 등록된 성적서 카드에 번호 줄', () => {
   // 홈 알림에도 같은 호출이 있으니 hsCertTab 함수 몸통 안에서만 센다
   const i = CODE.indexOf('function hsCertTab(');
