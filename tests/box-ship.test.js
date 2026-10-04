@@ -391,6 +391,26 @@ t('확인창 — 단추 이름을 받는다(기본 취소·저장)', () => {
   assert.ok(f.includes('data-a="no">${HS_ESC(L.no)}</button>') && f.includes('data-a="yes">${HS_ESC(L.yes)}</button>'), '단추가 받은 이름을 안 쓴다');
 });
 
+/* ── ⑨ 알림 상자 — 오류 안내가 안 읽히면 소리만 남는다 (2026-10-05 목업 촬영에서 발견: warn 에만 배경 규칙이 없었다) ───────── */
+const noComment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+t('알림 상자 — 박스 출하가 내는 알림 종류마다 배경 규칙이 있다(warn 은 규칙이 없어 흰 글씨가 머리글에 묻혔었다)', () => {
+  const a = CODE.indexOf("Screens['box-ship'] = async");
+  const b = CODE.indexOf('\n}\n', CODE.indexOf('async function boxShipSave('));
+  assert.ok(a !== -1 && b > a, '박스 출하 화면 구역을 찾지 못함');
+  const kinds = new Set();
+  CODE.slice(a, b).split('\n').filter((l) => l.includes('toast(')).forEach((l) => { for (const m of l.matchAll(/[,?:]\s*'([a-z]+)'/g)) kinds.add(m[1]); });   // 종류 자리 = 쉼표·삼항 뒤의 작은따옴표 낱말(=== 'dup' 같은 비교는 걸리지 않는다)
+  assert.ok(['warn', 'info', 'err', 'suc'].every((k) => kinds.has(k)), '구역에서 알림 종류를 못 모았다(' + [...kinds] + ') — 이 시험이 아무것도 안 지킨다');
+  kinds.forEach((k) => assert.ok(new RegExp('\\.toast\\.' + k + '\\s*\\{[^}]*background\\s*:').test(CODE), '.toast.' + k + ' 에 배경이 없다 — 흰 글씨만 떠서 머리글에 묻힌다'));
+});
+
+t('안내 글·확인창 — 낱말 중간에서 줄이 꺾이지 않는다(word-break:keep-all)', () => {
+  const g = noComment(fnText('function renderBoxShip() {'));
+  assert.ok(/<div class="fs-15 fw-7 \$\{[^}]*\}" style="[^"]*word-break:keep-all[^"]*">\$\{HS_ESC\(guide\.text\)\}<\/div>/.test(g), '안내 글에 keep-all 이 없다 — «있/으면» 처럼 낱말 중간에서 꺾인다');
+  const c = noComment(fnText('function boxShipConfirm(title, sub, labels) {'));
+  assert.ok(/<div class="dialog" style="[^"]*word-break:keep-all[^"]*">/.test(c), '확인창에 keep-all 이 없다 — «저/장할까요» 처럼 낱말 중간에서 꺾인다');
+});
+
 let asyncDone = false;
 process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험이 끝까지 못 갔다(끝나지 않는 await)'); process.exitCode = 1; } });
 

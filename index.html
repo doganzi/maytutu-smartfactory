@@ -207,6 +207,7 @@ a { text-decoration:none; color:inherit; }
 .toast.suc { background:var(--suc); }
 .toast.err { background:var(--err); }
 .toast.info { background:var(--info); }
+.toast.warn { background:var(--warn); color:#1b1b1b; }   /* 규칙이 없던 종류 — 배경 없는 흰 글씨가 머리글에 묻혀 오류 안내가 안 읽혔다 */
 
 /* Loading overlay */
 #loading { position:fixed; inset:0; background:rgba(255,255,255,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:99; }
@@ -16765,7 +16766,7 @@ const BoxShip = {
   },
   /* 따라 하는 순서 — 택배: ① 겉 라벨(봉마다) → ② 송장 · 직배·픽업: ① 봉 라벨 → ② 저장 단추 */
   STEPS: { parcel: ['겉 라벨 찍기', '송장 찍기'], direct: ['봉 라벨 찍기', '저장'] },
-  /* 지금 해야 할 한 가지 — 화면 맨 위 안내. n = 담은 봉 수 · fresh = 방금 저장하고 다음 상자를 아직 안 시작함 */
+  /* 지금 해야 할 한 가지 — 카메라 바로 아래 안내 카드. n = 담은 봉 수 · fresh = 방금 저장하고 다음 상자를 아직 안 시작함 */
   stepOf(mode, n, fresh) {
     const packs = BOX_SHIP_CFG.BOX_PACKS, min = Math.min(...packs), max = Math.max(...packs);
     if (!mode.waybill) {
@@ -16997,7 +16998,7 @@ function boxShipConfirm(title, sub, labels) {
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
     overlay.innerHTML = `
-      <div class="dialog" style="max-width:360px">
+      <div class="dialog" style="max-width:360px;word-break:keep-all">
         <div class="fs-15 fw-7 mb-8">${HS_ESC(title)}</div>
         ${sub ? `<div class="fs-12 c-txt-l mb-12">${HS_ESC(sub)}</div>` : ''}
         <div class="d-actions">
@@ -17029,7 +17030,7 @@ function renderBoxShip() {
     <div class="card" style="padding:12px;border-left:5px solid ${stripe}">
       <div class="row" style="gap:6px;align-items:center;margin-bottom:4px">${names.map((nm, i) =>
         `<span class="fs-11 ${i + 1 === guide.step ? 'fw-7' : 'c-txt-l'}">${i + 1 === guide.step ? '●' : '○'} ${i + 1}. ${HS_ESC(nm)}</span>`).join('<span class="fs-11 c-txt-l">›</span>')}</div>
-      <div class="fs-15 fw-7 ${guide.tone === 'warn' ? 'c-warn' : ''}">${HS_ESC(guide.text)}</div>
+      <div class="fs-15 fw-7 ${guide.tone === 'warn' ? 'c-warn' : ''}" style="word-break:keep-all">${HS_ESC(guide.text)}</div>
     </div>
     <div class="card mt-8" style="padding:12px">
       <div class="row between" style="align-items:center">
