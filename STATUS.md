@@ -1,7 +1,7 @@
 # 📊 maytutu-smartfactory — STATUS
 
 > **갱신 책임**: PR 머지 시 작업 세션이 갱신
-> **마지막 갱신**: 2026-06-12 KST (#69~#85 CCP 양식화·종이양식 1:1 PDF·동결온도 모니터링·P3 이관도구 반영; 직전 #63~#68)
+> **마지막 갱신**: 2026-10-05 KST (금속검출기 NMD-530 자동 연동 구현 완료·현장 설치 대기; 이전 2026-06-12 #69~#85 CCP 양식화·종이양식 1:1 PDF·동결온도 모니터링·P3 이관도구 반영; 직전 #63~#68)
 
 ---
 
@@ -118,6 +118,13 @@
 - **역할 화면 미리보기** — #69·#72 머지 완료(설정 셀렉터 + 배너, `State.user.role` 오버라이드·realRole 보존). vm 파싱 + node 동작테스트 6/6 통과. 노트북 로그인 라이브 검증만 남음(GitHub Pages 프리뷰 없음).
 - **CCP PDF 픽셀검증** — 금속검출(#84)·동결공정(#85) 실물 1:1 양식 머지됨. PDF 픽셀 레이아웃 육안검증만 미완(로컬 pdf.js CJK 렌더 한계 → 노트북 로그인 필요).
 - **CCP P3 일괄변환 실행** — 도구 #80 머지(`data-audit` 관리자, 비파괴·원본 `_legacy` 보존·dry-run·idempotent). 배포≠실행 → **관리자가 노트북에서 dry-run 스캔 후 변환 1회 실행** 필요.
+
+### 금속검출기(NMD-530) 자동 연동 (2026-10-05)
+- **구현 완료**: 수집기(`bridge/nmd530-bridge.js`)·시트 수신부(`apps-script/nmd530_receiver.gs`)·웹 화면 «금속검출 실시간현황» + CCP-1P 일지 참고 줄. 계약 = [`docs/NMD530_PIPELINE.md`](docs/NMD530_PIPELINE.md).
+- **현장 설치 대기**: DEV-0007 에 수집기 설치(QR·송장 라벨프린터와 공존 확인 포함) — [`docs/DEV0007_NMD530_INSTALL_GUIDE.md`](docs/DEV0007_NMD530_INSTALL_GUIDE.md).
+- **수신부 배포 대기**: Apps Script 웹앱 배포·스크립트 속성 입력(구글 로그인 필요) — [`apps-script/SETUP_NMD530.md`](apps-script/SETUP_NMD530.md).
+- 제조사 문의 4건(시계 약 +16분 53초 빠름(2026-10-04 실측, 수집 PC 시계 기준)·LAN N/A·카운터 리셋·규격서) — [`docs/MFR_INQUIRY_NMD530.md`](docs/MFR_INQUIRY_NMD530.md).
+- 시편(Fe/SUS) 감도 확인은 CCP-1P 수기 일지와 병행(대체 아님).
 
 ### 외부 자격증명 대기
 - **동결온도(CCP-1) 실가동** — #68 Tuya 로거 + #75~#85로 투입실측·종료기록·모니터링 화면·HACCP PDF·출하차단·자동스탬프까지 완성. **사용자 Tuya 콘솔 자격증명(Access ID/Secret·Device ID) 회신 → `discoverStatus()`→`TEMP_CODE/SCALE` 확정 → 가동**만 남음. 런북 = `apps-script/SETUP.md`.
