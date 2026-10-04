@@ -487,10 +487,11 @@ function acquireLock(name) {
 }
 function releaseLock(name) { _actionLocks[name] = false; clearTimeout(_lockTimers[name]); }
 
-function showLoading() { $id('loading').classList.remove('hidden'); }
+function showLoading() { if (State._silent) return; $id('loading').classList.remove('hidden'); } // _silent = LiveSync 가 조용히 다시 그리는 중
 function hideLoading() { $id('loading').classList.add('hidden'); }
 
 function toast(msg, type = 'info', duration = 2500) {
+  if (State._silent) return; // LiveSync 조용한 갱신 중에는 화면 안내를 내지 않는다 — 오류형(홈의 «시험성적서 만료» 같은 상시 알림)도 포함: 종류로는 «지금 일어난 일» 과 «계속되는 상태» 를 못 가른다
   const el = $id('toast');
   el.style.whiteSpace = 'pre-line';
   el.textContent = msg;
@@ -1131,17 +1132,37 @@ const SheetsAPI = {
   // ── 캐시 레이어 (TTL 기반) ──
   _cache: {},
   _cacheTTL: 30000, // 30초 캐시
+  // «이 화면이 읽은 데이터가 그 뒤 바뀌었나» 를 값 비교 없이 알아내는 장치 — LiveSync 가 쓴다.
+  //   _sig[key] = 마지막으로 받은 값의 JSON · _ver[key] = 값이 «달라질 때만» 오르는 번호(캐시를 비워도 유지).
+  //   _track    = 지금 그려진 화면이 읽은 {key → 읽은 시점의 번호} (Router.render 가 화면마다 새로 건다).
+  _sig: {},
+  _ver: {},
+  _track: null,
+  _userAfterRender: false, // 화면을 그린 뒤 사용자가 손댔다 — 그 뒤 버튼·대화상자가 새로 읽은 값은 «화면이 그린 것» 이 아니다(그릴 때마다 꺼진다)
   _getCached(key) {
     const entry = this._cache[key];
     if (entry && Date.now() - entry.ts < this._cacheTTL) return entry.data;
     return null;
   },
   _setCache(key, data) {
+    const sig = JSON.stringify(data);
+    if (this._sig[key] !== sig) { this._sig[key] = sig; this._ver[key] = (this._ver[key] || 0) + 1; }
     this._cache[key] = { data, ts: Date.now() };
   },
+  /** 화면이 key 를 읽었다고 적는다(track=false 인 «보이지 않는 선읽기» 는 적지 않는다) */
+  _noteRead(key, track) {
+    if (track === false || !this._track) return;
+    // 그린 뒤 사용자가 손댔다면 이미 적힌 키의 번호는 올리지 않는다 — 화면은 옛 값 그대로인데 «최신을 읽었다» 로 가려져 영영 갱신되지 않는 것을 막는다(새 키는 적는다)
+    if (this._userAfterRender && this._track.has(key)) return;
+    this._track.set(key, this._ver[key] || 0);
+  },
   invalidateCache(tab) {
-    // 특정 탭 캐시 무효화
-    Object.keys(this._cache).forEach(k => { if (k.startsWith(tab)) delete this._cache[k]; });
+    // 특정 탭 캐시 무효화 — 키는 «getAll:<탭>» · «getRange:<탭>!A1:Z» 꼴이라 탭 이름으로 찾는다
+    //   (예전엔 k.startsWith(tab) 이라 어떤 키와도 안 맞아 쓰기 직후에도 낡은 캐시가 30초 남았다)
+    Object.keys(this._cache).forEach(k => {
+      const name = k.slice(k.indexOf(':') + 1).split('!')[0].replace(/^'|'$/g, '');
+      if (name === tab) delete this._cache[k];
+    });
   },
   invalidateAllCache() {
     this._cache = {};
@@ -1203,10 +1224,11 @@ const SheetsAPI = {
      ⚠️ 날짜가 있는 탭은 절대 넣지 말 것 — UNFORMATTED 는 날짜를 serial 숫자로 돌려준다. */
   _UNFORMATTED_TABS: new Set(['SOP레시피']),
 
-  async getAll(tab, useCache = true) {
+  // track=false: LiveSync 의 보이지 않는 선읽기 — «화면이 읽은 것» 으로 적지 않는다
+  async getAll(tab, useCache = true, track = true) {
     if (useCache) {
       const cached = this._getCached(`getAll:${tab}`);
-      if (cached) return JSON.parse(JSON.stringify(cached)); // deep copy
+      if (cached) { this._noteRead(`getAll:${tab}`, track); return JSON.parse(JSON.stringify(cached)); } // deep copy
     }
     const rawQ = this._UNFORMATTED_TABS.has(tab) ? '?valueRenderOption=UNFORMATTED_VALUE' : '';
     const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(tab)}${rawQ}`);
@@ -1214,20 +1236,22 @@ const SheetsAPI = {
     const data = await res.json();
     const rows = data.values ? data.values.slice(1) : [];
     this._setCache(`getAll:${tab}`, rows);
+    this._noteRead(`getAll:${tab}`, track);
     return rows;
   },
 
   // Get specific range (캐시 적용)
-  async getRange(range, useCache = true) {
+  async getRange(range, useCache = true, track = true) {
     if (useCache) {
       const cached = this._getCached(`getRange:${range}`);
-      if (cached) return JSON.parse(JSON.stringify(cached));
+      if (cached) { this._noteRead(`getRange:${range}`, track); return JSON.parse(JSON.stringify(cached)); }
     }
     const res = await this._fetch(`${this.baseUrl()}/values/${encodeURIComponent(range)}`);
     if (!res.ok) throw new Error(`Sheets GET ${range}: ${res.status}`);
     const data = await res.json();
     const rows = data.values || [];
     this._setCache(`getRange:${range}`, rows);
+    this._noteRead(`getRange:${range}`, track);
     return rows;
   },
 
@@ -1576,6 +1600,11 @@ const Router = {
 
   render(params = {}) {
     const s = State.currentScreen;
+    // 이 화면이 읽는 시트 목록을 새로 적기 시작 — LiveSync 가 «바뀐 게 있나» 비교하는 근거
+    State._screenKeys = State._screenKeys || {};
+    SheetsAPI._track = State._screenKeys[s] = new Map();
+    SheetsAPI._userAfterRender = false;
+    LiveSync._carry = null; // 명시적으로 다시 그리는 것 — 이 화면에서 사용자가 만졌던 상태 기록은 새로 시작
     // Update bottom nav
     const tabMap = {
       dashboard: 'home',
@@ -1632,19 +1661,73 @@ window.addEventListener('popstate', (e) => {
 /* ═══════════════════════════════════════════════
    LIVE SYNC — PC↔모바일 실시간 데이터 동기화
    ═══════════════════════════════════════════════ */
+// <live-sync>
+/* 원칙(2026-10-04 사용자 지시): «화면에 표시없이 새로고침 되는 게 최선 · 작업할 때 방해되는 요소는 없어야 한다».
+   자동 갱신(poll·focus·visibility)은 ① 시트 값이 실제로 바뀐 경우에만 ② 사용자가 손대지 않는 틈에
+   ③ 로딩 막·토스트 없이 ④ 스크롤 위치를 그대로 두고 화면을 다시 그린다. 값이 같으면 화면에는 아무 일도 없다.
+   수동 새로고침(🔄 버튼)만 예전처럼 캐시를 모두 비우고 다시 그린다. */
 const LiveSync = {
   _pollTimer: null,
   _pollInterval: 30000, // 30초 폴링 주기
   _lastSyncTs: 0,
   _minSyncGap: 5000,   // 최소 5초 간격 (중복 방지)
   _isSyncing: false,
+  _manualRunning: false, // 🔄 수동 새로고침이 도는 중(연타 방지) — 자동 갱신과는 따로 센다
+  _syncSince: 0,       // «도는 중» 표를 올린 시각 — 읽기가 끝나지 않고 매달리면(망 끊김) 영영 막히니 _stuckMs 가 넘으면 낡은 것으로 놓는다
+  _manualSince: 0,
+  _stuckMs: 60000,
+  _syncGen: 0,         // 매달려서 놓인 낡은 실행이 늦게 끝나도 지금 실행의 표를 못 내리게 — 놓을 때마다 오른다
+  _domBase: null,      // 사용자가 «처음 손댄 순간» 의 입력칸 값(WeakMap) — _domDirty 의 비교 기준
+  _idleMs: 2000,       // 마지막 손놀림(터치·키·스크롤) 뒤 이만큼 조용해야 화면을 바꾼다
+  _lastTouchTs: 0,
+  _retryTimer: null,   // 보이게 됨·포커스 복귀가 미뤄졌을 때 한 번만 다시 시도하는 타이머
+  // 사용자가 만진 «화면에만 있는» 상태 — {screen, details: Map(키→펼침), touched: Set(만진 입력칸)}
+  //   touched = #content 안에서 만진 입력칸. 아직 화면에 붙어 있고 기본값과 다르면(다시 그리면 값이 사라지므로)
+  //             이 화면의 자동 갱신을 미룬다 — 칸이 사라졌거나 기본값으로 돌아왔으면 미룰 이유가 없다
+  //   details = 사용자가 펼치고 접은 <details> (다시 그린 뒤 그대로 이어 준다)
+  //   Router.render(명시적 다시 그림)·🔄 수동 새로고침이 비운다
+  _carry: null,
+  // 늦게 채워지는 칸(data-late-slot)의 «다시 그리기 전» 내용 — {칸 id: innerHTML}. 조용히 다시 그리는 동안에만 있고 평소엔 null
+  _lateCarry: null,
 
-  /** 앱 시작 시 호출 — visibilitychange + 폴링 등록 */
+  /** 늦게 채워지는 칸 — 화면을 다 그린 뒤 뒤에서 채우는 칸은 이걸로 만든다.
+      조용히 다시 그리는 중이면 옛 내용으로 시작해(빈 칸으로 시작하면 높이가 줄었다 늘어 스크롤이 건너뛴다),
+      평소엔 placeholder 로 시작한다. 채우는 쪽이 끝나면 innerHTML 을 새 값으로 바꾼다. */
+  lateSlot(id, placeholder = '', cls = '') {
+    const carry = this._lateCarry && id in this._lateCarry ? this._lateCarry[id] : placeholder;
+    return `<div id="${id}"${cls ? ` class="${cls}"` : ''} data-late-slot>${carry}</div>`;
+  },
+
+  /** 앱 시작 시 호출 — 손놀림 기록 + visibilitychange + 폴링 등록 */
   init() {
+    // 손놀림 기록 — 작업 중(터치·스크롤·키 입력)에는 화면을 바꾸지 않는 근거
+    //   스크롤만은 «조용함» 을 풀지 않는다 — 조용한 재그림 뒤 스크롤 위치를 되돌릴 때 생기는 scroll 이벤트가 사용자 손놀림으로 오해되면 안 된다.
+    //   터치·키·휠은 푼다 — 조용한 재그림이 돌던 중에도 사용자가 누른 버튼의 로딩 막·토스트는 삼키지 않는다
+    const mark = e => {
+      this._lastTouchTs = Date.now();
+      if (!e || e.type !== 'scroll') { State._silent = false; if (!SheetsAPI._userAfterRender) this._snapDom(); SheetsAPI._userAfterRender = true; }
+    };
+    ['touchstart', 'pointerdown', 'keydown', 'wheel', 'scroll'].forEach(ev =>
+      document.addEventListener(ev, mark, { passive: true, capture: true }));
+
+    // 사용자가 입력칸을 만졌다 — 어느 칸인지 적어 둔다(값이 날아가지 않게 이 화면의 자동 갱신을 미루는 근거)
+    const inContent = t => !!(t && t.closest && t.closest('#content'));
+    ['input', 'change'].forEach(ev => document.addEventListener(ev, e => {
+      if (inContent(e.target)) this._carryFor().touched.add(e.target);
+    }, { passive: true, capture: true }));
+    // 사용자가 «더 보기»(<details>) 를 펼치고 접었다 — 다시 그린 뒤에도 그대로 이어 준다
+    document.addEventListener('click', e => {
+      const sm = e.target && e.target.closest && e.target.closest('summary');
+      const d = sm && sm.parentElement;
+      if (!d || d.tagName !== 'DETAILS' || !inContent(d)) return;
+      setTimeout(() => { this._carryFor().details.set(this._detailsKey(d), !!d.open); }, 0); // 펼침 상태는 기본 동작이 끝난 뒤에 읽는다
+    }, { passive: true, capture: true });
+
     // 탭 활성화 시 자동 동기화
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         console.log('[LiveSync] 탭 활성화 → 자동 동기화');
+        this.startPoll(); // 숨김 때 멈춘 폴링을 되살린다 (예전엔 화면을 옮기기 전까지 영영 다시 안 돌았다)
         this.sync('visibility');
       } else {
         // 비활성 시 폴링 중지 (API 호출 절약)
@@ -1670,9 +1753,7 @@ const LiveSync = {
   startPoll() {
     this.stopPoll(); // 중복 방지
     this._pollTimer = setInterval(() => {
-      if (document.visibilityState === 'visible' && !this._isSyncing) {
-        this.sync('poll');
-      }
+      if (document.visibilityState === 'visible') this.sync('poll'); // «도는 중» 이면 sync 가 알아서 건너뛴다 — 매달림 감시도 거기 있다
     }, this._pollInterval);
   },
 
@@ -1684,108 +1765,269 @@ const LiveSync = {
     }
   },
 
-  /** 동기화 실행 — 캐시 무효화 + 현재 화면 리렌더 */
-  async sync(trigger = 'manual') {
+  /** 지금 화면을 바꾸면 안 되는 순간인가 — 사유(문자열) 또는 '' (바꿔도 됨).
+      수동 새로고침은 이 검사를 받지 않는다(사용자가 직접 눌렀다). */
+  _busyReason(screen) {
+    // 입력 보존 화면: 입력값/결과 유실 방지. 'lot-detail' / 'inventory' 는 LOT 카드 펼침 상태와
+    // 스크롤 위치 보존을 위해 포함(자동 재렌더 시 펼침이 접혀 페이지가 짧아지는 문제).
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm'];
+    if (inputPreservedScreens.includes(screen)) return `${screen}: 입력 보존 화면`;
+    // 출하 선택 모드 — 완제품 LOT 에 출하 선택(체크박스)이 1개라도 있으면 보존
+    if (State._selectedShipIds instanceof Map) {
+      let pendingCount = 0;
+      for (const s of State._selectedShipIds.values()) pendingCount += s.size || 0;
+      if (pendingCount > 0) return `출하 선택 ${pendingCount}건 진행 중`;
+    }
+    // 저장·처리 중(중복 제출 방지 잠금)이거나 로딩 막이 떠 있다 — 사용자가 누른 동작이 아직 안 끝났다
+    if (Object.values(_actionLocks).some(v => v)) return '저장·처리 진행 중';
+    const ld = document.getElementById('loading');
+    if (ld && !ld.classList.contains('hidden')) return '로딩 중';
+    // 이 화면에서 입력칸을 만졌고 그 값이 아직 화면에 남아 있다 — 다시 그리면 입력값이 사라진다
+    if (this._unsavedInput(screen)) return `${screen}: 입력한 값 보존`;
+    if (this._domDirty()) return `${screen}: 입력한 값 보존(버튼·스캔)`;
+    // 모달 다이얼로그 오픈 중 — 모달 사라짐/페이지 튕김 방지
+    if (document.querySelector('.dialog-overlay:not(.hidden)')) return '모달 오픈 중';
+    // 활성 입력 요소(보편적 안전망)
+    const ae = document.activeElement;
+    if (ae && ['INPUT', 'SELECT', 'TEXTAREA'].includes(ae.tagName)) return `${ae.tagName}#${ae.id || ''} 입력 활성`;
+    // 방금 만졌다(스크롤 관성 포함)
+    if (Date.now() - this._lastTouchTs < this._idleMs) return '손놀림 중';
+    return '';
+  },
+
+  /** 동기화 실행. 'manual' = 🔄 버튼(캐시 전부 비우고 다시 그림 + 완료 토스트) · 그 외 = 조용한 자동 갱신 */
+  async sync(trigger = 'manual', retried = false) {
     const now = Date.now();
-    if (now - this._lastSyncTs < this._minSyncGap) {
+    const manual = trigger === 'manual';
+    // 🔄 는 사용자가 직접 눌렀다 — 조용한 자동 갱신이 도는 중이거나 방금 돌았어도 막히지 않는다(눌러도 반응 없음 금지).
+    //   두 번 연타만 막는다(_manualRunning). 자동 갱신이 그 사이 받아 둔 것은 «화면이 읽은 목록» 이 바뀌어 있어 스스로 접는다
+    // 미뤄진 뒤의 «다시 시도» 는 최소 간격에 막히지 않는다 — 받아 본 뒤 반영만 미뤄졌다면 이미 _lastSyncTs 가 찍혀 있어
+    // 2.5초 뒤 재시도가 5초 간격에 걸려 버려진다(타이머가 하나뿐이고 한 번만 시도하니 폭주하지 않는다)
+    if (!manual && !retried && now - this._lastSyncTs < this._minSyncGap) {
       console.log(`[LiveSync] 최소 간격 미충족, skip (${now - this._lastSyncTs}ms)`);
       return;
     }
-    if (this._isSyncing) {
-      console.log('[LiveSync] 이미 동기화 중, skip');
-      return;
-    }
-
-    // 입력 보존 화면: 자동 트리거(poll/focus/visibility) 시 스킵 — 입력값/결과 유실 방지.
-    //   사용자가 새로고침 버튼을 직접 누르는 'manual' 만 허용.
-    // 'lot-detail' / 'inventory' 도 포함 — LOT 카드 펼침 상태 및 스크롤 위치 보존 (자동 재렌더 시
-    // 펼침 상태 손실로 페이지 높이가 짧아져 scrollY 복원이 무효화되는 이슈 방지).
-    const screenForGuard = State.currentScreen;
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm'];
-    if (trigger !== 'manual' && inputPreservedScreens.includes(screenForGuard)) {
-      console.log(`[LiveSync] ${screenForGuard}: 입력 보존 화면 — 자동 ${trigger} 스킵 (수동 새로고침 시에만 갱신)`);
-      return;
-    }
-    // 출하 선택 모드 — 완제품 LOT 에 출하 선택(체크박스) 1개라도 있으면 자동 트리거 스킵.
-    // (재고/Lot-detail 외 다른 화면으로 잠시 옮겨가는 동안에도 폴링 차단 효과)
-    if (trigger !== 'manual' && State._selectedShipIds instanceof Map) {
-      let pendingCount = 0;
-      for (const s of State._selectedShipIds.values()) pendingCount += s.size || 0;
-      if (pendingCount > 0) {
-        console.log(`[LiveSync] 출하 선택 ${pendingCount}건 진행 중 — ${trigger} 스킵`);
+    const busy = manual ? this._manualRunning : (this._isSyncing || this._manualRunning); // 자동은 🔄 가 도는 중에도 쉰다(둘이 같은 #content 를 그리지 않게)
+    if (busy) {
+      // 읽기 하나가 끝나지 않고 매달리면(_fetch 에는 시간 제한이 없다) 영영 «동기화 중» 으로 막힌다 — 넘으면 낡은 실행으로 보고 놓는다
+      const since = manual ? this._manualSince : Math.max(this._isSyncing ? this._syncSince : 0, this._manualRunning ? this._manualSince : 0);
+      if (now - since <= this._stuckMs) {
+        console.log('[LiveSync] 이미 동기화 중, skip');
         return;
       }
+      console.warn(`[LiveSync] 동기화가 ${Math.round(this._stuckMs / 1000)}초 넘게 끝나지 않아 낡은 것으로 보고 놓는다`);
+      this._syncGen++; this._isSyncing = false; this._manualRunning = false; State._silent = false; this._lateCarry = null;
     }
-    // 모달 다이얼로그 오픈 중이면 자동 트리거 시 스킵 — 모달 사라짐/페이지 튕김 방지
-    if (trigger !== 'manual') {
-      const openDialog = document.querySelector('.dialog-overlay:not(.hidden)');
-      if (openDialog) {
-        console.log(`[LiveSync] 모달 오픈 중 — ${trigger} 스킵 (모달 보존)`);
-        return;
-      }
-    }
-    // 활성 입력 요소가 있으면 자동 트리거 시 스킵 (보편적 안전망)
-    if (trigger !== 'manual') {
-      const ae = document.activeElement;
-      if (ae && ['INPUT','SELECT','TEXTAREA'].includes(ae.tagName)) {
-        console.log(`[LiveSync] ${ae.tagName}#${ae.id||''} 입력 활성 — ${trigger} 스킵`);
+    const screen = State.currentScreen;
+    if (!manual) {
+      const why = this._busyReason(screen);
+      if (why) {
+        console.log(`[LiveSync] ${why} — 자동 ${trigger} 보류 (다음 주기에 다시 비교)`);
+        this._retryLater(trigger, retried);
         return;
       }
     }
 
-    this._isSyncing = true;
+    const gen = this._syncGen;
+    const owns = !this._isSyncing; // 자동 갱신이 도는 중에 눌린 🔄 는 자동의 표를 건드리지 않는다(먼저 끝났다고 «도는 중» 을 내리면 자동이 겹쳐 돈다)
+    if (owns) { this._isSyncing = true; this._syncSince = now; }
+    if (manual) { this._manualRunning = true; this._manualSince = now; }
     this._lastSyncTs = now;
-
     try {
-      // 모든 캐시 무효화 → 다음 getAll 호출 시 API에서 최신 데이터 로드
-      SheetsAPI.invalidateAllCache();
-
-      const screen = State.currentScreen;
       console.log(`[LiveSync] 동기화 시작 (trigger=${trigger}, screen=${screen})`);
+      if (manual) await this._manualSync(screen);
+      else await this._silentSync(screen, trigger, retried);
+    } catch (e) {
+      console.error('[LiveSync] 동기화 실패:', e.message);
+      // 동기화 실패해도 시스템 정상 동작 — 다음 주기에 재시도
+    } finally {
+      if (gen === this._syncGen) { // 매달려서 놓인 낡은 실행이 늦게 끝나도 지금 실행의 표를 내리지 않는다
+        if (manual) this._manualRunning = false;
+        if (owns) this._isSyncing = false;
+      }
+    }
+  },
 
-      // 재렌더 직전 — 스크롤 위치 보존 (재렌더 후 같은 위치로 복원)
-      const savedScrollY = window.scrollY;
+  /** 보이게 됨·포커스 복귀가 «곧 풀릴 사유(방금 만짐 등)» 로 미뤄졌다 — 다음 폴링(30초)까지 낡은 화면을 보지 않게 한 번만 다시 시도한다.
+      폴링 자신의 보류는 다음 주기가 있으니 재시도하지 않고, 재시도가 또 미뤄지면 거기서 멈춘다(폴링에 맡긴다). */
+  _retryLater(trigger, retried) {
+    if (retried || trigger === 'poll' || trigger === 'manual' || this._retryTimer) return;
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      if (document.visibilityState === 'visible') this.sync(trigger, true);
+    }, this._idleMs + 500);
+  },
 
-      // 현재 화면 리렌더 — 화면별 최적화
-      if (screen === 'wo-execute' && State.woExec?.woId) {
-        // WO 실행 화면: 작업 중 데이터 보존하면서 records만 갱신
-        // (전체 리로드는 _scannedLots, _pendingPhotos 등 인메모리 데이터 유실 위험)
-        try {
-          const freshRecords = await SheetsAPI.getAll('공정기록', false);
-          State.woExec.records = freshRecords.filter(r => r[0] === State.woExec.woId);
-          console.log(`[LiveSync] wo-execute 경량 동기화: records ${State.woExec.records.length}건 갱신`);
-        } catch (e) {
-          console.warn('[LiveSync] wo-execute records 갱신 실패:', e.message);
-        }
-      } else if (screen === 'wo-detail' && State._woDetailId) {
+  /** 🔄 버튼 — 캐시를 전부 비우고 현재 화면을 다시 그린다(사용자가 눌렀으니 로딩·토스트 허용) */
+  async _manualSync(screen) {
+    this._carry = null; // 사용자가 직접 눌렀다 — 화면을 처음 상태로 다시 그린다
+    SheetsAPI.invalidateAllCache();
+    await this._renderScreen(screen);
+    const timeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    toast(`데이터 동기화 완료 (${timeStr})`, 'suc', 1500);
+  },
+
+  /** 자동 갱신 — 보이지 않게 최신 값을 받아 «화면이 읽은 뒤 바뀐 것이 있을 때만» 조용히 다시 그린다 */
+  async _silentSync(screen, trigger, retried) {
+    // sync() 가 막 올린 세대 — 매달려서 놓인 낡은 실행이 나중에 깨어나도 지금 실행의 «조용함»·늦은 칸 이어받기를 지우거나 겹쳐 그리지 못하게 한다
+    const gen = this._syncGen;
+    // WO 실행 화면: 작업 중 데이터 보존하면서 records 만 갱신(화면은 그대로)
+    if (screen === 'wo-execute') { if (State.woExec?.woId) await this._renderScreen(screen); return; } // 작업 상태가 없으면 전체 재그림(스캔·사진 유실)으로 새지 않는다
+
+    const track = State._screenKeys && State._screenKeys[screen];
+    if (!track || !track.size || !Screens[screen]) return;
+    const keys = [...track.keys()];
+
+    // ① 보이지 않게 최신 값을 받아 둔다 — 오프라인이어도 조용히
+    //    track=false: 이 읽기는 «화면이 읽은 것» 으로 치지 않는다(치면 바뀐 것을 못 알아챈다)
+    let failed = 0;
+    await Promise.all(keys.map(k => {
+      const i = k.indexOf(':'), kind = k.slice(0, i), arg = k.slice(i + 1);
+      const p = kind === 'getRange' ? SheetsAPI.getRange(arg, false, false) : SheetsAPI.getAll(arg, false, false);
+      return p.catch(() => { failed++; });
+    }));
+    if (gen !== this._syncGen) { console.log('[LiveSync] 놓인 낡은 실행 — 접는다'); return; }
+    // 하나라도 못 받았으면 이번엔 접는다 — 그대로 그리면 화면 함수가 그 탭을 다시 받으러 네트워크를 타고,
+    // 기다리는 사이 사용자 손놀림이 끼어들어 입력이 지워질 수 있다. 캐시에 있는 값만 읽는 그리기는 한 호흡에 끝나 끼어들 틈이 없다
+    if (failed) { console.log(`[LiveSync] 읽기 ${failed}건 실패 — 이번 자동 갱신은 접는다`); return; }
+
+    // ② 화면이 읽은 뒤 값이 달라진 탭이 없으면 아무 일도 하지 않는다 — 깜빡임·스크롤 튐·토스트 전부 없음
+    const changed = keys.filter(k => track.get(k) !== (SheetsAPI._ver[k] || 0));
+    if (!changed.length) return;
+
+    // ③ 받는 사이 사용자가 화면을 옮기거나 손댔으면 이번엔 접는다 — 다음 주기가 같은 비교를 다시 한다
+    if (State.currentScreen !== screen || State._screenKeys[screen] !== track) return;
+    const why = this._busyReason(screen);
+    if (why) { console.log(`[LiveSync] 변경 ${changed.length}건 — ${why}, 반영 보류`); this._retryLater(trigger, retried); return; }
+
+    // ④ 조용히 다시 그린다 — 로딩 막·토스트 없음(State._silent) · 스크롤 위치 유지
+    const content = $id('content');
+    const top = content ? content.scrollTop : 0;
+    const winY = window.scrollY;
+    // 늦게 채워지는 칸은 다시 그리면 «빈 칸» 으로 시작해 높이가 줄었다가 나중에 채워진다 — 그 사이 화면이 건너뛴다.
+    // 그리기 «전» 옛 칸 내용을 모아 두면 화면 함수가 lateSlot() 으로 그대로 받아 시작한다(채움이 끝나면 새 값으로 바뀐다)
+    this._lateCarry = {};
+    if (content) content.querySelectorAll('[data-late-slot]').forEach(n => { if (n.id) this._lateCarry[n.id] = n.innerHTML; });
+    State._silent = true;
+    try { await this._renderScreen(screen); } finally { if (gen === this._syncGen) { State._silent = false; this._lateCarry = null; } }
+    this._restoreDetails(screen);
+    const restore = () => {
+      if (State.currentScreen !== screen) return;
+      if (content) content.scrollTop = top;
+      if (winY > 0) window.scrollTo(0, winY);
+    };
+    restore();
+    requestAnimationFrame(() => requestAnimationFrame(restore));
+    console.log(`[LiveSync] 조용히 반영 (trigger=${trigger}, screen=${screen}, 바뀐 탭=${changed.length})`);
+  },
+
+  /** 현재 화면을 다시 그린다 — 화면이 읽는 데이터 목록(_track)도 새로 적는다 */
+  async _renderScreen(screen) {
+    if (screen === 'wo-execute' && State.woExec?.woId) {
+      // 전체 리로드는 _scannedLots, _pendingPhotos 등 인메모리 데이터 유실 위험 → records 만 갱신
+      try {
+        const freshRecords = await SheetsAPI.getAll('공정기록', false, false);
+        State.woExec.records = freshRecords.filter(r => r[0] === State.woExec.woId);
+        console.log(`[LiveSync] wo-execute 경량 동기화: records ${State.woExec.records.length}건 갱신`);
+      } catch (e) {
+        console.warn('[LiveSync] wo-execute records 갱신 실패:', e.message);
+      }
+      return;
+    }
+    State._screenKeys = State._screenKeys || {};
+    const prevTrack = State._screenKeys[screen];
+    SheetsAPI._track = State._screenKeys[screen] = new Map();
+    const userBefore = SheetsAPI._userAfterRender, baseBefore = this._domBase;
+    SheetsAPI._userAfterRender = false;
+    try {
+      if (screen === 'wo-detail' && State._woDetailId) {
         await Screens['wo-detail']({ woId: State._woDetailId });
       } else if (Screens[screen]) {
         // 화면별 params 우선 사용 — sub-screen 진입 컨텍스트 유실 방지
         const screenParams = (State._screenParams && State._screenParams[screen]) || State._lastParams || {};
         await Screens[screen](screenParams);
       }
-
-      // 재렌더 후 스크롤 위치 복원 — rAF 두 번으로 비동기 렌더·DOM 안정화 대기.
-      // 자동 동기화 (poll/focus/visibility) 시에만 적용 — 수동 새로고침은 사용자가 위로 가길 기대할 수 있음.
-      if (trigger !== 'manual' && savedScrollY > 0) {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          window.scrollTo(0, savedScrollY);
-        }));
-      }
-
-      // 동기화 완료 시각 표시 (토스트는 poll 때만 생략)
-      if (trigger !== 'poll') {
-        const timeStr = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-        toast(`데이터 동기화 완료 (${timeStr})`, 'suc', 1500);
-      }
-
-      console.log(`[LiveSync] 동기화 완료 (trigger=${trigger})`);
     } catch (e) {
-      console.error('[LiveSync] 동기화 실패:', e.message);
-      // 동기화 실패해도 시스템 정상 동작 — 다음 주기에 재시도
-    } finally {
-      this._isSyncing = false;
+      // 그리다 실패하면 이전 «읽은 목록» 으로 되돌린다 — 비워 둔 채로 두면 다음 주기가 «읽은 게 없다» 로 보고 영영 재시도하지 않는다
+      State._screenKeys[screen] = prevTrack;
+      if (userBefore) { SheetsAPI._userAfterRender = true; this._domBase = baseBefore; } // 그리기가 실패해 옛 화면이 그대로다 — JS 로 바꾼 값 보호도(손댄 표지 + 처음 손댄 순간의 값) 그대로여야 한다
+      if (State.currentScreen === screen) SheetsAPI._track = prevTrack || null; // 그 사이 다른 화면으로 갔다면 그 화면의 읽기 추적을 건드리지 않는다
+      throw e;
     }
+  },
+
+  /** 지금 화면의 «사용자가 만진 상태» 기록(화면이 바뀌었으면 새로 시작) */
+  _carryFor() {
+    if (!this._carry || this._carry.screen !== State.currentScreen) {
+      this._carry = { screen: State.currentScreen, details: new Map(), touched: new Set() };
+    }
+    return this._carry;
+  },
+
+  /** 이 화면에서 사용자가 만진 입력칸 중 «아직 붙어 있고 기본값과 다른» 것이 있나 — 있으면 다시 그릴 때 그 값이 사라진다 */
+  _unsavedInput(screen) {
+    const c = this._carry;
+    if (!c || c.screen !== screen) return false;
+    for (const el of Array.from(c.touched)) {
+      if (!el.isConnected) { c.touched.delete(el); continue; } // 화면이 다시 그려져 칸이 사라졌다 — 값도 이미 사라졌으니 미룰 이유가 없다
+      if (this._differsFromDefault(el)) return true;
+    }
+    return false;
+  },
+
+  /** 사용자가 이 화면을 만진 뒤, 화면에 «기본값과 다른 입력칸» 이 남아 있나 — +/− 버튼·바코드 스캐너처럼 JS 가 값만 바꾼 칸은
+      input 이벤트가 없어 touched 에 안 잡힌다. 만지기 전(그리는 중 JS 가 채운 기본값)은 잃을 것이 없으니 보지 않는다(_userAfterRender). */
+  _domDirty() {
+    if (!SheetsAPI._userAfterRender) return false;
+    const c = $id('content');
+    if (!c) return false;
+    const base = this._domBase;
+    // 사용자가 처음 손댄 «순간» 에 이미 있던 칸은 그때 값과 비교한다 — 그리는 중 JS 가 채운 기본값(날짜·기간 select 등)을 사용자 변경으로
+    // 오탐하면 그 화면의 자동 갱신이 영영 보류된다. 그 뒤에 생긴 칸만 «처음 그려진 값» 과 비교한다.
+    return Array.from(c.querySelectorAll('input,select,textarea')).some(el => el.type !== 'hidden'
+      && (base && base.has(el) ? this._controlValue(el) !== base.get(el) : this._differsFromDefault(el)));
+  },
+
+  /** 사용자가 이 화면을 처음 손대는 «바로 그 순간» 의 입력칸 값들 — touchstart·keydown 은 버튼의 click·키 입력이 값을 바꾸기 «전» 이라 변경 전이 찍힌다 */
+  _snapDom() {
+    const m = new WeakMap(), c = $id('content');
+    if (c) c.querySelectorAll('input,select,textarea').forEach(el => m.set(el, this._controlValue(el)));
+    this._domBase = m;
+  },
+
+  _controlValue(el) {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? '1' : '0';
+    if (el.tagName === 'SELECT') return el.multiple ? Array.from(el.options || []).map(o => (o.selected ? '1' : '0')).join('') : String(el.selectedIndex);
+    return String(el.value);
+  },
+
+  /** 입력칸이 «처음 그려진 값» 과 다른가 — 사용자가 지웠거나 되돌렸으면 다시 그려도 잃을 것이 없다 */
+  _differsFromDefault(el) {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+    if (el.tagName === 'SELECT') {
+      const opts = Array.from(el.options || []);
+      if (el.multiple) return opts.some(o => o.selected !== o.defaultSelected);
+      const di = opts.findIndex(o => o.defaultSelected);
+      return el.selectedIndex !== (di < 0 ? 0 : di); // 처음 고른 칸이 없으면 첫 칸이 기본
+    }
+    return el.value !== el.defaultValue;
+  },
+
+  /** <details> 를 «순서 + 제목» 으로 가리키는 키 — 데이터가 바뀌어 모양이 달라지면 키가 안 맞아 복원하지 않는다(엉뚱한 칸이 열리는 것보다 낫다) */
+  _detailsKey(d) {
+    const all = Array.from($id('content').querySelectorAll('details'));
+    const title = ((d.querySelector && d.querySelector('summary')) || {}).textContent || '';
+    return all.indexOf(d) + '|' + title.trim().slice(0, 40);
+  },
+
+  /** 조용히 다시 그린 뒤 — 사용자가 펼치고 접었던 <details> 를 그대로 되돌린다 */
+  _restoreDetails(screen) {
+    const c = this._carry;
+    if (!c || c.screen !== screen || !c.details.size) return;
+    Array.from($id('content').querySelectorAll('details')).forEach(d => {
+      const k = this._detailsKey(d);
+      if (c.details.has(k)) d.open = c.details.get(k);
+    });
   },
 
   /** 수동 새로고침 버튼 핸들러 */
@@ -1793,6 +2035,7 @@ const LiveSync = {
     this.sync('manual');
   },
 };
+// </live-sync>
 
 // Router.go에서 마지막 params 저장 (동기화 시 리렌더용)
 // 화면별로 params 분리 보관 — sub-screen 진입 후 다른 화면 잠깐 들렀다 복귀 시 params 유실 방지
@@ -2155,7 +2398,7 @@ Screens.dashboard = async () => {
   $id('content').innerHTML = `
     <div style="padding:16px">
       <!-- 🏭 생산 계획 — 홈의 맨 위. 렌더 후 loadHomeProdPlan() 이 채운다(ERP 반죽 판매 API 라 느리다) -->
-      <div id="home-prod-plan"></div>
+      ${LiveSync.lateSlot('home-prod-plan')}
 
       <!-- Summary Cards -->
       <div class="grid-2 mb-12">
@@ -2289,7 +2532,7 @@ Screens.dashboard = async () => {
       ` : ''}
 
       <!-- Drive 서류 부족 -->
-      <div id="home-doc-alert"></div>
+      ${LiveSync.lateSlot('home-doc-alert')}
 
       <!-- 빠른 작업 -->
       <div class="sec-title mb-8 mt-8">⚡ 빠른 작업</div>
@@ -2349,6 +2592,8 @@ Screens.dashboard = async () => {
 async function hsLoadHomeDocAlert() {
   const el = $id('home-doc-alert');
   if (!el) return;
+  // 이 함수는 화면을 다 그린 «뒤» 에 끝난다 — 그때는 State._silent 가 이미 풀려 있다. 시작할 때(렌더 안) 조용했는지를 잡아 둔다
+  const quiet = !!State._silent;
   try {
     const [scan, certs, equip] = await Promise.all([
       DriveDocs.scan(),
@@ -2356,7 +2601,7 @@ async function hsLoadHomeDocAlert() {
       SheetsAPI.getAll('기기관리').catch(() => []),
     ]);
     const findings = HaccpStd.docFindings({ scan, certs, equip });
-    if (!findings.length) return;
+    if (!findings.length) { el.innerHTML = ''; return; } // 조용히 다시 그릴 때 이어받은 옛 카드가 남지 않게
     const errN = findings.filter(f => f.sev === 'err').length;
     const top = findings.slice(0, 5);
     el.innerHTML = `
@@ -2375,7 +2620,7 @@ async function hsLoadHomeDocAlert() {
       ${findings.length > top.length
         ? `<div class="card clickable" onclick="State._hsTab='성적서';Router.go('haccp-std',{tab:'성적서'})"><div class="fs-12 c-txt-l" style="text-align:center">외 ${findings.length - top.length}건 모두 보기 ›</div></div>`
         : ''}`;
-    if (errN > 0) toast(`📂 서류 미보관 ${errN}건 — 성적서 탭에서 확인하세요`, 'err', 6000);
+    if (errN > 0 && !quiet) toast(`📂 서류 미보관 ${errN}건 — 성적서 탭에서 확인하세요`, 'err', 6000);
   } catch (e) {
     console.warn('[홈] Drive 문서 현황 조회 실패:', e);
   }
@@ -2681,7 +2926,7 @@ async function loadHomeProdPlan() {
         lastApproved: lastAppr, demand: plan.demand, asOf });
       if (chart) cards.push({ name: it[1] || code, kgPer: parseFloat(it[4]) || 5, src, plan, chart });
     }
-    if (!cards.length) return;
+    if (!cards.length) { el.innerHTML = ''; return; } // 조용히 다시 그릴 때 이어받은 옛 카드가 남지 않게
     // 작업지시서 생성 화면의 프리셋 카드가 「이번 주 권장」을 띄울 때 쓴다(홈을 거친 세션에서만 채워진다 — 없으면 그 줄만 빠진다)
     State.prodPlan = { at: Date.now(), items: cards.map(c => ({ name: c.name, recPacks: c.chart.recPacks, recBatches: c.chart.recBatches })) };
     el.innerHTML = '<div class="fs-14 fw-7 mb-8 mt-8">🏭 생산 계획 (주별 · 실적 → 예측)</div>' + cards.map(c => {
@@ -10446,7 +10691,7 @@ function hsCertTab(certs, rmItems, fgItems) {
   ];
   const inp = 'width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px';
   return `
-    <div id="hs-docs" class="mt-12"><div class="card"><div class="fs-12 c-txt-l" style="text-align:center">📂 Drive 문서 현황 확인 중…</div></div></div>
+    ${LiveSync.lateSlot('hs-docs', '<div class="card"><div class="fs-12 c-txt-l" style="text-align:center">📂 Drive 문서 현황 확인 중…</div></div>', 'mt-12')}
 
     <details class="card mt-12" style="border-left:3px solid var(--pri)">
       <summary class="fs-13 fw-7" style="cursor:pointer">➕ 시험성적서 등록 · 갱신</summary>
