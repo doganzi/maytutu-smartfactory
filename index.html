@@ -7597,6 +7597,16 @@ const ERP_CLOSING_TAB = 'Closing_Line';
     행마다 ERP 코드표(api/_dough_family.json)의 packsPerBox·mbCode 가 붙어 온다 — 홈 생산계획(수요 D)과 손익 매출이 같이 읽는다.
     ⚠️ 옛 `?only=marketbom` 은 마켓봄만 줘서 자사몰 이행(2026-10 마켓봄 0건) 뒤 수요·매출이 0 으로 떨어졌다(2026-10-04). */
 const ERP_LOGI_API = 'https://maytutu-erp.vercel.app/api/logistics?only=dough';
+/** 실제로 부를 주소 — 공장 정식 주소(maytutu-factory.vercel.app)는 **ERP 와 같은 Vercel 프로젝트**라 같은 출처 `/api/…` 로 부른다.
+    🔴 다른 출처(maytutu-erp.vercel.app)로 부르면 ERP CORS 허용목록(doganzi.github.io 만)에 없어 «Failed to fetch» 로 막힌다 —
+       2026-09-25 공장 주소 이전 뒤로 홈 생산계획은 **조용히 출하 기준**(실판매 아님)으로, 손익 매출은 «추정» 으로 떨어져 있었다
+       (2026-10-04 라이브 검수에서 발견: 공장 앱 375봉/주 · ERP 06 332봉/주). 같은 출처면 CORS·프리플라이트가 아예 없다.
+    옛 GitHub Pages 주소·로컬 파일에서는 종전대로 ERP 절대 주소(CORS 허용 오리진 doganzi.github.io). */
+function erpLogiUrl() {
+  const h = (typeof location !== 'undefined' && location && location.hostname) || '';
+  return (h === 'maytutu-factory.vercel.app' || h === 'maytutu-erp.vercel.app')
+    ? ERP_LOGI_API.replace(/^https:\/\/[^/]+/, '') : ERP_LOGI_API;
+}
 /** 손익 매출로 세는 채널 — 본사가 냉동택배로 직접 보내는 두 채널(박스당 택배비 모형이 맞는다).
     콜로는 4PL 물류수수료(공급가 12.65%) 구조라 이 모형에 안 맞아 뺀다 — 넣으려면 수수료 줄을 따로 만들 것. */
 const PNL_SALE_CHANNELS = ['마켓봄', '자사몰'];
@@ -7952,7 +7962,7 @@ const FactoryPnl = {
       ⚠️ 옛 서버(ERP 배포 전)는 only=dough 를 몰라 전체 원장을 준다 — 그때는 그 안의 marketbom 행으로 떨어진다. */
   async fetchDough() {
     try {
-      const r = await fetch(ERP_LOGI_API, { headers: { Authorization: `Bearer ${State.token}` } });
+      const r = await fetch(erpLogiUrl(), { headers: { Authorization: `Bearer ${State.token}` } });
       if (!r.ok) return { rows: [], err: `ERP ${r.status}` };
       const j = await r.json();
       if (j.dough) {

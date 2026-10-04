@@ -555,6 +555,20 @@ t('matchReport 는 손익 채널(마켓봄·자사몰)만 세고 코드로 맞�
   assert.deepStrictEqual(bad.rows, []);
   assert.strictEqual(bad.err, 'ERP 500');
   ok.push('fetchDough: ?only=dough → 옛 서버면 marketbom 행 → 실패는 빈 행 + 오류');
+
+  //  공장 정식 주소에서는 같은 출처 /api 로 부른다 — ERP 절대 주소는 CORS 에 막혀 «Failed to fetch» 였다(2026-10-04 라이브)
+  const seen = [];
+  global.fetch = async (u) => { seen.push(String(u)); return { ok: true, json: async () => ({ dough: { rows: [], sources: {} } }) }; };
+  global.location = { hostname: 'maytutu-factory.vercel.app' };
+  await FactoryPnl.fetchDough();
+  global.location = { hostname: 'doganzi.github.io' };
+  await FactoryPnl.fetchDough();
+  delete global.location;
+  await FactoryPnl.fetchDough();
+  assert.strictEqual(seen[0], '/api/logistics?only=dough', '공장 정식 주소에서 다른 출처(ERP 절대 주소)를 불렀다 — CORS 로 막힌다');
+  assert.strictEqual(seen[1], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '옛 Pages 주소는 ERP 절대 주소(CORS 허용 오리진)');
+  assert.strictEqual(seen[2], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '주소를 모르면(시험·로컬) 절대 주소');
+  ok.push('fetchDough: 공장 정식 주소는 같은 출처 /api · 옛 Pages 주소는 ERP 절대 주소');
   console.log(ok.map(n => '  ✓ ' + n).join('\n'));
   console.log(`\n✅ FactoryPnl ${ok.length}건 통과`);
 })().catch(e => { console.error(e); process.exit(1); });
