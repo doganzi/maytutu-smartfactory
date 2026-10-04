@@ -264,5 +264,48 @@ t('마켓봄 판매행에서 배치 수까지 이어진다', () => {
   assert.strictEqual(p.batches, 0);
 });
 
+/* ── 5. 반죽 세 채널(마켓봄·자사몰·콜로) — 2026-10-04 물류 감사 ─────────────────
+   D 가 마켓봄만 셌다 → 자사몰 이행(10월 마켓봄 0건) 뒤 몇 주 안에 0 이 되어 카드가 사라진다.
+   ERP `/api/logistics?only=dough` 가 행마다 코드표 봉수(packsPerBox)·마켓봄 코드(mbCode)를 붙여 준다.
+   ⚠️ ERP tests/dough_demand.test.mjs 의 공용 블록 시험과 **같은 값**이어야 한다. */
+const FG002 = ['ANG00002', 'ANG00266', 'ANG00276'];
+t('봉수는 코드표 1순위 — 자사몰 쿠폰 공급가로 역산하면 틀린다', () => {
+  const row = { name: '[점주용] 호두과자 전용반죽', qty: 4, supply: 194320 };   // 박스당 48,580 ÷ 21,591 = 2.25
+  assert.strictEqual(planPacksPerBox(row), 2, '코드표 없이 공급가 역산이면 2봉 — 이게 고친 결함이다');
+  assert.strictEqual(planPacksPerBox({ ...row, packsPerBox: 3 }), 3, '코드표 봉수가 이긴다');
+  assert.strictEqual(planPacksPerBox({ ...row, packsPerBox: null }), 2, '코드표가 모르면(null) 옛 규칙으로 떨어진다');
+  assert.strictEqual(planPacksPerBox({ name: '앙호두 전용반죽(5kg*3ea)', qty: 1, supply: 64773, packsPerBox: 4 }), 4, '품명 규격보다도 코드표가 먼저다');
+});
+
+t('완제품 연결은 행의 mbCode 로(콜로 ANG00179 → ANG00276) · mbCode \'\' 면 code 로 떨어지지 않는다', () => {
+  const rows = [
+    { date: '2026-09-28', channel: '콜로세움', code: 'ANG00179', mbCode: 'ANG00276', qty: 2, packsPerBox: 4 },
+    { date: '2026-09-28', channel: '콜로세움', code: 'ANG00002', mbCode: '', qty: 5, packsPerBox: 4 },
+    { date: '2026-09-28', code: 'ANG00276', name: '앙호두 전용반죽(5kg*3ea)', qty: 1, supply: 64773 },   // 옛 마켓봄 행
+  ];
+  const ev = planSalesEvents(rows, FG002);
+  assert.strictEqual(ev.length, 2);
+  assert.strictEqual(ev.reduce((a, e) => a + e.packs, 0), 8 + 3);
+});
+
+t('«마켓봄 0 + 자사몰 N» — 수요 D 가 0 으로 떨어지지 않는다 (마켓봄만이면 null)', () => {
+  const asOf = new Date('2026/10/30 15:00');                 // 금 — 진행 중인 주 10/26
+  const cur = planWeekStart(asOf).getTime();
+  const at = (w) => new Date(cur - w * 7 * DAY + 2 * DAY);
+  const rows = [];
+  for (const w of [5, 6, 7]) rows.push({ date: at(w), channel: '마켓봄', code: 'ANG00276', mbCode: 'ANG00276', qty: 100, packsPerBox: 3 });
+  for (const w of [1, 2, 3, 4]) {
+    rows.push({ date: at(w), channel: '자사몰', code: 'ANG00276', mbCode: 'ANG00276', qty: 40, supply: 40 * 48580, packsPerBox: 3 });
+    rows.push({ date: at(w), channel: '콜로세움', code: 'ANG00179', mbCode: 'ANG00276', qty: 2, packsPerBox: 4 });
+  }
+  const plan = calcProductionPlan({ series: planWeeklySeries(planSalesEvents(rows, FG002), asOf), stock: 300, pending: 0 });
+  assert.ok(plan, '세 채널이면 계획이 나와야 한다');
+  assert.strictEqual(plan.demand, 128, 'D = 자사몰 120봉 + 콜로 8봉');
+  assert.strictEqual(plan.batches, 3);
+  const mbOnly = rows.filter(r => r.channel === '마켓봄');
+  assert.strictEqual(calcProductionPlan({ series: planWeeklySeries(planSalesEvents(mbOnly, FG002), asOf), stock: 300, pending: 0 }), null,
+    '픽스처가 사고를 재현하지 못한다 — 마켓봄만이면 null 이어야 한다');
+});
+
 console.log(ok.map(n => '  ✓ ' + n).join('\n'));
 console.log(`\n✅ 생산량 제안 ${ok.length}건 통과`);
