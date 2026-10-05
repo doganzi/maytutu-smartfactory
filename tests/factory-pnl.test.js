@@ -2,7 +2,8 @@
    (사본을 따로 두면 원본과 갈라져서 통과해도 의미가 없다 — haccp-std.test.js 와 같은 방식)
 
    실행:  node tests/factory-pnl.test.js      실패하면 assert 로 즉시 중단
-   범위:  순수 집계 로직만 — 화면·Sheets 쓰기는 라이브 검수 대상                        */
+   범위:  순수 집계 로직만 — 화면·Sheets 쓰기는 라이브 검수 대상.
+          ERP 읽기(fetchDough·fetchErpClosing)는 실시간 갱신(LiveSync)이 지켜보는 SheetsAPI «외부 읽기» 를 타는지도 본다   */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -48,8 +49,21 @@ global.toast = (m, t) => { _dom._toasts = (_dom._toasts || []).concat([[m, t]]);
 global.Router = { go: (s) => { _dom._went = s; } };
 global.acquireLock = () => true; global.releaseLock = () => {};
 global.formatDateTime = () => '2026-08-12 10:00:00';
-global.SheetsAPI = { getAll: async () => [], append: async () => {}, createSheet: async () => {},
-                     updateCell: async () => {}, updateRowByIndex: async () => {}, invalidateCache: () => {} };
+// 캐시·읽은 목록 추적·외부 읽기(getExternal) 장치는 index.html 의 진짜 SheetsAPI 를 그대로 쓰고, 시트를 부르는 메서드만 스텁으로 덮는다.
+//   (ERP 읽기가 실시간 갱신(LiveSync)에 태워진 뒤로 fetchDough·fetchErpClosing 은 SheetsAPI.getExternal 을 거친다 — 옛 스텁에는 그 장치가 없다)
+const _sheetsSrc = (() => {
+  const i = SRC.indexOf('const SheetsAPI = {');
+  assert.notStrictEqual(i, -1, 'index.html 에서 SheetsAPI 를 찾지 못함');
+  const m = /\r?\n\};\r?\n/.exec(SRC.slice(i));
+  assert.ok(m, 'index.html 에서 SheetsAPI 의 끝을 찾지 못함');
+  return SRC.slice(i, i + m.index + m[0].length);
+})();
+global.SheetsAPI = vm.runInThisContext('(function () { ' + _sheetsSrc + ' return SheetsAPI; })()', { filename: 'index.html#SheetsAPI' });
+Object.assign(global.SheetsAPI, { getAll: async () => [], append: async () => {}, createSheet: async () => {},
+                                  updateCell: async () => {}, updateRowByIndex: async () => {} });
+// 소스 형태 검사용 — 주석을 걷어낸 사본(문자열 안의 // 는 건드리지 않는다).
+//   블록 주석은 «줄 머리·공백·; { } ( ,» 바로 뒤의 /* 만 시작으로 본다 — accept="image/*" · '/api/auth/*' 같은 글자를 주석 시작으로 오인하면 그 뒤 코드가 통째로 지워져 «호출 형태» 를 못 센다
+const strip = code => code.replace(/(^|[\s;{}(,])\/\*[\s\S]*?\*\//g, '$1').replace(/(^|[^:'"\x60\\])\/\/.*$/gm, '$1');
 
 const code = slice('const FG_EXT = {', 'const FG_SHEET_HEADER')          // 완제품 확장 컬럼 인덱스
            + '\n' + slice("const PNL_SHEET = '공장손익';", '/* ─── 공장 손익 화면')
@@ -537,21 +551,24 @@ t('matchReport 는 손익 채널(마켓봄·자사몰)만 세고 코드로 맞�
 });
 
 (async () => {
+  //  fetchDough 는 SheetsAPI 외부 읽기(캐시 있음)를 거친다 — 시험마다 «새로 받는» 읽기가 필요하면 캐시를 비우고 부른다(🔄 와 같다)
+  const fresh = () => { SheetsAPI.invalidateAllCache(); return FactoryPnl.fetchDough(); };
+
   //  fetchDough — ?only=dough 를 부르고, 옛 서버(배포 전)면 marketbom 행으로 떨어진다. 실패는 [](추정 폴백).
   const calls = [];
   global.fetch = async (u) => { calls.push(String(u)); return { ok: true, json: async () => ({
     channels: ['마켓봄', '자사몰', '콜로세움'],
     dough: { rows: _dRows(), sources: { 자사몰: { lastDate: '2026-10-02' }, 마켓봄: { lastDate: '2026-09-30' } } } }) }; };
-  const d = await FactoryPnl.fetchDough();
+  const d = await fresh();
   assert.ok(/\/api\/logistics\?only=dough$/.test(calls[0]), '반죽 세 채널 엔드포인트가 아니다: ' + calls[0]);
   assert.strictEqual(d.rows.length, 3);
   assert.strictEqual(d.updated, '2026-10-02');
   global.fetch = async () => ({ ok: true, json: async () => ({ marketbom: { rows: [{ code: 'ANG00276' }], deliveryByMonth: { '2026-09': 1 }, updated_at: '2026-09-30' } }) });
-  const old = await FactoryPnl.fetchDough();
+  const old = await fresh();
   assert.strictEqual(old.rows.length, 1, '옛 서버 응답에서 마켓봄 행을 못 읽었다');
   assert.strictEqual(old.updated, '2026-09-30');
   global.fetch = async () => ({ ok: false, status: 500 });
-  const bad = await FactoryPnl.fetchDough();
+  const bad = await fresh();
   assert.deepStrictEqual(bad.rows, []);
   assert.strictEqual(bad.err, 'ERP 500');
   ok.push('fetchDough: ?only=dough → 옛 서버면 marketbom 행 → 실패는 빈 행 + 오류');
@@ -560,15 +577,110 @@ t('matchReport 는 손익 채널(마켓봄·자사몰)만 세고 코드로 맞�
   const seen = [];
   global.fetch = async (u) => { seen.push(String(u)); return { ok: true, json: async () => ({ dough: { rows: [], sources: {} } }) }; };
   global.location = { hostname: 'maytutu-factory.vercel.app' };
-  await FactoryPnl.fetchDough();
+  await fresh();
   global.location = { hostname: 'doganzi.github.io' };
-  await FactoryPnl.fetchDough();
+  await fresh();
   delete global.location;
-  await FactoryPnl.fetchDough();
+  await fresh();
   assert.strictEqual(seen[0], '/api/logistics?only=dough', '공장 정식 주소에서 다른 출처(ERP 절대 주소)를 불렀다 — CORS 로 막힌다');
   assert.strictEqual(seen[1], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '옛 Pages 주소는 ERP 절대 주소(CORS 허용 오리진)');
   assert.strictEqual(seen[2], 'https://maytutu-erp.vercel.app/api/logistics?only=dough', '주소를 모르면(시험·로컬) 절대 주소');
   ok.push('fetchDough: 공장 정식 주소는 같은 출처 /api · 옛 Pages 주소는 ERP 절대 주소');
+
+  //  ═══ ERP 읽기는 실시간 갱신(LiveSync)이 지켜보는 «외부 읽기» 다 ═══
+  //  직접 fetch 로 되돌아가면 ERP 값이 바뀌어도 화면은 사용자가 다시 열기 전까지 모른다 — «최신 정보 실시간» 이 먹통이 된다.
+
+  //  ① 요청 모양 — ERP 응답은 5분 브라우저 캐시(max-age=300)라 no-cache 로 불러야 ERP 가 바뀐 «뒤» 에 낡은 값을 받지 않는다
+  let reqOpt = null;
+  global.fetch = async (u, o) => { reqOpt = o; return { ok: true, json: async () => ({ dough: { rows: [], sources: {} } }) }; };
+  State.token = 'tok-1';
+  await fresh();
+  assert.strictEqual(reqOpt.cache, 'no-cache', 'ERP 를 5분 브라우저 캐시로 받으면 값이 바뀌어도 낡은 값만 온다');
+  assert.strictEqual(reqOpt.headers.Authorization, 'Bearer tok-1', '이 앱이 가진 구글 토큰으로 부른다');
+  ok.push('fetchDough: 요청은 no-cache + 구글 토큰');
+
+  //  ② 캐시 — 같은 값을 다시 부르면 네트워크를 타지 않고(다시 그리기가 한 호흡에 끝난다), 못 받은 것은 캐시하지 않는다
+  let net = 0;
+  global.fetch = async () => { net++; return { ok: true, json: async () => ({ dough: { rows: [{ code: 'ANG00276' }], sources: {} } }) }; };
+  SheetsAPI.invalidateAllCache();
+  const c1 = await FactoryPnl.fetchDough();
+  c1.rows.push({ code: '고쳐 쓴 값' });
+  const c2 = await FactoryPnl.fetchDough();
+  assert.strictEqual(net, 1, '캐시 안에서 다시 불러도 ERP 를 또 두드리지 않는다');
+  assert.strictEqual(c2.rows.length, 1, '받은 쪽이 고쳐 써도 캐시는 상하지 않는다(복사본)');
+  c2.rows.push({ code: '캐시에서 받은 값도 고쳐 쓴다' });
+  assert.strictEqual((await FactoryPnl.fetchDough()).rows.length, 1, '캐시에서 받은 값을 고쳐 써도 캐시는 상하지 않는다(복사본)');
+  global.fetch = async () => { net++; return { ok: false, status: 502 }; };
+  SheetsAPI.invalidateAllCache(); net = 0;
+  const f1 = await FactoryPnl.fetchDough();
+  const f2 = await FactoryPnl.fetchDough();
+  assert.ok(f1.err === 'ERP 502' && f2.err === 'ERP 502' && net === 2, '못 받은 것은 캐시하지 않는다 — 다음 읽기가 다시 시도한다');
+  global.fetch = async () => { throw new Error('Failed to fetch'); };
+  SheetsAPI.invalidateAllCache();
+  const off = await FactoryPnl.fetchDough();
+  assert.deepStrictEqual(off.rows, [], '오프라인이어도 던지지 않고 폴백 모양(빈 행)으로 준다 — 화면이 예전과 똑같이 받는다');
+  assert.strictEqual(off.err, 'Failed to fetch');
+  ok.push('fetchDough: 캐시(복사본) · 못 받은 것은 캐시 안 함 · 오프라인은 던지지 않고 폴백');
+
+  //  ③ 결산(Closing_Line) 읽기도 같은 장치를 탄다 — 시트 응답을 헤더 기준 객체로 풀고, 권한이 없으면 빈 줄 + 오류
+  global.fetch = async (u) => { reqOpt = { u: String(u) }; return { ok: true, json: async () => ({ values: [['계정', '금액'], ['공장경비', 1200], ['운반비', 300]] }) }; };
+  SheetsAPI.invalidateAllCache();
+  const cl = await FactoryPnl.fetchErpClosing();
+  assert.deepStrictEqual(cl.lines, [{ 계정: '공장경비', 금액: 1200 }, { 계정: '운반비', 금액: 300 }]);
+  assert.ok(reqOpt.u.includes('/values/Closing_Line') && reqOpt.u.includes('valueRenderOption=UNFORMATTED_VALUE'), '결산 탭을 서식 없이(숫자 그대로) 읽는다');
+  global.fetch = async () => ({ ok: false, status: 403 });
+  SheetsAPI.invalidateAllCache();
+  const cl403 = await FactoryPnl.fetchErpClosing();
+  assert.deepStrictEqual(cl403.lines, [], '권한이 없으면 빈 줄');
+  assert.strictEqual(cl403.err, '결산 403');
+  let net403 = 0;
+  global.fetch = async () => { net403++; return { ok: false, status: 403 }; };
+  SheetsAPI.invalidateAllCache();
+  await FactoryPnl.fetchErpClosing(); await FactoryPnl.fetchErpClosing();
+  assert.strictEqual(net403, 2, '결산도 못 받은 것은 캐시하지 않는다 — 권한을 받은 뒤 다음 읽기가 곧바로 다시 시도한다');
+  ok.push('fetchErpClosing: 헤더 기준 객체 · 못 받으면 빈 줄 + 오류(캐시 안 함)');
+
+  //  ④ 화면이 읽은 목록(_track)에 오른다 — LiveSync 가 «이 화면이 ERP 값을 읽었다» 를 알고, 값이 바뀌면 조용히 다시 그린다
+  //     (번호는 값이 «달라질 때만» 오른다 — 같은 값이면 화면에 아무 일도 없다)
+  global.fetch = async () => ({ ok: true, json: async () => ({ dough: { rows: [{ code: 'A' }], sources: {} } }) });
+  SheetsAPI.invalidateAllCache();
+  SheetsAPI._track = new Map();
+  await FactoryPnl.fetchDough();
+  await FactoryPnl.fetchErpClosing();
+  assert.ok(SheetsAPI._track.has('erp:dough') && SheetsAPI._track.has('erp:closing'), 'ERP 읽기가 화면이 읽은 목록에 오르지 않으면 LiveSync 가 ERP 값의 변화를 지켜볼 수 없다');
+  const v1 = SheetsAPI._ver['erp:dough'];
+  assert.strictEqual(SheetsAPI._track.get('erp:dough'), v1, '읽은 번호를 적는다');
+  SheetsAPI.invalidateAllCache();
+  await FactoryPnl.fetchDough();
+  assert.strictEqual(SheetsAPI._ver['erp:dough'], v1, '같은 값을 다시 받으면 번호는 그대로 — 화면에 아무 일도 없다');
+  global.fetch = async () => ({ ok: true, json: async () => ({ dough: { rows: [{ code: 'A' }, { code: 'B' }], sources: {} } }) });
+  SheetsAPI.invalidateAllCache();
+  await FactoryPnl.fetchDough();
+  assert.strictEqual(SheetsAPI._ver['erp:dough'], v1 + 1, 'ERP 값이 바뀌면 번호가 오른다 — LiveSync 가 이 차이로 다시 그린다');
+  SheetsAPI._track = null;
+  ok.push('ERP 읽기 → 화면이 읽은 목록(_track)·번호(_ver): 같으면 그대로, 바뀌면 오른다');
+
+  //  ⑤ 등록·간격 — 두 읽기가 등록돼 있고(미등록이면 getExternal 이 던진다), 보이지 않는 선읽기 간격이 시트 주기(30초)보다 길다
+  for (const key of ['erp:dough', 'erp:closing']) {
+    assert.ok(SheetsAPI.isExternal(key), key + ' 가 SheetsAPI 외부 읽기로 등록돼 있지 않다');
+    assert.ok(SheetsAPI._ext[key].minMs >= 60000, key + ' 선읽기 간격이 너무 짧다 — ERP 를 시트 주기(30초)로 두드리게 된다');
+  }
+  ok.push('외부 읽기 등록: erp:dough · erp:closing · 선읽기 간격 60초 이상');
+
+  //  ⑥ 소스 형태(주석을 걷어낸 사본) — ERP 를 직접 부르는 길은 «읽기 본체» 두 곳뿐이다. 화면이 직접 fetch 하면 LiveSync 가 모른다
+  const live = strip(SRC);
+  assert.strictEqual((live.match(/fetch\(\s*erpLogiUrl\(\)/g) || []).length, 1, 'ERP 물류 API 를 부르는 fetch 가 _readDough 한 곳이어야 한다 — 화면이 직접 부르면 실시간 갱신이 모른다');
+  assert.strictEqual((live.match(/\$\{ERP_FIN_SID\}\/values/g) || []).length, 1, 'ERP 재무DB 를 부르는 fetch 가 _readClosing 한 곳이어야 한다');
+  //   «fetch( 모양» 만 세면 `const u = erpLogiUrl(); fetch(u, …)` · `fetch(ERP_LOGI_API, …)` · `fetch(`…${ERP_FIN_SID}…`)` 처럼
+  //   모양만 바꾼 우회를 못 잡는다 — 그래서 주소를 만드는 식별자가 «정의 + 읽기 본체» 에서만 쓰이는지도 센다.
+  //   (ERP 읽기를 새로 더하면 SheetsAPI.registerExternal 로 등록하고, 이 숫자도 함께 고친다)
+  const uses = (id) => (live.match(new RegExp('\\b' + id + '\\b', 'g')) || []).length;
+  assert.strictEqual(uses('erpLogiUrl'), 2, 'erpLogiUrl 은 정의 + _readDough 한 곳에서만 쓴다 — 다른 곳에서 주소를 만들어 부르면 실시간 갱신이 모른다');
+  assert.strictEqual(uses('ERP_LOGI_API'), 3, 'ERP_LOGI_API 는 상수 1 + erpLogiUrl 본문 2 에서만 쓴다 — fetch(ERP_LOGI_API …) 로 직접 부르지 않는다');
+  assert.strictEqual(uses('ERP_FIN_SID'), 2, 'ERP_FIN_SID 는 상수 + _readClosing 한 곳에서만 쓴다 — 다른 곳에서 재무DB 를 직접 읽지 않는다');
+  assert.strictEqual(uses('ERP_CLOSING_TAB'), 2, 'ERP_CLOSING_TAB 은 상수 + _readClosing 한 곳에서만 쓴다');
+  ok.push('소스 형태: ERP 를 직접 부르는 길은 읽기 본체 두 곳뿐(fetch 모양 + 주소 식별자 사용처)');
+  delete State.token;
   console.log(ok.map(n => '  ✓ ' + n).join('\n'));
   console.log(`\n✅ FactoryPnl ${ok.length}건 통과`);
 })().catch(e => { console.error(e); process.exit(1); });

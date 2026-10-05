@@ -1170,6 +1170,41 @@ const SheetsAPI = {
     this._cache = {};
   },
 
+  // ── 외부 읽기(ERP 등 Sheets 가 아닌 읽기) — 시트와 같은 추적 장치(_ver·_track)에 태워 LiveSync 가 값이 바뀐 것을 지켜보게 한다 ──
+  //   _ext[key] = {read, minMs, at} · 키는 'erp:…' 꼴이라 시트 키(getAll:·getRange:)와 섞이지 않는다.
+  //   read() 는 «절대 던지지 않고» {ok, value} 를 준다 — 실패해도 value 는 화면이 쓰던 폴백 모양 그대로다(화면은 예전과 똑같이 받는다).
+  //   값은 시트와 같은 _cache 에 들어가므로 invalidateAllCache()(🔄) 가 함께 비운다.
+  _ext: {},
+  /** minMs = 보이지 않는 선읽기 최소 간격(ms) — 외부 서버를 시트 주기(30초)로 두드리지 않는다. 이 간격만큼은 값도 신선하다고 본다 */
+  registerExternal(key, read, minMs = 0) { this._ext[key] = { read, minMs, at: 0 }; },
+  isExternal(key) { return !!this._ext[key]; },
+  /** 화면이 부르는 읽기 — getAll 과 같다(읽은 목록 기록 · 값이 달라질 때만 번호↑ · 복사본을 준다). 실패는 캐시하지 않는다. */
+  async getExternal(key, useCache = true, track = true) {
+    const e = this._ext[key];
+    if (!e) throw new Error(`외부 읽기 미등록: ${key}`);
+    if (useCache) {
+      // 신선도 = max(30초, 선읽기 간격) — 간격 안에서는 선읽기가 건너뛰므로 값도 그만큼은 유효해야, 다시 그리기가 네트워크를 타지 않고 한 호흡에 끝난다
+      const c = this._cache[key];
+      if (c && Date.now() - c.ts < Math.max(this._cacheTTL, e.minMs)) { this._noteRead(key, track); return JSON.parse(JSON.stringify(c.data)); }
+    }
+    e.at = Date.now();
+    const out = await e.read();
+    if (out.ok) this._setCache(key, out.value);
+    else {
+      e.at = 0; // 다음 주기에 곧바로 다시 시도한다(실패를 간격만큼 붙들고 있지 않는다)
+      // 못 받은 채 «그렸다» 면 화면은 폴백 값이다 — 그 뒤 성공한 값이 예전 값과 같아도 번호가 올라야 폴백 화면이 다시 그려진다
+      if (track !== false) delete this._sig[key];
+    }
+    this._noteRead(key, track);
+    return out.ok ? JSON.parse(JSON.stringify(out.value)) : out.value; // 받은 쪽이 고쳐 써도 캐시가 상하지 않게 복사본(getAll 의 캐시 히트와 같다)
+  },
+  /** LiveSync 의 보이지 않는 선읽기 — 간격 안이면 건너뛴다. 못 받아도 번호·캐시를 건드리지 않는다(track=false). */
+  refreshExternal(key) {
+    const e = this._ext[key];
+    if (!e || Date.now() - e.at < e.minMs) return Promise.resolve();
+    return this.getExternal(key, false, false).then(() => {});
+  },
+
   // ── Retry + 401/429 처리 ──
   async _fetch(url, opts = {}, retries = 3) {
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -1884,6 +1919,8 @@ const LiveSync = {
     //    track=false: 이 읽기는 «화면이 읽은 것» 으로 치지 않는다(치면 바뀐 것을 못 알아챈다)
     let failed = 0;
     await Promise.all(keys.map(k => {
+      // 외부 읽기(ERP)는 시트가 아니다 — 간격(minMs)을 두고 받고, 못 받아도 «읽기 실패» 로 세지 않는다(ERP 가 죽어도 시트 자동 갱신은 계속된다)
+      if (SheetsAPI.isExternal(k)) return SheetsAPI.refreshExternal(k).catch(() => {});
       const i = k.indexOf(':'), kind = k.slice(0, i), arg = k.slice(i + 1);
       const p = kind === 'getRange' ? SheetsAPI.getRange(arg, false, false) : SheetsAPI.getAll(arg, false, false);
       return p.catch(() => { failed++; });
@@ -7880,6 +7917,8 @@ const PNL_EMPLOYER_INS_RATE = 0.102;
 /** ERP 재무 DB(회계·재무 05) — 결산 라인. 읽기 전용. */
 const ERP_FIN_SID = '1FbqWXusA6KCpJThwZ6f4tNSMw19kSjL7hL19byTrOVE';
 const ERP_CLOSING_TAB = 'Closing_Line';
+/** ERP 읽기의 보이지 않는 선읽기 최소 간격(ms) — ERP 반죽 원천은 배포 단위로만 바뀌고(응답 5분 캐시) 결산도 자주 안 바뀐다. 시트 주기(30초)로 두드리지 않는다. */
+const ERP_POLL_MS = 120000;
 /** ERP 물류 API — 반죽 실판매 세 채널(마켓봄·자사몰·콜로). 인증 = 이 앱이 이미 가진 구글 토큰(hd=anghodu.biz).
     행마다 ERP 코드표(api/_dough_family.json)의 packsPerBox·mbCode 가 붙어 온다 — 홈 생산계획(수요 D)과 손익 매출이 같이 읽는다.
     ⚠️ 옛 `?only=marketbom` 은 마켓봄만 줘서 자사몰 이행(2026-10 마켓봄 0건) 뒤 수요·매출이 0 으로 떨어졌다(2026-10-04). */
@@ -8245,45 +8284,55 @@ const FactoryPnl = {
   /** 화면 표시용 — 최근 n개월만(데이터 없는 달은 애초에 버킷이 없다) */
   recent(rows, n) { return n > 0 ? rows.slice(-n) : rows; },
 
-  /** ERP 반죽 실판매(마켓봄·자사몰·콜로) — 이 앱의 구글 토큰을 그대로 쓴다. 실패하면 [](손익은 추정으로, 계획은 출하로 폴백).
-      ⚠️ 옛 서버(ERP 배포 전)는 only=dough 를 몰라 전체 원장을 준다 — 그때는 그 안의 marketbom 행으로 떨어진다. */
-  async fetchDough() {
+  /** ERP 반죽 실판매(마켓봄·자사몰·콜로) 읽기 본체 — 이 앱의 구글 토큰을 그대로 쓴다. {ok, value} 를 주고 절대 던지지 않는다.
+      실패하면 value 는 []·err 폴백(손익은 추정으로, 계획은 출하로).
+      ⚠️ 옛 서버(ERP 배포 전)는 only=dough 를 몰라 전체 원장을 준다 — 그때는 그 안의 marketbom 행으로 떨어진다.
+      cache:'no-cache' — ERP 응답은 5분 브라우저 캐시(max-age=300)라 그냥 부르면 ERP 가 바뀐 뒤에도 낡은 값을 받는다(실시간 갱신이 먹통). */
+  async _readDough() {
     try {
-      const r = await fetch(erpLogiUrl(), { headers: { Authorization: `Bearer ${State.token}` } });
-      if (!r.ok) return { rows: [], err: `ERP ${r.status}` };
+      const r = await fetch(erpLogiUrl(), { headers: { Authorization: `Bearer ${State.token}` }, cache: 'no-cache' });
+      if (!r.ok) return { ok: false, value: { rows: [], err: `ERP ${r.status}` } };
       const j = await r.json();
       if (j.dough) {
         const src = j.dough.sources || {};
-        return { rows: j.dough.rows || [], delivery: {}, sources: src,
-                 updated: (src['자사몰'] && src['자사몰'].lastDate) || (src['마켓봄'] && src['마켓봄'].lastDate) || '' };
+        return { ok: true, value: { rows: j.dough.rows || [], delivery: {}, sources: src,
+                 updated: (src['자사몰'] && src['자사몰'].lastDate) || (src['마켓봄'] && src['마켓봄'].lastDate) || '' } };
       }
-      return { rows: (j.marketbom && j.marketbom.rows) || [],
+      return { ok: true, value: { rows: (j.marketbom && j.marketbom.rows) || [],
                delivery: (j.marketbom && j.marketbom.deliveryByMonth) || {},
-               updated: j.marketbom && j.marketbom.updated_at };
+               updated: j.marketbom && j.marketbom.updated_at } };
     } catch (e) {
-      return { rows: [], delivery: {}, err: e.message };   // CORS·오프라인 — 화면에서 '추정' 배지로 드러난다
+      return { ok: false, value: { rows: [], delivery: {}, err: e.message } };   // CORS·오프라인 — 화면에서 '추정' 배지로 드러난다
     }
   },
+  /** 화면이 부르는 읽기 — 실시간 갱신(LiveSync)이 값이 바뀐 것을 지켜보도록 SheetsAPI 외부 읽기('erp:dough')에 태운다. 돌려주는 모양은 예전과 같다. */
+  async fetchDough() { return SheetsAPI.getExternal('erp:dough'); },
 
-  /** ERP 재무DB Closing_Line — 결산의 매출원가 계정. 시트 API 라 CORS 무관. 권한 없으면 []. */
-  async fetchErpClosing() {
+  /** ERP 재무DB Closing_Line 읽기 본체 — 결산의 매출원가 계정. 시트 API 라 CORS 무관. 권한 없으면 []. {ok, value} 를 주고 절대 던지지 않는다. */
+  async _readClosing() {
     try {
       const r = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${ERP_FIN_SID}/values/${encodeURIComponent(ERP_CLOSING_TAB)}?valueRenderOption=UNFORMATTED_VALUE`,
         { headers: { Authorization: `Bearer ${State.token}` } });
-      if (!r.ok) return { lines: [], err: `결산 ${r.status}` };
+      if (!r.ok) return { ok: false, value: { lines: [], err: `결산 ${r.status}` } };
       const vals = (await r.json()).values || [];
-      if (vals.length < 2) return { lines: [] };
+      if (vals.length < 2) return { ok: true, value: { lines: [] } };
       const hdr = vals[0].map(h => String(h || '').trim());
       const lines = vals.slice(1).filter(row => row && row.length).map(row => {
         const o = {}; hdr.forEach((h, i) => { o[h] = row[i] ?? ''; }); return o;
       });
-      return { lines };
+      return { ok: true, value: { lines } };
     } catch (e) {
-      return { lines: [], err: e.message };
+      return { ok: false, value: { lines: [], err: e.message } };
     }
   },
+  /** 화면이 부르는 읽기 — 위와 같이 SheetsAPI 외부 읽기('erp:closing')에 태운다. */
+  async fetchErpClosing() { return SheetsAPI.getExternal('erp:closing'); },
 };
+
+/** ERP 읽기를 실시간 갱신(LiveSync)에 편입한다 — 화면은 위의 fetch* 로만 읽고(직접 fetch 금지), 선읽기 간격은 ERP_POLL_MS. */
+SheetsAPI.registerExternal('erp:dough', () => FactoryPnl._readDough(), ERP_POLL_MS);
+SheetsAPI.registerExternal('erp:closing', () => FactoryPnl._readClosing(), ERP_POLL_MS);
 
 /* ─── 공장 손익 화면 (관리자 전용) ─── */
 const _pw = (n) => (n == null || !isFinite(n)) ? '-' : Math.round(n).toLocaleString();
