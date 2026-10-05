@@ -10037,8 +10037,8 @@ Screens['items-sp'] = async () => {
         items.map(item => {
           const code = item[0], name = item[1], spec = item[2] || '', unit = item[3] || '개';
           const category = item[4] || '', minStock = parseFloat(item[5]) || 0;
-          const totalStock = lots.filter(l => l[1] === code && l[5] !== '폐기' && l[5] !== '소진')
-            .reduce((sum, l) => sum + (parseFloat(l[4]) || 0), 0);
+          const totalStock = lots.filter(l => l[1] === code && l[7] !== '폐기' && l[7] !== '소진')
+            .reduce((sum, l) => sum + (parseFloat(l[6]) || 0), 0);
           const isLow = minStock > 0 && totalStock < minStock;
           return `
             <div class="card">
