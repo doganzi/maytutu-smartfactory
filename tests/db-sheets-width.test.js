@@ -252,6 +252,44 @@ ok('라벨 순서 고정: 입고기록·소모품LOT 은 쓰기 코드의 칸 �
   assert.strictEqual(DEFS['소모품LOT'][7], 'status');
 });
 
+ok('소모품품목 재고 합산: 입고 쓰기 코드가 놓는 칸(품목코드·잔량·상태)을 읽고, 실제 행으로 계산하면 재고가 나온다', () => {
+  // ① 쓰기 쪽 칸 위치 — 입고 때 소모품LOT 에 append 하는 행 리터럴에서 읽는다(칸 번호를 시험에 박지 않는다)
+  const lotRows = [];
+  const reL = /SheetsAPI\.append\(\s*lotTab\s*,\s*\[/g;
+  let m;
+  while ((m = reL.exec(JS))) { const s = m.index + m[0].length - 1; lotRows.push(topSplit(JS.slice(s + 1, balanced(JS, s)))); }
+  assert.ok(lotRows.length >= 2, `입고 LOT append 가 ${lotRows.length}건 — 원재료·소모품 두 갈래를 못 찾았다(앵커 갱신)`);
+  const row = lotRows.reduce((a, b) => (b.length < a.length ? b : a));            // 짧은 쪽 = 소모품(8칸), 긴 쪽 = 원재료(12칸)
+  assert.strictEqual(row.length, DEFS['소모품LOT'].length, '소모품LOT 입고 행 폭이 정의와 다르다');
+  const qtyIdx = row.indexOf('qty'), remainIdx = row.lastIndexOf('qty');          // 입고 시 잔량 칸에는 입고 수량이 한 번 더 들어간다
+  assert.ok(qtyIdx !== -1 && remainIdx > qtyIdx && row.filter((x) => x === 'qty').length === 2, `소모품LOT 입고 행에서 수량·잔량 칸을 못 찾았다: ${row.join(', ')}`);
+  const codeIdx = row.indexOf('itemCode'), statusIdx = row.indexOf("'미사용'");
+  assert.ok(codeIdx !== -1 && statusIdx !== -1, `소모품LOT 입고 행에서 품목코드·상태 칸을 못 찾았다: ${row.join(', ')}`);
+
+  // ② 읽기 쪽 — 소모품품목 화면의 totalStock 계산이 읽는 칸이 위와 같다
+  const from = JS.indexOf("Screens['items-sp']"), to = JS.indexOf('Screens.vendors', from);
+  assert.ok(from !== -1 && to > from, "Screens['items-sp'] 구간을 찾지 못함");
+  const stmt = (JS.slice(from, to).replace(/\s+/g, ' ').match(/const totalStock = [^;]+;/) || [])[0];
+  assert.ok(stmt, '소모품품목 재고 합산 코드 모양이 바뀌었다 — 이 시험의 앵커를 갱신할 것');
+  const idxs = (re) => [...stmt.matchAll(re)].map((x) => +x[1]);
+  assert.deepStrictEqual(idxs(/l\[(\d+)\] === code/g), [codeIdx], '합산이 품목코드를 읽는 칸이 입고 쓰기와 다르다');
+  assert.deepStrictEqual(idxs(/l\[(\d+)\] !== '/g), [statusIdx, statusIdx], '합산이 상태(폐기·소진 제외)를 읽는 칸이 입고 쓰기와 다르다');
+  assert.deepStrictEqual(idxs(/parseFloat\(l\[(\d+)\]\)/g), [remainIdx], '합산이 잔량을 읽는 칸이 입고 쓰기와 다르다 — 옛 칸이면 단위 글자를 숫자로 읽어 재고가 늘 0');
+
+  // ③ 동작 — 입고 쓰기 배치대로 만든 행을 합산 코드에 그대로 넣어 계산한다
+  const mk = (code, qty, remain, status) => row.map((a, i) => ({ lotId: 'SP-1', itemCode: code, itemName: '장갑', unit: '개', 'formatDate()': '2026-10-05' }[a]
+    ?? (i === qtyIdx ? String(qty) : i === remainIdx ? String(remain) : i === statusIdx ? status : '')));
+  const rows = [
+    mk('SP-A', 10, 7, '미사용'),     // 10개 입고 후 3개 사용 → 잔량 7
+    mk('SP-A', 5, 5, '미사용'),
+    mk('SP-A', 4, 4, '폐기'),        // 폐기 LOT 은 재고가 아니다
+    mk('SP-A', 3, 3, '소진'),        // 화면 합산이 제외하는 상태
+    mk('SP-B', 100, 100, '미사용'),  // 다른 품목
+  ];
+  const total = vm.runInNewContext(`const code = 'SP-A'; const lots = ${JSON.stringify(rows)};\n${stmt}\ntotalStock`);
+  assert.strictEqual(total, 12, `소모품 SP-A 재고는 잔량 7 + 5 = 12 여야 한다(폐기·소진·다른 품목 제외) — 실제 ${total}`);
+});
+
 ok('낡은 정의가 남아 있지 않다(주석 걷어낸 사본)', () => {
   const norm = JS.replace(/\s+/g, '');
   const gone = [

@@ -12,7 +12,9 @@
           ⑫ 리뷰어 지적 3건 — 읽기 실패가 있으면 이번 갱신은 접는다 · 🔄 는 자동 갱신/최소 간격에 막히지 않는다 ·
              +/− 버튼·스캐너가 바꾼 입력값(input 이벤트 없음)도 보존한다
           ⑪ 늦게 채워지는 칸(홈 서류·생산계획 · 성적서 탭 서류 현황)은 조용히 다시 그릴 때 비우지 않고(높이 유지 → 스크롤 안 튐),
-             그 칸의 늦은 토스트도 조용히 한다(실단말기 측정 2026-10-04: 칸이 비면 높이 1712→1387, 채워지면 앵커링이 +325 밀어 스크롤 420→745) */
+             그 칸의 늦은 토스트도 조용히 한다(실단말기 측정 2026-10-04: 칸이 비면 높이 1712→1387, 채워지면 앵커링이 +325 밀어 스크롤 420→745)
+            ⑮ ERP 읽기(SheetsAPI 외부 읽기) — 값이 바뀌면 조용히 다시 그린다 · 간격 안에서는 ERP 를 두드리지 않는다 ·
+               ERP 가 죽어도 시트 갱신은 계속된다 · 폴백으로 그린 화면은 회복되면 다시 그린다 · 🔄 는 외부 읽기 캐시도 비운다 */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -1224,6 +1226,144 @@ process.on('exit', code => {
     // _busyReason 은 쓰지 않는다 — 그리다 실패한 🔄 는 hideLoading 전에 던져 «불러오는 중» 이 먼저 나온다. 비교 기준 자체를 본다
     assert.strictEqual(f.LiveSync._domDirty(), true, '실패하면 비교 기준도 되돌아가 JS 가 바꾼 값(4≠3)이 여전히 보호된다');
     console.log('✔ ⑭ 놓인 낡은 실행은 지금 실행을 못 흔든다 · 실패하면 비교 기준도 되돌린다');
+  }
+
+  // ═══ ⑮ ERP 읽기(SheetsAPI 외부 읽기)를 실시간 갱신에 편입 — 시트가 아닌 읽기도 값이 바뀌면 조용히 다시 그리고, ERP 가 죽어도 시트 갱신은 계속된다 ═══
+  //   화면은 getAll 처럼 getExternal('erp:…') 로 읽는다. 읽기 본체는 {ok, value} 를 주고 절대 던지지 않는다(못 받아도 value 는 화면이 쓰던 폴백 모양).
+  //   선읽기 간격(minMs) 안/밖은 _ext[key].at 을 옮겨 만든다 — 실제로 기다리지 않는다.
+  const MIN = 120000;
+  const openedExt = async () => {
+    const env = makeEnv(SHEETS());
+    env.extCalls = 0; env.extShown = null; env.extNext = null;       // extNext = 다음 읽기가 줄 {ok, value} (없으면 «잘 받음 {v:1}»)
+    env.SheetsAPI.registerExternal('erp:x', async () => {
+      env.extCalls++;
+      const out = env.extNext || { ok: true, value: { v: 1 } };
+      if (out.throws) throw new Error('읽기 본체가 던졌다');
+      return out;
+    }, MIN);
+    env.ctx.Screens.dashboard = async function () {
+      env.renders.push({ name: 'dashboard', silent: !!env.ctx.State._silent });
+      for (const t of ['A', 'B']) env.reads[t] = Array.from(await env.SheetsAPI.getAll(t), r => r.join(','));
+      env.extShown = JSON.stringify(await env.SheetsAPI.getExternal('erp:x'));   // vm 영역의 객체라 문자열로 비교한다
+    };
+    env.State.currentScreen = 'dashboard';
+    env.Router.render(); await settle();
+    env.extCalls = 0; env.reset();
+    return env;
+  };
+  const openGate = e => { e.SheetsAPI._ext['erp:x'].at = 0; };         // 선읽기 간격이 «지났다» — 다음 폴링이 ERP 를 읽는다
+
+  // ① 값이 바뀌면 조용히 다시 그린다 — 예전엔 ERP 가 바뀌어도 화면은 사용자가 다시 열기 전까지 몰랐다
+  {
+    const e = await openedExt();
+    assert.strictEqual(e.extShown, '{"v":1}');
+    assert.ok(e.State._screenKeys.dashboard.has('erp:x'), 'ERP 읽기가 화면이 읽은 목록에 오른다');
+    e.extNext = { ok: true, value: { v: 2 } }; openGate(e);
+    await e.sync('poll');
+    assert.strictEqual(e.renders.length, 1, 'ERP 값이 바뀌면 다시 그린다');
+    assert.strictEqual(e.renders[0].silent, true, '조용히 그린다');
+    assert.strictEqual(e.toasts.length + e.loadingShown, 0, '토스트·로딩 막 없음');
+    assert.strictEqual(e.extShown, '{"v":2}', '새 값으로 그려졌다');
+    assert.strictEqual(e.extCalls, 1, 'ERP 는 선읽기 한 번뿐 — 다시 그리기는 그 값을 메모리에서 읽는다(네트워크 없음 = 한 호흡)');
+    assert.strictEqual(e.fetched.filter(u => /\/values\/x/.test(u)).length, 0, '외부 키를 시트 탭으로 읽지 않는다');
+    e.reset(); openGate(e); await e.sync('poll');
+    assert.strictEqual(e.renders.length, 0, '같은 값이면 또 그리지 않는다 — 번호가 소비됐다');
+    assert.strictEqual(e.extCalls, 2, '(같은 값이어도 읽기는 했다)');
+    console.log('✔ ⑮ ERP 값이 바뀌면 조용히 다시 그린다 · 같으면 무반응');
+  }
+
+  // ② 간격 안에서는 ERP 를 두드리지 않는다 — 시트는 폴링마다 보지만 ERP 는 간격(minMs)마다만. 다시 그리기도 ERP 를 네트워크로 부르지 않는다
+  {
+    const e = await openedExt();
+    for (let i = 0; i < 3; i++) await e.sync('poll');
+    assert.strictEqual(e.extCalls, 0, '간격 안: ERP 선읽기 없음');
+    assert.strictEqual(e.fetched.length, 6, '시트 선읽기(A·B)는 폴링마다 그대로 — 3회 × 2탭');
+    e.SheetsAPI._cache['erp:x'].ts = Date.now() - 60000;             // 60초 묵은 값: 시트 캐시 기준(30초)이면 낡았지만 외부 읽기는 «간격(120초)» 만큼 신선하다
+    e.sheets.B = [['3', 'z']];
+    e.reset(); await e.sync('poll');
+    assert.strictEqual(e.renders.length, 1, '시트가 바뀌어 한 번 다시 그린다');
+    assert.strictEqual(e.extCalls, 0, '다시 그리기 중에 ERP 를 부르지 않는다 — 네트워크를 타면 그리는 도중 사용자 손놀림이 끼어들 틈이 생긴다');
+    openGate(e); await e.sync('poll');
+    assert.strictEqual(e.extCalls, 1, '간격이 지나면 ERP 를 읽는다');
+    console.log('✔ ⑮ 간격 안에서는 ERP 를 두드리지 않는다 · 시트 갱신은 그대로');
+  }
+
+  // ③ ERP 가 죽어도 시트 자동 갱신은 계속된다 — 못 받은 ERP 가 «읽기 실패» 로 갱신 전체를 접게 만들면 안 된다
+  {
+    const e = await openedExt();
+    e.extNext = { ok: false, value: { v: 'fallback', err: 'ERP 500' } }; openGate(e);
+    e.sheets.B = [['3', 'z']];
+    await e.sync('poll');
+    assert.strictEqual(e.extCalls, 1, 'ERP 를 읽어 봤다(못 받았다)');
+    assert.strictEqual(e.renders.length, 1, 'ERP 가 죽어도 바뀐 시트는 조용히 다시 그린다');
+    assert.deepStrictEqual(e.reads.B, ['3,z']);
+    assert.strictEqual(e.extShown, '{"v":1}', '못 받으면 마지막으로 잘 받은 값을 그대로 보여 준다(폴백으로 갈아타지 않는다)');
+    assert.strictEqual(e.SheetsAPI._ext['erp:x'].at, 0, '실패는 간격을 붙들지 않는다 — 다음 폴링이 곧바로 다시 시도한다');
+    assert.strictEqual(e.SheetsAPI._ver['erp:x'], 1, '못 받은 것은 번호를 올리지 않는다');
+    e.extNext = null; e.reset(); await e.sync('poll');
+    assert.strictEqual(e.extCalls, 2, '곧바로 다시 시도했다');
+    assert.strictEqual(e.renders.length, 0, '회복해도 값이 같으면 화면에 아무 일도 없다');
+    // 읽기 본체가 약속(던지지 않는다)을 어기고 던져도 시트 갱신은 계속된다
+    const t = await openedExt();
+    t.extNext = { throws: true }; openGate(t);
+    t.sheets.B = [['3', 'z']];
+    await t.sync('poll');
+    assert.strictEqual(t.renders.length, 1, '읽기 본체가 던져도 이번 갱신은 접히지 않는다');
+    console.log('✔ ⑮ ERP 가 죽어도 시트 갱신은 계속된다 · 실패는 곧바로 다시 시도');
+  }
+
+  // ④ 못 받은 채 그린 폴백은 회복되면 다시 그린다 — 폴백(추정·출하 기준)은 «ERP 가 죽었다» 는 임시 화면이다
+  {
+    const e = await openedExt();
+    e.extNext = { ok: false, value: { v: 'fallback' } };
+    await e.sync('manual');                                          // 🔄 — 캐시를 비우고 다시 그리는데 ERP 를 못 받았다
+    assert.strictEqual(e.extShown, '{"v":"fallback"}', '못 받으면 화면은 폴백 값으로 그려진다');
+    e.extNext = { ok: true, value: { v: 1 } };                       // ERP 가 돌아왔고 값은 «전에 잘 받은 것과 같다»
+    e.reset(); await e.sync('poll');
+    assert.strictEqual(e.renders.length, 1, '회복하면 조용히 다시 그린다 — 값이 전과 같아도(폴백 화면을 걷어 낸다)');
+    assert.strictEqual(e.extShown, '{"v":1}');
+    assert.strictEqual(e.renders[0].silent, true);
+    console.log('✔ ⑮ 폴백으로 그린 화면은 ERP 가 회복되면 다시 그린다');
+  }
+
+  // ⑤ 🔄 수동 새로고침은 외부 읽기 캐시도 비운다 — 간격이 닫혀 있어도 ERP 의 최신 값을 곧바로 받는다
+  {
+    const e = await openedExt();
+    e.extNext = { ok: true, value: { v: 3 } };
+    await e.sync('manual');
+    assert.strictEqual(e.extShown, '{"v":3}', '🔄 는 ERP 의 새 값을 곧바로 보여 준다(캐시·간격에 막히지 않는다)');
+    assert.strictEqual(e.extCalls, 1);
+    console.log('✔ ⑮ 🔄 는 외부 읽기 캐시도 비운다');
+  }
+
+  // ⑥ 읽은 값은 복사본이다 · 등록 안 된 키는 조용히 넘어가지 않고 던진다 · track=false 는 목록에 적지 않는다
+  {
+    const e = await openedExt();
+    const a = await e.SheetsAPI.getExternal('erp:x');
+    a.v = '고쳐 씀';
+    const b = await e.SheetsAPI.getExternal('erp:x');
+    assert.strictEqual(b.v, 1, '받은 쪽이 고쳐 써도 캐시는 상하지 않는다(getAll 의 캐시 히트와 같다)');
+    await assert.rejects(() => e.SheetsAPI.getExternal('erp:nope'), /외부 읽기 미등록: erp:nope/, '등록 안 된 키는 던진다 — 조용히 빈 값을 주면 화면이 «최신» 으로 착각한다');
+    assert.strictEqual(e.SheetsAPI.isExternal('getAll:A'), false, '시트 키는 외부 읽기가 아니다');
+    assert.strictEqual(e.SheetsAPI.isExternal('erp:x'), true);
+    e.SheetsAPI._track = new Map();
+    await e.SheetsAPI.getExternal('erp:x', true, false);
+    assert.ok(!e.SheetsAPI._track.has('erp:x'), 'track=false 는 목록에 적지 않는다(적으면 바뀐 것을 못 알아챈다)');
+    console.log('✔ ⑮ 복사본 · 미등록 키는 던진다 · track=false');
+  }
+
+  // ⑦ 입력 중에는 ERP 값이 바뀌어도 미룬다 — 미룬 것이지 잃은 게 아니다
+  {
+    const e = await openedExt();
+    e.document.activeElement = { tagName: 'INPUT', id: 'q' };
+    e.extNext = { ok: true, value: { v: 2 } }; openGate(e);
+    await e.sync('poll');
+    assert.strictEqual(e.renders.length, 0, '입력 중에는 ERP 값이 바뀌어도 다시 그리지 않는다');
+    e.document.activeElement = null;
+    await e.sync('poll');
+    assert.strictEqual(e.renders.length, 1, '풀리면 다음 주기에 반영된다');
+    assert.strictEqual(e.extShown, '{"v":2}');
+    console.log('✔ ⑮ 입력 중에는 미루고 풀리면 반영');
   }
 
   // ═══ 소스 형태(주석 제거 사본 · 호출 형태) ═══
