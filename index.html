@@ -17195,7 +17195,8 @@ Screens['box-ship'] = async (params = {}) => {
     bags: [], indiv: new Map(), used: new Map(), ready: false, busy: false, last: { code: '', at: 0 }, lastSaved: '',
     shipRows: [], shipByIndiv: new Map(), fresh: false, shipsOk: false,   // shipRows = 출하기록 행(오늘 수·이미 나간 봉 안내용 · shipsOk = 그걸 읽었나) · fresh = 방금 저장하고 다음 상자 전
   };
-  renderHeader('📦 박스 출하', '화면 안내를 따라 찍으세요', { back: 'inventory', noRefresh: true, right: '<button class="btn btn-sm btn-outline" style="color:#fff;border-color:rgba(255,255,255,.6);padding:4px 10px;font-size:12px" onclick="boxShipFinish()">끝내기</button>' });
+  // 머리 단추는 btn-outline 을 쓰지 않는다 — 색 modifier 없는 btn-outline 은 투명 단추 가드(tests/db-sheets-width)가 막는다. 머리 색 바탕 위의 «투명 바탕 · 흰 글자 · 흰 테두리» 를 직접 지정한다.
+  renderHeader('📦 박스 출하', '화면 안내를 따라 찍으세요', { back: 'inventory', noRefresh: true, right: '<button class="btn btn-sm" style="background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.6);padding:4px 10px;font-size:12px" onclick="boxShipFinish()">끝내기</button>' });
   $id('content').innerHTML = `
     <div style="padding:12px 16px 24px">
       <div class="row" id="bs-modes" style="gap:6px;margin-bottom:10px"></div>

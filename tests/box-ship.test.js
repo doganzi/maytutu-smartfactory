@@ -7,7 +7,7 @@
          ④ shipId 연속 채번 — 한 상자 n봉이 서로 다른 번호(옛 일괄 출하는 같은 번호를 받았다)
          ⑤ 출하기록 15열 — 송장·전표번호 / 받는 방식 / 받는 곳 · 송도·콜로는 받는 곳이 바로 찬다
          ⑥ 라벨 사본 — 봉 라벨만 바로 다음 장에(A A B B)
-         ⑦ 연결 — 옛 출하 창·선택 출하가 없고, 새 화면이 라우터·스캔 결과·인쇄·스키마에 붙어 있다
+         ⑦ 연결 — 옛 출하 창·선택 출하가 없고, 출하기록 쓰기는 한 곳뿐이며, 새 화면이 라우터·스캔 결과·인쇄·스키마에 붙어 있다
          ⑧ 안내 흐름 — 단계 표시·다음에 할 일·오늘 수·소리·끝내기, 저장 직후 같은 송장 재스캔은 «이미 저장»
 
    실행:  node tests/box-ship.test.js                                                         */
@@ -188,6 +188,12 @@ t('출하기록 스키마 15열 — 뒤 3열 waybill·shipMethod·receiver', () 
   const cols = m[1].split(',').map((s) => s.trim().replace(/'/g, ''));
   assert.strictEqual(cols.length, 15);
   assert.deepStrictEqual(cols.slice(12), ['waybill', 'shipMethod', 'receiver']);
+});
+t('출하기록 쓰기는 박스 출하 저장 한 곳뿐 — 한 행 리터럴 append(옛 방식)가 되살아나지 않는다', () => {
+  // db-sheets-width 의 폭 검출기는 append('탭', [한 행]) 모양만 잰다 — 여러 행([[…]])이나 변수로 넘긴 append 는 보지 못한다.
+  // 그래서 출하기록에 쓰는 호출이 박스 출하 저장(BoxShip.buildRows 의 15열 행) 하나뿐이라는 사실을 여기서 센다. 주석을 걷어낸 CODE 로 센다.
+  const calls = CODE.match(/SheetsAPI\.append\(\s*['"`]출하기록['"`]/g) || [];
+  assert.strictEqual(calls.length, 1, `출하기록 append 가 ${calls.length}곳이다 — 박스 출하 저장 한 곳뿐이어야 한다(행은 BoxShip.buildRows 가 만든다)`);
 });
 t('저장 — 직전 재조회(실패 시 중단) · 저장 계획 · 연속 shipId · 온도 · D/E/F · LOT I/J · 작업지시서 · 잠금 해제', () => {
   const a = CODE.indexOf('async function boxShipSave(ref) {');
