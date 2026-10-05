@@ -337,12 +337,29 @@ t('소리 재생 — 계획대로 울린다 · 멈춘 오디오는 깨운다 · 
   play({}, true);
   play({ AudioContext: function Boom() { throw new Error('오디오 막힘'); } }, false);
 });
+t('주제 조사 «은/는» — 마지막 글자의 받침에 맞춘다(직배는 · 픽업은), 한글이 아니면 «은(는)»', () => {
+  assert.strictEqual(BoxShip.topic(BOX_SHIP_CFG.MODES.songdo.label), '🏪 송도 직배는', '받침 없는 «배»');
+  assert.strictEqual(BoxShip.topic(BOX_SHIP_CFG.MODES.colo.label), '🛻 콜로 픽업은', '받침 있는 «업»');
+  assert.strictEqual(BoxShip.topic('  택배 '), '택배는', '앞뒤 공백은 걷는다');
+  // 한글 음절 11172자 전부를 «받침 유무» 를 따로 센 답과 대조한다 — NFD 로 풀면 받침이 있는 글자만 3조각이다
+  let bad = 0;
+  for (let c = 0xAC00; c <= 0xD7A3; c++) {
+    const ch = String.fromCharCode(c);
+    const want = ch.normalize('NFD').length === 3 ? '은' : '는';
+    if (BoxShip.topic('가' + ch) !== '가' + ch + want) bad++;
+  }
+  assert.strictEqual(bad, 0, '받침 판정이 틀린 글자 수');
+  for (const w of ['ABC', '3', '직배!']) assert.strictEqual(BoxShip.topic(w), `${w}은(는)`, `${w} — 한글로 끝나지 않으면 은(는)`);
+  for (const w of ['', null, undefined]) assert.strictEqual(BoxShip.topic(w), '은(는)', '빈 값도 깨지지 않는다');
+  assert.ok(!SRC.includes('${mode.label} 은 송장 없이'), '«직배 은» 처럼 받침을 안 보고 «은» 을 붙인 옛 문구가 남아 있다');
+});
+
 t('옛 안내문이 파일 어디에도(주석 포함) 없다 — 단계 안내가 대신한다', () => {
   ['봉 라벨을 먼저 찍어 주세요', '마지막으로 <b>송장</b>을 찍으면', '송장은 봉을 다 찍은 뒤 마지막에', '봉 라벨 → 송장 순서로 찍기',
     '한 상자는 보통 3봉 또는 4봉입니다', '속 봉을 찍어도 같습니다'].forEach((g) => assert.ok(!SRC.includes(g), `낡은 안내가 남았다: ${g}`));
   assert.ok(!/const hint = mode\.waybill/.test(CODE), '옛 안내 변수 hint 가 남았다');
 });
-t('화면 — 단계 표시 · 지금 할 일 · 오늘 수 · 방금 저장 · 직배는 저장 단추(택배는 없음)', () => {
+t('화면 — 단계 표시 · 지금 할 일 · 오늘 수 · 방금 저장 · 직배는 저장 단추(택배는 없음 · 단추는 bs-save 로 아래에 붙는다)', () => {
   const render = (bs) => {
     const els = { 'bs-modes': { innerHTML: '' }, 'bs-panel': { innerHTML: '' } };
     const c = vm.createContext({ State: { _boxShip: bs }, BoxShip, BOX_SHIP_CFG, $id: (id) => els[id], HS_ESC: (x) => String(x), formatDate: () => '2026-10-04', Object, Set, Array, Map, String });
@@ -360,6 +377,9 @@ t('화면 — 단계 표시 · 지금 할 일 · 오늘 수 · 방금 저장 · 
   const hs = render(base('songdo', 2));
   assert.ok(hs.includes('boxShipSaveDirect()') && hs.includes('저장 · 2봉 → 송도직영점') && hs.includes('● 2. 저장'));
   assert.ok(/<button[^>]*disabled[^>]*boxShipSaveDirect/.test(render(base('songdo', 0))), '0봉이면 저장 단추가 잠긴다');
+  assert.ok(/<button class="[^"]*\bbs-save\b[^"]*"[^>]*onclick="boxShipSaveDirect\(\)"/.test(hs), '송도 저장 단추에 bs-save 가 없다 — 봉이 쌓이면 단추가 화면 밖으로 밀려 맨 아래까지 내려가야 눌린다');
+  assert.ok(/<button class="[^"]*\bbs-save\b[^"]*"[^>]*onclick="boxShipSaveDirect\(\)">저장 · 2봉 → 신제주점/.test(render(base('colo', 2))), '콜로 저장 단추도 bs-save 로 아래에 붙는다');
+  assert.ok(!h0.includes('bs-save') && !h3.includes('bs-save'), '택배에는 저장 단추가 없다 — 고정할 단추도 없다');
   const b = base('parcel', 0);
   b.shipRows = [shipRow({ 6: '2026-10-04 09:00', 12: "'111111111111", 13: '택배' }), shipRow({ 6: '2026-10-03 09:00', 12: "'222222222222", 13: '택배' })];
   b.lastSaved = '3봉 · 송장 111111111111';
@@ -402,6 +422,26 @@ t('알림 상자 — 박스 출하가 내는 알림 종류마다 배경 규칙�
   CODE.slice(a, b).split('\n').filter((l) => l.includes('toast(')).forEach((l) => { for (const m of l.matchAll(/[,?:]\s*'([a-z]+)'/g)) kinds.add(m[1]); });   // 종류 자리 = 쉼표·삼항 뒤의 작은따옴표 낱말(=== 'dup' 같은 비교는 걸리지 않는다)
   assert.ok(['warn', 'info', 'err', 'suc'].every((k) => kinds.has(k)), '구역에서 알림 종류를 못 모았다(' + [...kinds] + ') — 이 시험이 아무것도 안 지킨다');
   kinds.forEach((k) => assert.ok(new RegExp('\\.toast\\.' + k + '\\s*\\{[^}]*background\\s*:').test(CODE), '.toast.' + k + ' 에 배경이 없다 — 흰 글씨만 떠서 머리글에 묻힌다'));
+});
+
+const cssProps = (body) => new Map(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => { const i = d.indexOf(':'); return [d.slice(0, i).trim(), d.slice(i + 1).trim()]; }));
+
+t('알림 상자 — 글 길이만큼 펴고 화면 안에서만 접는다(left:50% 만 쓰면 폭이 화면 절반으로 줄어 긴 안내가 여러 줄로 접혔다)', () => {
+  // .toast 규칙은 둘이다(작은 화면 글자 크기 · 위치를 잡는 본 규칙) — 위치를 잡는 쪽을 고른다
+  const p = [...CODE.matchAll(/\.toast\s*\{([^}]*)\}/g)].map((m) => cssProps(m[1])).find((r) => r.get('position') === 'fixed');
+  assert.ok(p, '위치를 잡는 .toast 규칙(position:fixed)을 찾지 못함');
+  assert.strictEqual(p.get('left'), '50%', '가운데 정렬 기준이 바뀌었다');
+  assert.strictEqual(p.get('width'), 'max-content', '글 길이만큼 펴지 않는다 — 폭이 화면 절반으로 줄어 긴 안내가 접힌다');
+  assert.strictEqual(p.get('max-width'), 'calc(100vw - 32px)', '화면 밖으로 넘치지 않게 하는 상한이 없다');
+});
+
+t('저장 단추 — 봉이 쌓여 화면 밖으로 밀려도 아래에 붙는다(.bs-save: sticky · 아래 여백 · 목록 위로)', () => {
+  const m = /\.bs-save\s*\{([^}]*)\}/.exec(CODE);
+  assert.ok(m, '.bs-save 규칙을 찾지 못함');
+  const p = cssProps(m[1]);
+  assert.strictEqual(p.get('position'), 'sticky', '아래에 붙지 않는다');
+  assert.strictEqual(p.get('bottom'), '8px', '아래 여백이 없으면 화면 가장자리에 붙어 눌리지 않는다');
+  assert.ok(Number(p.get('z-index')) >= 2, '목록 글 위로 올라오지 않으면 가려진다');
 });
 
 t('안내 글·확인창 — 낱말 중간에서 줄이 꺾이지 않는다(word-break:keep-all)', () => {
@@ -468,7 +508,12 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
     bs.mode = 'songdo';
     log.toasts.length = 0;
     await next('501234567893');
-    assert.ok(log.toasts[0][0].includes('송장 없이'), '직배는 송장을 받지 않는다');
+    assert.deepStrictEqual(plain(log.toasts), [['🏪 송도 직배는 송장 없이 «저장» 을 누릅니다', 'info']], '직배는 송장을 받지 않는다 — 받침 없는 «배» 라 «는»');
+    bs.mode = 'colo';
+    log.toasts.length = 0;
+    await next('501234567894');
+    assert.deepStrictEqual(plain(log.toasts), [['🛻 콜로 픽업은 송장 없이 «저장» 을 누릅니다', 'info']], '픽업도 송장을 받지 않는다 — 받침 있는 «업» 이라 «은»');
+    bs.mode = 'songdo';
     bs.busy = true;
     log.toasts.length = 0;
     await next('FG-1');
@@ -545,7 +590,7 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
       '작업지시서': [],
     };
     const fail = { batch: false };
-    const toasts = [];
+    const toasts = [], buzz = [];
     const state = { currentScreen: 'box-ship', user: { email: 'w@x' }, _boxShip: null };
     const bs = state._boxShip = { mode: 'parcel', bags: [], indiv: new Map(), used: new Map(), ready: true, busy: false, last: { code: '', at: 0 }, lastSaved: '', shipRows: [], shipByIndiv: new Map(), fresh: false, shipsOk: true };
     tabs['완제품개별'].forEach((r) => bs.indiv.set(r[0], { indivId: r[0], lotId: r[1], status: r[3], itemName: '호두과자' }));
@@ -565,11 +610,11 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
       acquireLock: () => true, releaseLock() {}, showLoading() {}, hideLoading() {},
       formatDate: () => '2026-10-04', formatDateTime: () => '2026-10-04 10:00',
       getShipFreezerStamp: async () => null, warnShipStamp() {}, boxShipEnsureHeader: async () => {},
-      toast: (m, k) => toasts.push([m, k]), renderBoxShip() {},
+      toast: (m, k) => toasts.push([m, k]), boxShipBuzz: (good) => buzz.push(good), renderBoxShip() {},
     });
     vm.runInContext([lineOf('function boxShipRef(r) {'), fnText('function boxShipUsedMap(ships) {'), fnText('async function boxShipSave(ref) {')].join('\n'), c);
     return {
-      tabs, fail, toasts, bs,
+      tabs, fail, toasts, buzz, bs,
       save: (ref) => vm.runInContext(`boxShipSave(${JSON.stringify(ref)})`, c),
       put: (...ids) => ids.forEach((id) => bs.bags.push({ indivId: id, lotId: 'LOT-A', itemName: '호두과자' })),
       status: () => tabs['완제품개별'].map((r) => r[3]),
@@ -667,6 +712,26 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
       assert.strictEqual(w.bs.bags.length, 0, '끊긴 봉은 상자에서 뺀다');
       assert.strictEqual(w.last()[1], 'err');
     }
+  });
+  await at('저장이 안 되면 낮은 소리 — 막힘·그 사이 처리됨·다른 송장으로 이미 적힘·끊김은 «삑삑» 한 번씩, 성공은 조용(송장을 읽을 때 이미 울렸다)', async () => {
+    const cases = [   // [이름, 알림 종류, 시트 준비, 저장 뒤 출하기록 행 수]
+      ['송장 재사용으로 막힘', 'warn', (w) => { w.tabs['출하기록'].push(oldRow(1, 'FG-4', `'${W1}`, '택배')); }, 1],
+      ['그 사이 다른 곳에서 처리됨', 'err', (w) => { w.tabs['완제품개별'][0][3] = DONE; }, 0],
+      ['다른 송장으로 이미 적힘', 'err', (w) => { w.tabs['출하기록'].push(oldRow(1, 'FG-1', `'${W2}`, '택배')); }, 1],
+      ['저장 중 끊김', 'err', (w) => { w.fail.batch = true; }, 3],
+    ];
+    for (const [name, kind, setup, rows] of cases) {
+      const w = saveWorld(); w.put('FG-1', 'FG-2', 'FG-3');
+      setup(w);
+      await w.save(W1);
+      assert.deepStrictEqual(plain(w.buzz), [false], `${name} — 낮은 소리가 정확히 한 번 울려야 한다`);
+      assert.strictEqual(w.last()[1], kind, `${name} — 알림 종류`);
+      assert.strictEqual(w.tabs['출하기록'].length, rows, `${name} — 출하기록 행 수(성공 경로가 아니다)`);
+    }
+    const ok = saveWorld(); ok.put('FG-1', 'FG-2', 'FG-3');
+    await ok.save(W1);
+    assert.deepStrictEqual(plain(ok.buzz), [], '성공은 조용하다 — 송장을 읽을 때 이미 «삑» 하고 울렸다');
+    assert.strictEqual(ok.last()[1], 'suc');
   });
   await at('이어 쓸 전표 — 상자의 봉이 전부 같은 받는 곳의 옛 전표로 끊겼을 때만', async () => {
     const L = (...refs) => refs.map((ref, i) => ({ indivId: `FG-${i}`, ref }));

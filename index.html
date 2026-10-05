@@ -117,6 +117,7 @@ a { text-decoration:none; color:inherit; }
 .btn-outline.btn-warn { color:var(--warn); border-color:var(--warn); }
 .btn-outline.btn-gray { color:var(--gray-d); border-color:var(--gray-d); }
 .btn-full { width:100%; }
+.bs-save { position:sticky; bottom:8px; z-index:3; box-shadow:0 4px 14px rgba(0,0,0,0.28); }   /* 박스 출하(송도·콜로) 저장 단추 — 봉이 쌓여 화면 밖으로 밀려도 화면 아래에 붙어 있다 */
 .btn-sm { padding:6px 12px; font-size:12px; min-height:36px; }
 .btn:disabled { opacity:0.5; cursor:not-allowed; }
 .input-group { margin-bottom:14px; }
@@ -202,7 +203,7 @@ a { text-decoration:none; color:inherit; }
 .c-txt-l { color:var(--txt-l); } .c-pri { color:var(--pri); } .c-suc { color:var(--suc); } .c-err { color:var(--err); } .c-warn { color:var(--warn); } .c-info { color:var(--info); } .c-teal { color:var(--teal); } .c-gray { color:var(--gray); }
 
 /* Toast notification */
-.toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); padding:10px 20px; border-radius:8px; color:#fff; font-size:13px; font-weight:600; z-index:100; opacity:0; transition:opacity 0.3s; pointer-events:none; }
+.toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); width:max-content; max-width:calc(100vw - 32px); padding:10px 20px; border-radius:8px; color:#fff; font-size:13px; font-weight:600; z-index:100; opacity:0; transition:opacity 0.3s; pointer-events:none; }   /* left:50% 만 쓰면 상자 폭이 화면 절반으로 줄어 긴 안내가 여러 줄로 접혔다 — 글 길이만큼 펴고 화면 안에서만 접는다 */
 .toast.show { opacity:1; }
 .toast.suc { background:var(--suc); }
 .toast.err { background:var(--err); }
@@ -16733,6 +16734,13 @@ const BoxShip = {
       resume: '끊긴 저장입니다 — 이 상자의 봉 라벨을 다시 찍은 뒤 송장을 찍으세요',
     })[r.reason] || '처리할 수 없습니다';
   },
+  /* 주제 조사 «은/는» 을 마지막 글자의 받침에 맞춰 붙인다 — «송도 직배» → «송도 직배는» · «콜로 픽업» → «콜로 픽업은». 한글로 끝나지 않으면 «은(는)» */
+  topic(word) {
+    const w = String(word == null ? '' : word).trim();
+    const code = w.charCodeAt(w.length - 1);   // 빈 글자면 NaN
+    if (!(code >= 0xAC00 && code <= 0xD7A3)) return `${w}은(는)`;
+    return w + ((code - 0xAC00) % 28 ? '은' : '는');
+  },
   /* 출하기록 날짜 칸은 시트 서식에 따라 «2026-10-04 09:10» · «2026. 10. 4 오전 9:10:00» · «2026/10/4» 로 온다 — 앞의 날짜만 YYYY-MM-DD 로 */
   ymdOf(v) {
     const m = String(v == null ? '' : v).match(/^\s*(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
@@ -16942,7 +16950,7 @@ async function boxShipAccept(raw, opt = {}) {
     return;
   }
   if (c.kind === 'waybill') {
-    if (!mode.waybill) { toast(`${mode.label} 은 송장 없이 «저장» 을 누릅니다`, 'info', 3000); hush(); return; }
+    if (!mode.waybill) { toast(`${BoxShip.topic(mode.label)} 송장 없이 «저장» 을 누릅니다`, 'info', 3000); hush(); return; }
     const r = BoxShip.checkWaybill(bs.bags, c.code, bs.used, id => { const v = bs.indiv.get(String(id).trim().toUpperCase()); return v ? v.status : ''; });
     if (!r.ok) {
       if (r.reason !== 'saved') boxShipBuzz(false);   // 이미 저장한 상자를 카메라가 또 읽은 것은 잘못이 아니다 — 소리 없이 알리기만
@@ -17043,7 +17051,7 @@ function renderBoxShip() {
           <button class="btn btn-sm btn-outline btn-err" style="padding:2px 8px;font-size:10px;flex-shrink:0" onclick="boxShipRemove(${i})">빼기</button>
         </div>`).join('') : `<div class="fs-12 c-txt-l mt-8">아직 담은 봉이 없습니다</div>`}
       ${n ? `<div class="fs-11 c-txt-l mt-6">LOT ${lots.map(HS_ESC).join(', ')}</div>` : ''}
-      ${mode.waybill ? '' : `<button class="btn btn-suc btn-full mt-12" ${n ? '' : 'disabled'} onclick="boxShipSaveDirect()">저장 · ${n}봉 → ${HS_ESC(mode.receiver)}</button>`}
+      ${mode.waybill ? '' : `<button class="btn btn-suc btn-full bs-save mt-12" ${n ? '' : 'disabled'} onclick="boxShipSaveDirect()">저장 · ${n}봉 → ${HS_ESC(mode.receiver)}</button>`}
     </div>
     ${bs.lastSaved ? `<div class="fs-12 c-suc fw-6 mt-8">✔ 방금 저장: ${HS_ESC(bs.lastSaved)}</div>` : ''}
     ${bs.shipsOk ? `<div class="fs-12 c-txt-l mt-8">${HS_ESC(BoxShip.todayText(BoxShip.todayCount(bs.shipRows, formatDate())))}</div>` : ''}`;
@@ -17111,7 +17119,8 @@ async function boxShipEnsureHeader() {
   } catch (e) { console.warn('[출하기록 제목]', e); }
 }
 
-/* 상자 하나 저장 — 봉마다 출하기록 한 행 + 완제품개별 출하완료 + LOT 잔량 + 다 나간 LOT 의 작업지시서 출하완료 */
+/* 상자 하나 저장 — 봉마다 출하기록 한 행 + 완제품개별 출하완료 + LOT 잔량 + 다 나간 LOT 의 작업지시서 출하완료.
+   저장이 안 되면(막힘·그 사이 처리됨·끊김) 거절과 같은 낮은 소리 — 성공은 송장을 읽을 때 이미 «삑» 하고 울렸다 */
 async function boxShipSave(ref) {
   const bs = State._boxShip;
   if (!bs || !bs.bags.length) return;
@@ -17142,12 +17151,14 @@ async function boxShipSave(ref) {
     if (resume) { ref = resume; ({ sameRef, plan } = planFor(ref)); }
     if (plan.reject) {
       bs.used.set(ref, sameRef.map(r => r[2]));
+      boxShipBuzz(false);
       toast(BoxShip.message({ reason: plan.reject }), 'warn', 3000);
       return;
     }
     if (plan.gone.length) {
       plan.gone.forEach(b => { const v = bs.indiv.get(String(b.indivId).toUpperCase()); if (v) v.status = st.get(b.indivId) || v.status; });
       bs.bags = bs.bags.filter(b => !plan.gone.includes(b));
+      boxShipBuzz(false);
       toast(`${plan.gone.length}봉은 그 사이 다른 곳에서 처리돼 상자에서 뺐습니다 — 상자를 확인하고 다시 저장해 주세요`, 'err', 5000);
       renderBoxShip();
       return;
@@ -17156,6 +17167,7 @@ async function boxShipSave(ref) {
       bs.used = boxShipUsedMap(ships);   // 그 송장으로 마저 저장할 수 있게 — 봉을 다시 담고 그 송장을 찍으면 이어 쓴다
       const limboIds = new Set(plan.limbo.map(l => l.indivId));
       bs.bags = bs.bags.filter(b => !limboIds.has(b.indivId));
+      boxShipBuzz(false);
       toast(`${limboIds.size}봉은 다른 송장·전표(${[...new Set(plan.limbo.map(l => l.ref))].join(', ')})로 이미 출하기록에 적혀 있어 상자에서 뺐습니다 — ${mode.waybill ? '그 상자를 다시 저장해 끝내거나 시트 출하기록을 확인해 주세요' : `그 봉만 따로 담아 같은 받는 곳으로 저장하면 끊긴 저장이 이어집니다 (받는 곳이 다르거나 ${BOX_SHIP_CFG.RESUME_DAYS}일이 지난 전표면 시트 출하기록을 확인해 주세요)`}`, 'err', 6000);
       renderBoxShip();
       return;
@@ -17219,6 +17231,7 @@ async function boxShipSave(ref) {
     toast(`📦 저장 — ${bs.lastSaved}${temp ? ` · 냉동고 ${temp.temp}°C 자동기록` : ''}`, 'suc', 3500);
     renderBoxShip();
   } catch (e) {
+    boxShipBuzz(false);
     toast('박스 출하 실패: ' + e.message, 'err', 5000);
     console.error('[boxShipSave]', e);
   } finally {
