@@ -268,3 +268,4 @@ HACCP 감사 바인더로 들어가므로 번호가 기준서와 다르면 심�
 - 머지: PR → squash merge (선형 히스토리)
 - 모든 변경 전 진행중 작업 영향 점검 — wo-execute / 진행중 WO 데이터 보존 우선
 - LiveSync 자동 재렌더는 입력 화면 (`wo-create`, `bom-calc`, `req-form`, `data-audit`)에서 스킵 — 입력값 보존
+- 시트가 아닌 읽기(ERP 등)를 화면에 더할 때는 `SheetsAPI.registerExternal('erp:…', 읽기함수, 최소간격)` 으로 등록하고 `SheetsAPI.getExternal` 로 읽는다(`FactoryPnl.fetchDough` 참고). 화면에서 직접 `fetch` 하면 LiveSync 가 그 값이 바뀐 것을 못 봐서 사용자가 🔄 을 눌러야 새 값이 보인다. 읽기함수는 던지지 않고 `{ok, value}` 를 준다. 새 읽기를 더하면 `tests/factory-pnl.test.js` 의 «소스 형태» 가 세는 ERP 주소 식별자 사용처 숫자도 함께 고친다.
