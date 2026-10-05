@@ -213,7 +213,10 @@ ok('정의-사용 열 수: 리터럴 append 폭이 정의와 같다(남는 칸�
     checked.add(tab);
   }
   assert.deepStrictEqual(bad, [], '\n' + bad.join('\n'));
-  for (const must of ['입고기록', '거래처', '원재료LOT', '완제품LOT', '공정기록', '작업지시서', '출하기록']) assert.ok(checked.has(must), `${must} 가 검사 대상에서 빠짐(검출기가 못 찾음)`);
+  // 출하기록은 일부러 뺐다 — 박스 출하가 «봉 하나 append» 를 지우고 여러 봉을 한 번에 쓰는 append('출하기록', rows) 로 바꿔서, 리터럴 한 행만 세는 이 검출기에 더는 안 잡힌다.
+  // 그 폭은 tests/box-ship.test.js 가 지킨다: «택배 — 15열» 은 택배 행의 열 수를, «송도 직배·콜로 픽업» 시험은 같은 BoxShip.buildRows 틀이 만든 송도·콜로 행의 받는 곳(마지막 열)까지의 값을,
+  // «출하기록 스키마 15열» 은 정의의 열 수와 마지막 3열 이름을, «출하기록 append 는 박스 출하 저장 한 곳뿐» 은 옛 방식(한 행·여러 행 append)의 부활을 단언한다.
+  for (const must of ['입고기록', '거래처', '원재료LOT', '완제품LOT', '공정기록', '작업지시서']) assert.ok(checked.has(must), `${must} 가 검사 대상에서 빠짐(검출기가 못 찾음)`);
   assert.ok(checked.size >= 14, `검사한 탭이 너무 적음(${checked.size}) — 검출기가 조용히 못 잡고 있다`);
 });
 
