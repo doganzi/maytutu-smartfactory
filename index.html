@@ -177,6 +177,8 @@ a { text-decoration:none; color:inherit; }
 .card > .row.between > span.fs-16 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* 금속검출 실시간현황 — 위 말줄임 규칙이 설명 문장을 한 줄로 잘라 «이 시간의 검출은 확인할 수 없습니다» 같은 핵심 구절이 폰에서 사라진다. 이 화면(.metal-wrap) 안에서만 줄바꿈을 되살린다 */
 .metal-wrap .card .fs-11.c-txt-l, .metal-wrap .card .fs-12.c-txt-l, .metal-wrap .card .fs-14.fw-7 { overflow:visible; text-overflow:clip; white-space:normal; }
+/* 시험성적서 카드 — 발행기관·번호·유효기한이 한 줄에 다 안 들어가면 줄을 바꾼다. 위 전역 규칙은 이 줄들을 한 줄로 자르는데, 2026-10-05 PM75 실측에서 «발행 2…» 에서 끊겨 유효기한이 보이지 않았다. 이 카드 안에서만 풀고 다른 카드의 한 줄 말줄임은 그대로 둔다. */
+.cert-card .fs-11.c-txt-l { overflow:visible; text-overflow:clip; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; }
 /* LOT ID 전용 — 모바일에서 잘림 방지 */
 .lot-id { font-family:monospace; font-size:12px; font-weight:700; word-break:break-all; white-space:normal!important; overflow:visible!important; text-overflow:unset!important; line-height:1.4; color:var(--pri); letter-spacing:-0.3px; }
 .lot-card-header { display:flex; flex-direction:column; gap:6px; }
@@ -10818,12 +10820,13 @@ function hsCertTab(certs, rmItems, fgItems) {
           const st = HaccpStd.certStatus(c[7]);
           const dead = (c[12] || '유효') === '폐기';
           return `
-          <div class="card" style="border-left:3px solid ${dead ? 'var(--gray)' : st.badge === 'err' ? 'var(--err,#c62828)' : st.badge === 'warn' ? 'var(--warn,#e65100)' : 'var(--suc,#2e7d32)'};${dead ? 'opacity:.55' : ''}">
+          <div class="card cert-card" style="border-left:3px solid ${dead ? 'var(--gray)' : st.badge === 'err' ? 'var(--err,#c62828)' : st.badge === 'warn' ? 'var(--warn,#e65100)' : 'var(--suc,#2e7d32)'};${dead ? 'opacity:.55' : ''}">
             <div class="row between">
               <div style="flex:1">
                 <div class="fs-13 fw-7">${HS_ESC(c[3] || c[2] || '-')} <span class="fs-11 c-txt-l">${HS_ESC(c[1] || '')} ${HS_ESC(c[2] || '')}</span></div>
                 ${FgReportNo.html(fgNo, c[2]) ? `<div class="fs-11 c-txt-l mt-2">${FgReportNo.html(fgNo, c[2])}</div>` : ''}
-                <div class="fs-11 c-txt-l mt-2">${HS_ESC(c[4] || '')} ${HS_ESC(c[5] || '')} · 발행 ${HS_ESC(c[6] || '-')} → 유효 ${HS_ESC(c[7] || '-')}</div>
+                <div class="fs-11 c-txt-l mt-2">${HS_ESC(c[4] || '')} ${HS_ESC(c[5] || '')}</div>
+                <div class="fs-11 c-txt-l">발행 ${HS_ESC(c[6] || '-')} <span style="white-space:nowrap">→ 유효 ${HS_ESC(c[7] || '-')}</span></div>
                 <div class="fs-11 c-txt-l">판정 ${HS_ESC(c[8] || '-')} · 등록 ${HS_ESC((c[11] || '').substring(0, 10))} ${HS_ESC((c[10] || '').split('@')[0])}</div>
                 ${c[9] ? `<a href="${HS_ESC(c[9])}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">성적서 열기 ›</a>` : ''}
               </div>
