@@ -17532,7 +17532,8 @@ async function boxShipEnsureHeader() {
 }
 
 /* 상자 하나 저장 — 봉마다 출하기록 한 행 + 완제품개별 출하완료 + LOT 잔량 + 다 나간 LOT 의 작업지시서 출하완료.
-   저장이 안 되면(막힘·그 사이 처리됨·끊김) 거절과 같은 낮은 소리. 성공은 택배만 송장을 읽을 때 이미 «삑» 하고 울렸다 — 송도·콜로는 «저장» 단추로 부르므로 성공은 소리 없이 알림·«방금 저장» 으로만 알린다(성공 소리를 더할지는 현장 시험에서 정한다) */
+   소리 — 저장이 안 되면(막힘·그 사이 처리됨·끊김) 거절과 같은 낮은 소리, 송도·콜로가 저장되면 높은 «삑» 한 번(2026-10-05 현장 결정).
+   택배는 송장을 읽을 때 이미 «삑» 하고 울렸으므로 저장 성공에서 또 울리지 않는다 — 한 상자에 «삑» 이 두 번이면 «두 번 저장됐나» 로 읽힌다. */
 async function boxShipSave(ref) {
   const bs = State._boxShip;
   if (!bs || !bs.bags.length) return;
@@ -17640,6 +17641,7 @@ async function boxShipSave(ref) {
     bs.lastSaved = `${bs.bags.length}봉 · ${mode.waybill ? '송장 ' + ref : ref}${rows.length < bs.bags.length ? ' (끊긴 저장 이어 쓰기)' : ''}`;
     bs.bags = [];
     bs.fresh = true;
+    if (!mode.waybill) boxShipBuzz(true);   // 송도·콜로는 «저장» 단추의 결과가 성공 소리 — 택배는 송장을 읽을 때 이미 울렸다
     toast(`📦 저장 — ${bs.lastSaved}${temp ? ` · 냉동고 ${temp.temp}°C 자동기록` : ''}`, 'suc', 3500);
     renderBoxShip();
   } catch (e) {

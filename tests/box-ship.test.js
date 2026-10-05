@@ -752,7 +752,7 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
     assert.deepStrictEqual(plain(ok.buzz), [], '성공은 조용하다 — 송장을 읽을 때 이미 «삑» 하고 울렸다');
     assert.strictEqual(ok.last()[1], 'suc');
   });
-  await at('저장이 안 되면 낮은 소리 — 송도 직배·콜로 픽업도 같다(그 사이 처리됨 · 끊긴 봉이 섞임 · 끊김은 «삑삑» 한 번씩) · 성공은 소리 없이 알림·«방금 저장» 으로만', async () => {
+  await at('저장 소리 — 송도 직배·콜로 픽업: 성공은 높은 «삑» 한 번 · 안 되면(그 사이 처리됨 · 끊긴 봉이 섞임 · 끊김) «삑삑» 한 번씩', async () => {
     for (const mode of ['songdo', 'colo']) {
       const tag = BOX_SHIP_CFG.MODES[mode].tag;
       const ref = `D-20261004-${tag}`;
@@ -771,7 +771,7 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
       }
       const done = saveWorld(); done.bs.mode = mode; done.put('FG-1', 'FG-2');
       await done.save(ref);
-      assert.deepStrictEqual(plain(done.buzz), [], `${mode} — 성공은 소리가 없다(«저장» 단추를 눌러 부르므로 화면 알림·«방금 저장» 으로 알린다)`);
+      assert.deepStrictEqual(plain(done.buzz), [true], `${mode} — 성공은 높은 «삑» 정확히 한 번(«저장» 단추를 누른 결과를 소리로도 알린다)`);
       assert.strictEqual(done.last()[1], 'suc');
       assert.ok(done.bs.lastSaved.includes(ref), done.bs.lastSaved);
     }
