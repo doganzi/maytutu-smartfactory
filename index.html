@@ -4706,7 +4706,7 @@ Screens['lot-detail'] = async (params = {}) => {
       <div class="row between" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;gap:6px">
         <span class="fs-13 fw-7">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></span>
         <div class="row" style="gap:4px;flex-wrap:wrap">
-          ${[['recent','최근순'],['old','오래된순'],['exp','소비기한'],['remain','잔량순']].map(([k,lb]) => `<button class="btn btn-sm ${_lotSortKey===k?'btn-pri':'btn-outline'}" style="padding:3px 9px;font-size:11px;min-height:auto" onclick="setLotSort('${k}')">${lb}</button>`).join('')}
+          ${[['recent','최근순'],['old','오래된순'],['exp','소비기한'],['remain','잔량순']].map(([k,lb]) => `<button class="btn btn-sm ${_lotSortKey===k?'btn-pri':'btn-outline btn-gray'}" style="padding:3px 9px;font-size:11px;min-height:auto" onclick="setLotSort('${k}')">${lb}</button>`).join('')}
         </div>
       </div>
       ${displayLots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : displayLots.map(l => {
@@ -6662,7 +6662,7 @@ Screens['data-audit'] = async () => {
       <div class="card">
         <div class="fs-13 fw-7 mb-4">🔄 공정기록 격자 변환 <span class="badge badge-gray">CCP · 1회성</span></div>
         <div class="fs-11 c-txt-l mb-8">구 7단계 금속검출 기록을 신 격자 양식으로 변환합니다. <b>원본 7단계는 <code>_legacy</code>에 보존</b>(되돌리기 가능)되고, 구형에 없던 위치값은 추론(정상)이라 <code>_migrated</code>로 표기됩니다. <b>스캔(dry-run)으로 대상을 먼저 확인</b>한 뒤 실행하세요.</div>
-        <button class="btn btn-outline btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
+        <button class="btn btn-outline btn-pri btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
         <div id="ccp-migrate-result"></div>
       </div>
       <div id="audit-result"></div>
@@ -7564,7 +7564,7 @@ const DB_SHEETS = {
   '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
   '원재료LOT': ['lotId','itemCode','itemName','supplier','qty','unit','mfgDate','expDate','remain','status','indivCount','temp'],
   '완제품LOT': ['lotId','itemCode','itemName','qty','unit','prodDate','expDate','woId','remain','status','packCount','temp'],
-  '소모품LOT': ['lotId','itemCode','itemName','qty','unit','recvDate','expDate','status'],
+  '소모품LOT': ['lotId','itemCode','itemName','qty','unit','recvDate','remain','status'],
   '원재료개별': ['indivId','lotId','itemCode','status','qty/dt','note','qrUrl'],
   '완제품개별': ['indivId','lotId','itemCode','status','shipDt','shipperOrNote','qrUrl'],
   '공정기록': ['woId','stepNo','stepName','stepType','usedLotIds','stepData(JSON)','photoUrls','actualValue','photoUrl','checkResult','recordStatus','completedAt','worker'],
@@ -7573,11 +7573,11 @@ const DB_SHEETS = {
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
   '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status','매입단가'],
   '완제품품목': FG_SHEET_HEADER,
-  '소모품품목': ['code','name','spec','unit','status'],
-  '거래처': ['code','name','type','phone','address'],
+  '소모품품목': ['code','name','spec','unit','category','minStock'],
+  '거래처': ['code','name','type','contact','phone','addr','note'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
   '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],
-  '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
+  '입고기록': ['rcvId','type','supplier','itemCode','itemName','lotId','qty','unit','recvDt','receiver','status','photoUrl'],
   '기기관리': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
   'HACCP기준': HACCP_STD_HEADER,
   '시험성적서': CERT_SHEET_HEADER,
@@ -11658,7 +11658,7 @@ Screens['temp-log'] = async () => {
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th><th style="padding:6px 8px;text-align:left">사유</th></tr></thead>
           <tbody>${logHtml || `<tr><td colspan="5" style="padding:14px;text-align:center" class="c-txt-l fs-12">${State.tempFilter === 'todo' ? '이 기간에 사유 미기재 기록이 없습니다' : '해당 기간 기록 없음'}</td></tr>`}</tbody></table></div>
-      ${shown < viewAll.length ? `<button class="btn btn-outline btn-full" style="margin-top:8px" onclick="State.tempLimit=${State.tempLimit + 200};Router.go('temp-log')">더 보기 (남은 ${viewAll.length - shown}건)</button>` : ''}
+      ${shown < viewAll.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px" onclick="State.tempLimit=${State.tempLimit + 200};Router.go('temp-log')">더 보기 (남은 ${viewAll.length - shown}건)</button>` : ''}
       <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록<br>알람은 <b>최근 6시간 평균</b> 기준 (개별 기록의 적합/이탈 판정은 그대로 보존)<br>이탈·결측 행의 <b>사유</b>는 성애 제거·문 열림 등 원인을 기록하는 칸입니다 (기록자·기록시각 자동 저장)</div>
     </div>`;
 };
@@ -15352,7 +15352,7 @@ Screens['approval-detail'] = async (params = {}) => {
           <div class="fs-11 c-txt-l mb-8">전 공정 기록·CCP 결과·사진·LOT 추적을 포함한 HACCP 생산기록</div>
           <div class="row" style="gap:8px">
             <button class="btn btn-pri" style="flex:1" onclick="previewWOPdf('${wo[0]}')">📥 PDF 미리보기</button>
-            ${wo[19] ? `<button class="btn btn-outline" style="flex:1" onclick="window.open('${wo[19]}','_blank')">🔗 저장본 열기</button>` : ''}
+            ${wo[19] ? `<button class="btn btn-outline btn-pri" style="flex:1" onclick="window.open('${wo[19]}','_blank')">🔗 저장본 열기</button>` : ''}
           </div>
         </div>
 
