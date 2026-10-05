@@ -176,6 +176,8 @@ a { text-decoration:none; color:inherit; }
 .card .fs-14.fw-6,
 .card .fs-14.fw-7,
 .card > .row.between > span.fs-16 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 금속검출 실시간현황 — 위 말줄임 규칙이 설명 문장을 한 줄로 잘라 «이 시간의 검출은 확인할 수 없습니다» 같은 핵심 구절이 폰에서 사라진다. 이 화면(.metal-wrap) 안에서만 줄바꿈을 되살린다 */
+.metal-wrap .card .fs-11.c-txt-l, .metal-wrap .card .fs-12.c-txt-l, .metal-wrap .card .fs-14.fw-7 { overflow:visible; text-overflow:clip; white-space:normal; }
 /* LOT ID 전용 — 모바일에서 잘림 방지 */
 .lot-id { font-family:monospace; font-size:12px; font-weight:700; word-break:break-all; white-space:normal!important; overflow:visible!important; text-overflow:unset!important; line-height:1.4; color:var(--pri); letter-spacing:-0.3px; }
 .lot-card-header { display:flex; flex-direction:column; gap:6px; }
@@ -1621,7 +1623,7 @@ const Router = {
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
       vendors: 'more', haccp: 'more', 'bom-calc': 'more',
       'data-audit': 'more', 'ccp-fill': 'more', 'wo-pdfs': 'more', 'db-browser': 'more',
-      'ccp-dev': 'more',
+      'ccp-dev': 'more', 'metal-live': 'more',
     };
     State.activeTab = tabMap[s] || State.activeTab;
 
@@ -2235,21 +2237,24 @@ Screens.dashboard = async () => {
   let certAlerts = [], openDevCount = 0;
 
   try {
-    const [woData, rmItems, rmLots, eqData, certData, devData] = await Promise.all([
+    const [woData, rmItems, rmLots, eqData, certData, devData, fgMaster] = await Promise.all([
       SheetsAPI.getAll('작업지시서').catch(() => []),
       SheetsAPI.getAll('원재료품목').catch(() => []),
       SheetsAPI.getAll('원재료LOT').catch(() => []),
       SheetsAPI.getAll('기기관리').catch(() => []),
       SheetsAPI.getAll('시험성적서').catch(() => []),   // 시트 없으면 [] — 화면은 그대로 동작
       SheetsAPI.getAll('기준편차').catch(() => []),
+      SheetsAPI.getAll('완제품품목').catch(() => []),   // 품목제조보고번호 — 마스터에서만 읽는다
     ]);
+    const fgNo = FgReportNo.map(fgMaster);
 
     // 시험성적서 만료·임박 (검교정 알림과 동일 정책)
     certData.forEach(c => {
       if ((c[12] || '유효') === '폐기') return;
       const st = HaccpStd.certStatus(c[7]);
       if (st.badge === 'err' || st.badge === 'warn') {
-        certAlerts.push({ name: c[3] || c[2] || '-', code: c[2] || '', lab: c[4] || '', until: c[7] || '-', ...st });
+        certAlerts.push({ name: c[3] || c[2] || '-', code: c[2] || '', lab: c[4] || '', certNo: c[5] || '', until: c[7] || '-',
+                          rnHtml: FgReportNo.html(fgNo, c[2]), rnText: FgReportNo.of(fgNo, c[2]) || '', ...st });
       }
     });
     certAlerts.sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999));
@@ -2357,7 +2362,7 @@ Screens.dashboard = async () => {
     // 🔕 CertNotif.off() = 이 기기에서 껐다(FR-20260813-3ZC). 토스트만 멈추고 현황 카드는 남는다.
     if (certAlerts.length > 0 && !CertNotif.off()) {
       const expired = certAlerts.filter(a => a.badge === 'err');
-      if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${expired.map(a=>a.name).join(', ')}`, 'err', 6000);
+      if (expired.length > 0) toast(`🧪 시험성적서 만료 ${expired.length}건: ${[...new Set(expired.map(a => a.name + (a.rnText ? ` (${a.rnText})` : '')))].join(', ')}`, 'err', 6000);
       const soon = certAlerts.filter(a => a.badge !== 'err');
       if (soon.length > 0) toast(`🧪 시험성적서 갱신 임박 ${soon.length}건: ${soon.map(a=>a.name).join(', ')}`, 'warn', 5000);
     }
@@ -2520,7 +2525,9 @@ Screens.dashboard = async () => {
             <div class="row between">
               <div>
                 <div class="fs-14 fw-6" style="color:${a.badge==='err'?'var(--err,#c62828)':'var(--warn,#e65100)'}">${a.name}</div>
-                <div class="fs-12 c-txt-l">${a.code} ${a.lab} · 유효기한: ${a.until}</div>
+                <!-- .card 안의 fs-12+c-txt-l 은 CSS 가 한 줄로 잘라 12자리 번호 끝이 «…» 로 사라진다 — 줄바꿈을 허용해 번호가 끝까지 보이게 -->
+                <div class="fs-12 c-txt-l" style="white-space:normal">${a.code}${a.rnHtml ? ' · ' + a.rnHtml : ''}</div>
+                <div class="fs-12 c-txt-l" style="white-space:normal">${HS_ESC(a.lab)} ${HS_ESC(a.certNo)} · 유효기한: ${HS_ESC(a.until)}</div>
               </div>
               <span class="badge badge-${a.badge}">${a.label}</span>
             </div>
@@ -4694,7 +4701,7 @@ Screens['lot-detail'] = async (params = {}) => {
       <div class="row between" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;gap:6px">
         <span class="fs-13 fw-7">LOT 목록 <span class="fs-11 c-txt-l">${isFG ? '(클릭하여 개별 항목 확인/출하)' : '(미사용/사용중만 인쇄 가능)'}</span></span>
         <div class="row" style="gap:4px;flex-wrap:wrap">
-          ${[['recent','최근순'],['old','오래된순'],['exp','소비기한'],['remain','잔량순']].map(([k,lb]) => `<button class="btn btn-sm ${_lotSortKey===k?'btn-pri':'btn-outline'}" style="padding:3px 9px;font-size:11px;min-height:auto" onclick="setLotSort('${k}')">${lb}</button>`).join('')}
+          ${[['recent','최근순'],['old','오래된순'],['exp','소비기한'],['remain','잔량순']].map(([k,lb]) => `<button class="btn btn-sm ${_lotSortKey===k?'btn-pri':'btn-outline btn-gray'}" style="padding:3px 9px;font-size:11px;min-height:auto" onclick="setLotSort('${k}')">${lb}</button>`).join('')}
         </div>
       </div>
       ${displayLots.length === 0 ? '<div class="fs-12 c-txt-l">LOT 없음</div>' : displayLots.map(l => {
@@ -5383,6 +5390,7 @@ Screens.more = () => {
     { icon: '📦', label: '박스 출하', desc: '봉 라벨 → 송장 찍기 · 송도 직배 · 콜로 픽업', target: 'box-ship' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '🌡️', label: '동결온도 모니터링', desc: '냉장/냉동 실시간 온도 로그 · HACCP 기록 PDF', target: 'temp-log' },
+    { icon: '🧲', label: '금속검출 실시간현황', desc: '검출기 자동 기록 · 통신 상태 · 모니터링 공백', target: 'metal-live' },
     { icon: '🏷️', label: '라벨 인쇄', desc: 'QR 라벨 생성 및 인쇄', target: 'label-print' },
     { icon: '📄', label: '작업지시서 PDF', desc: '저장된 HACCP 생산기록 PDF 모음', target: 'wo-pdfs' },
     { icon: '🧮', label: 'BOM 계산기', desc: '봉수/kg 입력 → 자재별 필요량·재고 비교', target: 'bom-calc' },
@@ -6490,7 +6498,7 @@ Screens['data-audit'] = async () => {
       <div class="card">
         <div class="fs-13 fw-7 mb-4">🔄 공정기록 격자 변환 <span class="badge badge-gray">CCP · 1회성</span></div>
         <div class="fs-11 c-txt-l mb-8">구 7단계 금속검출 기록을 신 격자 양식으로 변환합니다. <b>원본 7단계는 <code>_legacy</code>에 보존</b>(되돌리기 가능)되고, 구형에 없던 위치값은 추론(정상)이라 <code>_migrated</code>로 표기됩니다. <b>스캔(dry-run)으로 대상을 먼저 확인</b>한 뒤 실행하세요.</div>
-        <button class="btn btn-outline btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
+        <button class="btn btn-outline btn-pri btn-full" onclick="ccpMigrateScan()">대상 스캔 (dry-run)</button>
         <div id="ccp-migrate-result"></div>
       </div>
       <div id="audit-result"></div>
@@ -7335,6 +7343,40 @@ const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근�
 const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18, mbCodes: 19 };
 const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
                          '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가','마켓봄코드'];
+/** 품목제조보고번호 — 정본은 «완제품품목» 마스터 한 곳(FG_EXT.reportNo).
+    성적서·알림·점검 항목에는 번호를 복사해 두지 않고 제품코드로 마스터를 찾아 보여 준다 →
+    마스터를 고치면 LiveSync(30초) 한 번에 모든 화면이 같이 바뀐다(번호가 두 곳에 있으면 한쪽이 낡는다). */
+const FgReportNo = {
+  LABEL: '품목제조보고번호',
+  /** 완제품품목 행들 → Map(제품코드 → 번호). 번호가 빈 품목은 넣지 않는다. */
+  map(fgRows) {
+    const m = new Map();
+    (fgRows || []).forEach(r => {
+      const no = r && String(r[FG_EXT.reportNo] ?? '').trim();
+      if (no) m.set(String(r[0]), no);
+    });
+    return m;
+  },
+  /** 완제품 코드(FG###)인데 마스터에 번호가 없으면 null(«미등록») — 원·부재료 코드는 해당 없음('' 반환) */
+  of(map, code) {
+    const c = String(code || '');
+    if (map.has(c)) return map.get(c);
+    return /^FG\d+$/.test(c) ? null : '';
+  },
+  /** 화면용 조각(HTML) — 번호 있음: «품목제조보고번호 <b>번호</b>» · 미등록: 경고색 · 해당 없음: '' */
+  html(map, code) {
+    const no = this.of(map, code);
+    if (no === '') return '';
+    return no === null
+      ? `<span class="c-warn">${this.LABEL} 미등록</span>`
+      : `${this.LABEL} <b>${HS_ESC(no)}</b>`;
+  },
+  /** 글줄용(토스트·점검 항목 설명) — 해당 없으면 '' */
+  text(map, code) {
+    const no = this.of(map, code);
+    return no === '' ? '' : `${this.LABEL} ${no === null ? '미등록' : no}`;
+  },
+};
 /** 성적서 만료 임박 기준(일) — 검교정 알림과 동일 정책 */
 const CERT_WARN_DAYS = 30;
 
@@ -7358,7 +7400,7 @@ const DB_SHEETS = {
   '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
   '원재료LOT': ['lotId','itemCode','itemName','supplier','qty','unit','mfgDate','expDate','remain','status','indivCount','temp'],
   '완제품LOT': ['lotId','itemCode','itemName','qty','unit','prodDate','expDate','woId','remain','status','packCount','temp'],
-  '소모품LOT': ['lotId','itemCode','itemName','qty','unit','recvDate','expDate','status'],
+  '소모품LOT': ['lotId','itemCode','itemName','qty','unit','recvDate','remain','status'],
   '원재료개별': ['indivId','lotId','itemCode','status','qty/dt','note','qrUrl'],
   '완제품개별': ['indivId','lotId','itemCode','status','shipDt','shipperOrNote','qrUrl'],
   '공정기록': ['woId','stepNo','stepName','stepType','usedLotIds','stepData(JSON)','photoUrls','actualValue','photoUrl','checkResult','recordStatus','completedAt','worker'],
@@ -7367,11 +7409,11 @@ const DB_SHEETS = {
   'SOP레시피': ['sopId','rmCode','rmName','ratio','unit','stepOrder'],
   '원재료품목': ['code','name','spec','sku','unit','category','reorderQty','allergen','storage','reorderPoint','leadDays','orderCycle','status','매입단가'],
   '완제품품목': FG_SHEET_HEADER,
-  '소모품품목': ['code','name','spec','unit','status'],
-  '거래처': ['code','name','type','phone','address'],
+  '소모품품목': ['code','name','spec','unit','category','minStock'],
+  '거래처': ['code','name','type','contact','phone','addr','note'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
   '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod','waybill','shipMethod','receiver'],
-  '입고기록': ['rcvId','itemCode','lotId','qty','unit','recvDt','vendor','receiver','note'],
+  '입고기록': ['rcvId','type','supplier','itemCode','itemName','lotId','qty','unit','recvDt','receiver','status','photoUrl'],
   '기기관리': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
   'HACCP기준': HACCP_STD_HEADER,
   '시험성적서': CERT_SHEET_HEADER,
@@ -9454,6 +9496,7 @@ Screens['items-fg'] = async () => {
 
   const isAdmin = State.user?.role === 'admin';
   window._fgItemsCache = items;
+  const fgNoMap = FgReportNo.map(items);
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -9488,6 +9531,7 @@ Screens['items-fg'] = async () => {
                   ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
                 </div>
               </div>
+              <div class="fs-12 c-txt-l">🔖 ${FgReportNo.html(fgNoMap, code)}${isAdmin && !fgNoMap.has(String(code)) ? ' <span style="color:var(--pri)">· ✏️에서 입력</span>' : ''}</div>
               <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
               <div class="fs-12 c-txt-l">소비기한: 생산일+6개월 · 보관: ${storage || '-'}</div>
@@ -10318,6 +10362,8 @@ const HaccpStd = {
 
   /** 자동 준수 점검 — 지금 데이터로 판정 가능한 것만. 각 항목은 편차로 등록할 수 있다. */
   compliance({ std, certs, fgItems, rmItems, devs }) {
+    const fgNo = FgReportNo.map(fgItems);
+    const rnPart = code => { const t = FgReportNo.text(fgNo, code); return t ? ` · ${t}` : ''; };
     const out = [];
     const today = formatDate();
     const add = (sev, kind, title, detail, basis) => out.push({ sev, kind, title, detail, basis });
@@ -10346,8 +10392,8 @@ const HaccpStd = {
     certs.forEach(c => {
       if ((c[12] || '유효') === '폐기') return;
       const st = this.certStatus(c[7]);
-      if (st.badge === 'err') add('err', '성적서만료', `${c[3] || c[2]} 성적서 만료`, `유효기한 ${c[7]} (${st.label}) · ${c[4] || ''} ${c[5] || ''}`, '원·부재료 입고검사 기준');
-      else if (st.badge === 'warn') add('warn', '성적서만료', `${c[3] || c[2]} 성적서 ${st.label}`, `유효기한 ${c[7] || '미기재'} · ${c[4] || ''}`, '원·부재료 입고검사 기준');
+      if (st.badge === 'err') add('err', '성적서만료', `${c[3] || c[2]} 성적서 만료`, `유효기한 ${c[7]} (${st.label}) · ${c[4] || ''} ${c[5] || ''}${rnPart(c[2])}`, '원·부재료 입고검사 기준');
+      else if (st.badge === 'warn') add('warn', '성적서만료', `${c[3] || c[2]} 성적서 ${st.label}`, `유효기한 ${c[7] || '미기재'} · ${c[4] || ''}${rnPart(c[2])}`, '원·부재료 입고검사 기준');
     });
     const validCodes = new Set(certs.filter(c => (c[12] || '유효') !== '폐기' && this.certStatus(c[7]).badge !== 'err').map(c => c[2]));
     rmItems.filter(i => i[0] !== 'RM002' && i[12] !== '비활성').forEach(i => {
@@ -10362,7 +10408,7 @@ const HaccpStd = {
       if (!i[FG_EXT.foodType]) miss.push('식품유형');
       if (!i[FG_EXT.packSize]) miss.push('제조포장단위');
       if (!i[5]) miss.push('소비기한');
-      if (miss.length) add('warn', '완제품정보', `${i[1] || i[0]} 규제정보 누락`, `누락: ${miss.join(', ')}`, '품목제조보고서');
+      if (miss.length) add('warn', '완제품정보', `${i[1] || i[0]} 규제정보 누락`, `누락: ${miss.join(', ')}${i[FG_EXT.reportNo] ? rnPart(i[0]) : ''}`, '품목제조보고서');
       if (!i[9] && !i[FG_EXT.labelFile]) add('warn', '라벨', `${i[1] || i[0]} 라벨 미등록`, '라벨 이미지·원본 링크가 모두 없습니다.', '식품 등의 표시기준');
     });
 
@@ -10508,7 +10554,7 @@ function hsStandardTab(std, findings) {
           <div class="row between">
             <div style="flex:1">
               <div class="fs-13 fw-7" style="color:${sevColor(f.sev)}">${HS_ESC(f.title)}</div>
-              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5">${HS_ESC(f.detail)}</div>
+              <div class="fs-11 c-txt-l mt-2" style="line-height:1.5;white-space:normal">${HS_ESC(f.detail)}</div>
               <div class="fs-11 c-txt-l mt-2">근거: ${HS_ESC(f.basis)}</div>
             </div>
             ${f.tracked
@@ -10521,6 +10567,7 @@ function hsStandardTab(std, findings) {
 
 function hsCertTab(certs, rmItems, fgItems) {
   const rows = certs.slice().sort((a, b) => String(a[7] || '').localeCompare(String(b[7] || '')));
+  const fgNo = FgReportNo.map(fgItems);
   const opts = [
     ...rmItems.filter(i => i[12] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '원재료' })),
     ...fgItems.filter(i => i[7] !== '비활성').map(i => ({ code: i[0], name: i[1], kind: '완제품' })),
@@ -10562,6 +10609,7 @@ function hsCertTab(certs, rmItems, fgItems) {
             <div class="row between">
               <div style="flex:1">
                 <div class="fs-13 fw-7">${HS_ESC(c[3] || c[2] || '-')} <span class="fs-11 c-txt-l">${HS_ESC(c[1] || '')} ${HS_ESC(c[2] || '')}</span></div>
+                ${FgReportNo.html(fgNo, c[2]) ? `<div class="fs-11 c-txt-l mt-2">${FgReportNo.html(fgNo, c[2])}</div>` : ''}
                 <div class="fs-11 c-txt-l mt-2">${HS_ESC(c[4] || '')} ${HS_ESC(c[5] || '')} · 발행 ${HS_ESC(c[6] || '-')} → 유효 ${HS_ESC(c[7] || '-')}</div>
                 <div class="fs-11 c-txt-l">판정 ${HS_ESC(c[8] || '-')} · 등록 ${HS_ESC((c[11] || '').substring(0, 10))} ${HS_ESC((c[10] || '').split('@')[0])}</div>
                 ${c[9] ? `<a href="${HS_ESC(c[9])}" target="_blank" rel="noopener" class="fs-11" style="color:var(--pri)">성적서 열기 ›</a>` : ''}
@@ -11446,10 +11494,319 @@ Screens['temp-log'] = async () => {
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:left">기기</th><th style="padding:6px 8px;text-align:right">온도℃</th><th style="padding:6px 8px;text-align:center">판정</th><th style="padding:6px 8px;text-align:left">사유</th></tr></thead>
           <tbody>${logHtml || `<tr><td colspan="5" style="padding:14px;text-align:center" class="c-txt-l fs-12">${State.tempFilter === 'todo' ? '이 기간에 사유 미기재 기록이 없습니다' : '해당 기간 기록 없음'}</td></tr>`}</tbody></table></div>
-      ${shown < viewAll.length ? `<button class="btn btn-outline btn-full" style="margin-top:8px" onclick="State.tempLimit=${State.tempLimit + 200};Router.go('temp-log')">더 보기 (남은 ${viewAll.length - shown}건)</button>` : ''}
+      ${shown < viewAll.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px" onclick="State.tempLimit=${State.tempLimit + 200};Router.go('temp-log')">더 보기 (남은 ${viewAll.length - shown}건)</button>` : ''}
       <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">HACCP 기준: 냉동창고 ≤ −18℃ · 냉장고 0~5℃ · 10분마다 자동기록<br>알람은 <b>최근 6시간 평균</b> 기준 (개별 기록의 적합/이탈 판정은 그대로 보존)<br>이탈·결측 행의 <b>사유</b>는 성애 제거·문 열림 등 원인을 기록하는 칸입니다 (기록자·기록시각 자동 저장)</div>
     </div>`;
 };
+
+/* ── 금속검출 실시간현황 (NMD-530) ──────────────────────────────────────────
+   검출기가 센 검출(리젝트) 수를 수집기가 시트에 적재한 것을 «읽기만» 한다 (계약서 docs/NMD530_PIPELINE.md §6·§9).
+   ※ 측정하지 못한 시간을 «이상 없음» 으로 보이지 않도록 통신끊김·수집기정지·리셋은 «모니터링 공백» 으로 따로 센다. */
+const METAL_STALE_MS = 3 * 60000;   // 상태 행 갱신이 이보다 오래되면 수집기 무응답 (heartbeat 60초의 3배)
+const METAL_SKEW_MS = 2 * 60000;    // 서버수신시각이 이 기기 시계보다 이만큼 «미래» 면 시계 불일치 (경과 시간을 믿을 수 없다)
+const METAL_TICK_MS = 30000;        // 연결·공백 카드만 이 간격으로 다시 그린다 (시트는 다시 읽지 않는다)
+const METAL_KIND = {                // 시트 B열 한글 → 코드 · 배지
+  '검출': 'DETECT', '미관측구간': 'GAP', '리셋': 'RESET', '통신끊김': 'LINK_DOWN', '통신복구': 'LINK_UP', '수집기시작': 'COLLECTOR_START',
+};
+const METAL_KIND_UI = {
+  DETECT: { l: '검출', b: 'err' }, GAP: { l: '미관측구간', b: 'warn' }, RESET: { l: '리셋', b: 'warn' },
+  LINK_DOWN: { l: '통신끊김', b: 'err' }, LINK_UP: { l: '통신복구', b: 'suc' }, COLLECTOR_START: { l: '수집기시작', b: 'gray' },
+};
+const metalLabel = kind => (METAL_KIND_UI[kind] || { l: String(kind || '-') }).l;
+const metalBadge = kind => (METAL_KIND_UI[kind] || { b: 'gray' }).b;
+function metalNum(v) {   // 건수 칸(시트 C·D·E·G·I·J·K)은 0 이상의 정수만 쓴다 — 빈칸·공백·음수·소수·무한·글자는 null (0 으로 위장 금지)
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? v : null;
+  const t = String(v == null ? '' : v).trim();
+  return /^\d{1,15}$/.test(t) ? Number(t) : null;
+}
+const metalTs = s => (String(s || '').trim() ? parseLogTs(s) : 0);
+const metalMin = sec => (sec > 0 ? Math.max(1, Math.round(sec / 60)) : 0);   // 짧아도 0분으로 감추지 않는다
+
+/* 로그 시트 행(A~O) → 이벤트. 시각을 읽을 수 없는 행은 버리되, 몇 건 버렸는지는 metalCountSkipped 가 센다. */
+function metalParseLog(rows) {
+  const out = [];
+  (rows || []).forEach(r => {
+    if (!r) return;
+    const t = metalTs(r[0]);
+    if (!t) return;
+    const kindKo = String(r[1] || '').trim();
+    out.push({
+      t, at: String(r[0]), kind: METAL_KIND[kindKo] || kindKo, n: metalNum(r[2]), total: metalNum(r[3]), prev: metalNum(r[4]),
+      from: metalTs(r[5]), fromAt: String(r[5] || ''), product: metalNum(r[6]), flags: String(r[7] || '').trim(),
+      ch1: metalNum(r[8]), ch2: metalNum(r[9]), downSec: metalNum(r[10]), device: String(r[11] || ''), id: String(r[14] || ''),
+    });
+  });
+  return out;
+}
+
+/* 내용은 있는데 시각(A)을 읽을 수 없는 행 수 — 조용히 버리면 합계가 모르게 줄어든다. (헤더 행은 SheetsAPI.getAll 이 이미 뗀다) */
+function metalCountSkipped(rows) {
+  return (rows || []).filter(r => Array.isArray(r) && r.some(c => String(c == null ? '' : c).trim()) && !metalTs(r[0])).length;
+}
+
+/* 상태 시트 행(A~M, 기기당 1행) → 상태. device 가 없으면 첫 행. 없으면 null. */
+function metalParseStatus(rows, device) {
+  const list = (rows || []).filter(r => r && String(r[0] || '').trim());
+  const r = device ? list.find(x => String(x[0]).trim() === device) : list[0];
+  if (!r) return null;
+  return {
+    device: String(r[0]).trim(), recvAt: String(r[1] || ''), recv: metalTs(r[1]), pc: metalTs(r[2]),
+    link: String(r[3] || '').trim().toUpperCase(), total: metalNum(r[4]), lastValid: metalTs(r[5]), product: metalNum(r[6]),
+    flags: String(r[7] || '').trim(), spool: metalNum(r[8]), host: String(r[9] || ''), version: String(r[10] || ''),
+    downSince: metalTs(r[11]), boot: metalTs(r[12]),
+  };
+}
+
+/* 연결 판정 — 서버수신시각(B) 기준. 3분 «이내»(경계 포함)면 수집기 생존, 그 외·시각 불명은 무응답.
+   수신시각이 이 기기 시계보다 2분 넘게 미래면 «시계 불일치» — 음수 경과를 «정상» 으로 위장하지 않는다. */
+function metalConnState(st, nowMs) {
+  if (!st) return { key: 'idle', label: '가동 전', color: 'var(--txt-l)', badge: 'gray' };
+  if (st.recv && st.recv - nowMs > METAL_SKEW_MS) {
+    return { key: 'clock', label: '시계 불일치 — 이 기기와 서버의 시각이 2분 넘게 어긋나 연결을 판단할 수 없음', color: 'var(--warn)', badge: 'warn' };
+  }
+  const age = nowMs - st.recv;
+  if (!st.recv || age > METAL_STALE_MS) {
+    return { key: 'stale', label: '수집기 응답 없음 — DEV-0007 전원·네트워크 확인', color: 'var(--err)', badge: 'err' };
+  }
+  if (st.link === 'UP') return { key: 'ok', label: '정상', color: 'var(--suc)', badge: 'suc' };
+  return { key: 'linkdown', label: '검출기 통신 끊김 — 수집기는 동작 중', color: 'var(--warn)', badge: 'warn' };
+}
+
+/* [[from,to],…](ms) 합집합의 길이(초) — 같은 시간을 두 사건이 가리켜도 한 번만 센다. */
+function metalUnionSec(iv) {
+  const a = iv.filter(x => x[1] > x[0]).sort((p, q) => p[0] - q[0]);
+  let total = 0, cs = null, ce = null;
+  a.forEach(x => {
+    if (ce == null || x[0] > ce) { if (ce != null) total += ce - cs; cs = x[0]; ce = x[1]; }
+    else if (x[1] > ce) ce = x[1];
+  });
+  if (ce != null) total += ce - cs;
+  return Math.round(total / 1000);
+}
+
+/* 기간 요약 — [startMs, endMs] 안의 이벤트만. endMs 가 없으면 상한 없음(미래 시각 행도 버리지 않는다).
+   모니터링 공백은 «구간의 합집합»: 통신복구 [t-끊김초, t] · 수집기시작 [from, t] · 지금 진행 중인 구간(status 를 주고 endMs 가 없을 때)
+   → 겹치면 한 번만 센다. 진행 중 구간은 통신 끊김이면 [끊김시작, now], 수집기 무응답이면 [마지막 수신, now]. */
+function metalSummarize(events, startMs, endMs, nowMs, status) {
+  const start = startMs || 0, end = endMs || Infinity;
+  const s = { detectTimed: 0, detectGap: 0, lastDetectAt: 0, resets: 0, unreadable: 0, unreadGap: 0, downSec: 0, collectorGapSec: 0, ongoingSec: 0, gapSec: 0, gapMinutes: 0 };
+  const down = [], stop = [], live = [];
+  const clip = (a, b) => [Math.max(a, start), b];
+  (events || []).forEach(e => {
+    if (!e || e.t < start || e.t > end) return;
+    if (e.kind === 'DETECT' || e.kind === 'GAP') {
+      if (e.kind === 'DETECT' && e.t > s.lastDetectAt) s.lastDetectAt = e.t;
+      if (e.n == null) s.unreadable++;                       // 증가분 숫자를 못 읽은 행 — 0 건으로 세지 않고 따로 알린다
+      else if (e.kind === 'DETECT') s.detectTimed += e.n;
+      else s.detectGap += e.n;
+    }
+    else if (e.kind === 'RESET') s.resets++;
+    else if (e.kind === 'LINK_UP' && e.downSec == null) s.unreadGap++;     // 끊김 시간을 못 읽은 복구 행 — 공백 0 으로 세지 않고 따로 알린다
+    else if (e.kind === 'LINK_UP' && e.downSec > 0) down.push(clip(e.t - e.downSec * 1000, e.t));
+    else if (e.kind === 'COLLECTOR_START' && e.from && e.t > e.from) stop.push(clip(e.from, e.t));
+  });
+  if (!endMs && nowMs && status && status.recv && status.recv - nowMs <= METAL_SKEW_MS) {
+    if (nowMs - status.recv > METAL_STALE_MS) {              // 수집기 무응답 — 그 전부터 끊겨 있었으면 그 구간도 공백
+      const dFrom = status.downSince || status.lastValid;   // 끊김 시작 시각이 비면 마지막 유효 응답부터
+      if (status.link !== 'UP' && dFrom && dFrom < status.recv) { live.push(clip(dFrom, status.recv)); down.push(live[live.length - 1]); }
+      live.push(clip(status.recv, nowMs)); stop.push(live[live.length - 1]);
+    } else if (status.link !== 'UP') {                       // 수집기는 살아 있고 검출기와 통신이 끊김
+      live.push(clip(status.downSince || status.lastValid || status.recv, nowMs)); down.push(live[live.length - 1]);
+    }
+  }
+  s.downSec = metalUnionSec(down);
+  s.collectorGapSec = metalUnionSec(stop);
+  s.ongoingSec = metalUnionSec(live);
+  s.gapSec = metalUnionSec(down.concat(stop));
+  s.gapMinutes = metalMin(s.gapSec);
+  return s;
+}
+
+function metalAgo(ms, nowMs) {
+  if (!ms) return '시각 미상';
+  const m = Math.floor((nowMs - ms) / 60000);
+  if (m < 1) return '방금';
+  if (m < 60) return m + '분 전';
+  if (m < 1440) return Math.floor(m / 60) + '시간 전';
+  return Math.floor(m / 1440) + '일 전';
+}
+
+/* 두 시트를 읽는다. 탭이 아직 없으면(Sheets 400) «수집기 가동 전» 으로 빈 값, 그 밖의 실패(권한·네트워크·5xx)는 readFail —
+   읽지 못한 것을 «기록 0건·공백 0분» 으로 보여 주면 안전하다고 오해하게 된다. */
+const metalRead = (tab, track) => SheetsAPI.getAll(tab, false, track).then(
+  rows => ({ rows: rows || [], fail: false }),
+  e => ({ rows: [], fail: !/: 400$/.test(String((e && e.message) || '')) }));
+async function metalLoad() {
+  const [lg, stt] = await Promise.all([metalRead('금속검출로그'), metalRead('금속검출상태')]);
+  return { events: metalParseLog(lg.rows), status: metalParseStatus(stt.rows), skipped: metalCountSkipped(lg.rows), readFail: lg.fail || stt.fail, readAt: Date.now() };
+}
+
+/* 지금 진행 중인 공백을 계산할 수 없는 연결 상태 — 이때 «공백 0분» 을 초록으로 보이면 안전하다고 오해한다 */
+const METAL_UNKNOWN = { clock: '이 기기와 서버의 시계가 어긋나', idle: '상태 시트에 수집기 보고가 없어', unread: '상태 시트를 새로 읽지 못해' };
+const metalCard = (title, color, body, id) =>
+  `<div${id ? ` id="${id}"` : ''} class="card" style="padding:12px 14px;margin-bottom:8px;border-left:4px solid ${color}"><div class="fs-11 c-txt-l">${title}</div>${body}</div>`;
+
+function metalConnCardHtml(st, conn, now) {
+  return metalCard('① 연결', conn.color,
+    `<div class="fs-14 fw-7 mt-4" style="color:${conn.color}">${escReason(conn.label)}</div>` +
+    (st ? `<div class="fs-11 c-txt-l mt-4">${st.recv ? `마지막 확인 ${escReason(st.recvAt.substring(5, 19))} (${metalAgo(st.recv, now)})` : '마지막 확인 시각을 읽지 못함'}${st.spool ? ` · 전송 대기 ${st.spool}건` : ''}</div>` : ''), 'metal-conn');
+}
+
+function metalGapCardHtml(sum, conn) {
+  const unknown = conn && METAL_UNKNOWN[conn.key];
+  return metalCard('⑤ 모니터링 공백', sum.gapMinutes || unknown ? 'var(--warn)' : 'var(--suc)',
+    `<div class="fs-22 fw-8 mt-4">${sum.gapMinutes}분</div>` +
+    `<div class="fs-11 c-txt-l mt-4">통신 끊김 ${metalMin(sum.downSec)}분 · 수집기 정지 ${metalMin(sum.collectorGapSec)}분 (겹친 시간은 한 번만 셈) — 이 시간의 검출은 확인할 수 없습니다</div>` +
+    (unknown ? `<div class="fs-11 fw-7 mt-4" style="color:var(--warn)">⚠ ${unknown} 지금 진행 중인 공백은 계산하지 못했습니다 — 위 분은 기록된 구간만 센 값입니다</div>` : '') +
+    (sum.ongoingSec ? `<div class="fs-11 fw-7 mt-4" style="color:var(--err)">지금도 공백 진행 중 — ${metalMin(sum.ongoingSec)}분째 (수집기 응답이 끊긴 구간은 복구 뒤 기록이 따라 들어오면 줄 수 있음)</div>` : ''), 'metal-gap');
+}
+
+/* 연결·공백 카드는 시간이 흐르는 만큼 달라지므로 30초마다 다시 그린다 — 이때 상태 탭(기기당 1행)만 새로 읽는다.
+   안 읽으면 화면을 열어 둔 채 3분이 지나는 순간 수집기가 멀쩡해도 «응답 없음» 으로 바뀐다. 못 읽으면 «판단 불가» 로 보인다(옛 값을 정상처럼 두지 않는다).
+   화면을 벗어나 카드가 없어지면 스스로 멈춘다. 읽는 사이 화면이 다시 그려졌으면(타이머가 바뀜) 이 틱은 버린다. */
+let metalTimer = null, metalTickBusy = false;
+function metalStopTick() { if (metalTimer) { clearInterval(metalTimer); metalTimer = null; } metalTickBusy = false; }
+const METAL_UNREAD_CONN = { key: 'unread', label: '상태 시트를 새로 읽지 못함 — 연결을 판단할 수 없음', color: 'var(--warn)', badge: 'warn' };
+function metalStartTick(d, sel) {
+  metalStopTick();
+  metalTimer = setInterval(async () => {
+    const me = metalTimer;
+    if (!$id('metal-conn') || !$id('metal-gap')) { metalStopTick(); return; }
+    if (metalTickBusy) return;
+    metalTickBusy = true;
+    let r;
+    try { r = await metalRead('금속검출상태', false); } catch (e) { r = { rows: [], fail: true }; }
+    if (metalTimer !== me) return;
+    metalTickBusy = false;
+    const c = $id('metal-conn'), g = $id('metal-gap');
+    if (!c || !g) { metalStopTick(); return; }
+    const now = Date.now();
+    if (!r.fail) d.status = metalParseStatus(r.rows);
+    const conn = r.fail ? METAL_UNREAD_CONN : metalConnState(d.status, now);
+    c.outerHTML = metalConnCardHtml(d.status, conn, now);
+    g.outerHTML = metalGapCardHtml(metalSummarize(d.events, tempPeriodStart(sel), 0, now, r.fail ? null : d.status), conn);
+  }, METAL_TICK_MS);
+}
+
+Screens['metal-live'] = async () => {
+  metalStopTick();
+  renderHeader('금속검출 실시간현황', '검출기 자동 기록 · 통신 상태', { back: 'more' });
+  showLoading();
+  let d;
+  try { d = await metalLoad(); } catch (e) { d = { events: [], status: null, skipped: 0, readFail: true }; }
+  hideLoading();
+  if (State.currentScreen !== 'metal-live') return;   // 읽는 사이 다른 화면으로 옮겼다 — 남의 화면에 그리지 않는다
+  if (State.metalPeriod == null) State.metalPeriod = 1;
+  if (State.metalLimit == null) State.metalLimit = 200;
+  const now = Date.now();
+  const sel = State.metalPeriod;
+  const periods = [{ d: 1, l: '오늘' }, { d: 7, l: '7일' }, { d: 30, l: '30일' }, { d: 0, l: '전체' }];
+
+  if (d.readFail) {   // 읽지 못한 것을 «0건» 으로 보여 주지 않는다
+    $id('content').innerHTML = `<div class="metal-wrap" style="padding:16px"><div class="card" style="padding:18px;text-align:center;border-left:4px solid var(--err)">
+      <div class="fs-14 fw-7" style="color:var(--err)">시트를 읽지 못했습니다</div>
+      <div class="fs-12 c-txt-l mt-4">금속검출 기록을 불러오지 못해 건수·공백을 표시하지 않습니다.<br>네트워크나 구글 로그인 상태를 확인한 뒤 다시 시도하세요.</div>
+      <button class="btn btn-outline btn-pri btn-full" style="margin-top:12px;min-height:44px" onclick="Router.go('metal-live')">다시 시도</button></div></div>`;
+    return;
+  }
+  if (!d.status && !d.events.length) {
+    $id('content').innerHTML = `<div class="metal-wrap" style="padding:16px"><div class="card" style="padding:18px;text-align:center">
+      <div class="fs-14 fw-7">수집기 가동 전</div>
+      <div class="fs-12 c-txt-l mt-4">금속검출기 자동 기록이 아직 시트에 도착하지 않았습니다.<br>수집기(DEV-0007)가 켜지고 첫 전송이 되면 여기에 나타납니다.</div></div></div>`;
+    return;
+  }
+
+  const conn = metalConnState(d.status, now);
+  const sum = metalSummarize(d.events, tempPeriodStart(sel), 0, now, d.status);
+  const view = d.events.filter(e => e.t >= tempPeriodStart(sel)).sort((a, b) => b.t - a.t);
+  const shown = Math.min(State.metalLimit, view.length);
+  const st = d.status;
+
+  const sumCard = metalCard('② 기간 검출 합계 · ' + periods.find(p => p.d === sel).l, 'var(--err)',
+    `<div class="fs-22 fw-8 mt-4">${sum.detectTimed + sum.detectGap}건</div>` +
+    `<div class="fs-11 c-txt-l mt-4">시각 확정 ${sum.detectTimed}건 + 구간 내(시각 미상) ${sum.detectGap}건</div>`);
+  const lastCard = metalCard('③ 마지막 검출', 'var(--pri)',
+    sum.lastDetectAt
+      ? `<div class="fs-14 fw-7 mt-4">${escReason(metalFmt(sum.lastDetectAt))}</div><div class="fs-11 c-txt-l mt-4">${metalAgo(sum.lastDetectAt, now)}</div>`
+      : `<div class="fs-13 c-txt-l mt-4">이 기간 시각이 확인된 검출 없음</div>`);
+  const flagCard = metalCard('④ 설비 상태 (마지막 보고)', st && st.flags ? 'var(--warn)' : 'var(--suc)',
+    `<div class="fs-13 fw-7 mt-4">${st ? (st.flags ? escReason(st.flags) : '표시된 이상 없음') : '-'}</div>`);
+  const resetCard = metalCard('⑥ 리셋 감지', sum.resets ? 'var(--warn)' : 'var(--gray-l)',
+    `<div class="fs-22 fw-8 mt-4">${sum.resets}회</div>` +
+    (sum.resets ? `<div class="fs-11 c-txt-l mt-4">카운터가 줄었습니다 — 검출기 이력 화면 NG 열과 대조하세요</div>` : ''));
+  const unread = metalUnreadNote(d.skipped, sum.unreadable, sum.unreadGap);
+
+  const rowsHtml = view.slice(0, shown).map(e => {
+    const seg = e.downSec != null ? `${e.downSec}초 끊김` : (e.fromAt ? escReason(e.fromAt.substring(11, 19)) + '~' : '-');
+    return `<tr><td style="padding:5px 8px;white-space:nowrap">${escReason(e.at.substring(5, 19))}</td>
+      <td style="padding:5px 8px;text-align:center"><span class="badge badge-${metalBadge(e.kind)}" style="font-size:10px">${escReason(metalLabel(e.kind))}</span></td>
+      <td style="padding:5px 8px;text-align:right;font-weight:600">${e.n != null ? '+' + e.n : '-'}</td>
+      <td style="padding:5px 8px;text-align:right">${e.total != null ? e.total : '-'}</td>
+      <td style="padding:5px 8px;font-size:11px">${e.flags ? escReason(e.flags) : '-'}</td>
+      <td style="padding:5px 8px;font-size:11px;white-space:nowrap">${seg}</td></tr>`;
+  }).join('');
+
+  $id('content').innerHTML = `
+    <div class="metal-wrap" style="padding:16px">
+      ${metalConnCardHtml(st, conn, now)}${unread}
+      <div style="display:flex;gap:6px;margin:12px 0 8px">
+        ${periods.map(p => `<div onclick="State.metalPeriod=${p.d};State.metalLimit=200;Router.go('metal-live')" style="flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:${sel === p.d ? 'var(--pri)' : 'var(--white)'};color:${sel === p.d ? 'var(--white)' : 'var(--txt)'};border:1px solid var(--gray-l)">${p.l}</div>`).join('')}
+      </div>
+      ${sumCard}${lastCard}${flagCard}${metalGapCardHtml(sum, conn)}${resetCard}
+      <div class="fs-13 fw-7" style="margin:10px 0 6px">검출기 기록 <span class="fs-11 c-txt-l">(${shown < view.length ? `${shown}/${view.length}건` : `${view.length}건`} · 최신순)</span></div>
+      <div class="card" style="padding:0;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">시각</th><th style="padding:6px 8px;text-align:center">구분</th><th style="padding:6px 8px;text-align:right">증가분</th><th style="padding:6px 8px;text-align:right">누적</th><th style="padding:6px 8px;text-align:left">설비상태</th><th style="padding:6px 8px;text-align:left">구간</th></tr></thead>
+          <tbody>${rowsHtml || `<tr><td colspan="6" style="padding:14px;text-align:center" class="c-txt-l fs-12">해당 기간 기록 없음</td></tr>`}</tbody></table></div>
+      ${shown < view.length ? `<button class="btn btn-outline btn-pri btn-full" style="margin-top:8px;min-height:44px" onclick="State.metalLimit=${State.metalLimit + 200};Router.go('metal-live')">더 보기 (남은 ${view.length - shown}건)</button>` : ''}
+      <div class="fs-11 c-txt-l" style="text-align:center;padding:14px 0">검출기가 센 검출(리젝트) 수를 수집 PC 시계 기준으로 자동 기록합니다. 시편(Fe 2.5 · SUS 4.0 mm) 감도 확인은 작업자가 CCP-1P 일지에 기록합니다(병행). 생산수량은 검출기가 0 으로 보고해 쓰지 않습니다.</div>
+    </div>`;
+  metalStartTick(d, sel);
+};
+
+/* 합계에서 빠진 행 안내 — 시각을 못 읽어 버린 행(skipped) · 증가분 숫자를 못 읽은 검출 행(unreadable). 둘 다 0 이면 빈 문자열. */
+function metalUnreadNote(skipped, unreadable, unreadGap) {
+  if (!skipped && !unreadable && !unreadGap) return '';
+  const parts = [];
+  if (skipped) parts.push(`시각을 읽지 못한 행 ${skipped}건`);
+  if (unreadable) parts.push(`증가분 숫자를 읽지 못한 검출 행 ${unreadable}건`);
+  if (unreadGap) parts.push(`끊김 시간을 읽지 못한 통신복구 행 ${unreadGap}건`);
+  return `<div class="card" style="padding:10px 14px;margin-bottom:8px;border-left:4px solid var(--warn)"><div class="fs-12 fw-7" style="color:var(--warn)">⚠ ${parts.join(' · ')}</div>
+    <div class="fs-11 c-txt-l mt-4">아래 합계·공백에서 빠졌습니다. 시트(금속검출로그)의 해당 행을 확인하세요.</div></div>`;
+}
+
+function metalFmt(ms) {   // epoch → 'MM-DD HH:mm:ss' (표시용)
+  const d = new Date(ms), p = n => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/* CCP-1P 참고 줄의 내용 — {show, html}. 읽지 못했으면 «읽지 못함» 을 보이고(줄을 숨기면 «기록 없음» 으로 오해한다), 시트가 비었으면 숨긴다. */
+function metalCcpLineHtml(d, now) {
+  const link = `<span onclick="Router.go('metal-live')" style="display:inline-flex;align-items:center;min-height:44px;padding:0 8px;color:var(--pri);font-weight:600;cursor:pointer">[현황 보기]</span>`;
+  if (!d || d.readFail) return { show: true, html: `<span style="color:var(--warn)">자동 검출 기록을 읽지 못했습니다 — 수기 일지는 그대로 작성하세요</span>${link}` };
+  if (!d.status && !d.events.length) return { show: false, html: '' };
+  const s = metalSummarize(d.events, tempPeriodStart(1), 0, now, d.status);
+  const bad = (d.skipped || 0) + s.unreadable + s.unreadGap;
+  const warn = bad ? ` <span style="color:var(--warn)">· 읽지 못한 행 ${bad}건</span>` : '';
+  const unk = METAL_UNKNOWN[metalConnState(d.status, now).key];
+  const unknown = unk ? ` <span style="color:var(--warn)">· ${unk} 현재 연결 확인 불가</span>` : '';
+  return { show: true, html: `<span>자동 검출 기록 오늘 <b>${s.detectTimed + s.detectGap}건</b> · 모니터링 공백 <b>${s.gapMinutes}분</b>${s.ongoingSec ? ' (진행 중)' : ''}${warn}${unknown}</span>${link}` };
+}
+
+/* CCP-1P 일지 위 참고 줄 — 읽기 전용. 일지 렌더 뒤에 비동기로 채운다.
+   일지 칸(통과량·검출량·판정)은 건드리지 않는다. 전용 div 하나만 쓰므로 입력값을 지우지 않는다. */
+async function metalFillCcpLine(stepNo) {
+  const el = $id(`ccp-auto-${stepNo}`);
+  if (!el) return;
+  let r;
+  try { r = metalCcpLineHtml(await metalLoad(), Date.now()); } catch (e) { r = metalCcpLineHtml(null, Date.now()); }
+  const cur = $id(`ccp-auto-${stepNo}`);   // 읽는 사이 일지가 다시 그려졌으면 새 요소에 채운다(없으면 조용히 끝)
+  if (!cur) return;
+  if (!r.show) { cur.style.display = 'none'; return; }
+  cur.innerHTML = r.html;
+  cur.style.display = 'flex';
+}
+/* ── 끝: 금속검출 실시간현황 ── */
 
 /* 동결온도 HACCP 기록부 PDF — 다운로드/새탭 (generateWOPdf 무수정·독립 구현) */
 async function exportTempLogPdf(days) {
@@ -12409,6 +12766,7 @@ function renderStepContent(step, stepType) {
         <div class="fs-11 c-txt-l mt-4">정상 기준 — 시편(Fe·SUS)=검출 / 제품 통과=불검출 / 제품+시편=검출</div>
       </div>
       <div class="input-group mt-8"><label>제품명</label><input type="text" id="ccp-prod-${stepNo}" value="${ccpProd}" placeholder="제품명" oninput="validateStepInputs(${stepNo})"></div>
+      <div id="ccp-auto-${stepNo}" class="fs-12 c-txt-l" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px"></div>
       <div id="ccp-grid-${stepNo}"></div>
       <div class="row" style="gap:6px;margin:2px 0 10px">
         <button type="button" class="btn btn-sm btn-outline btn-warn flex-1" onclick="ccpGridAddRow(${stepNo},'작업중2h')">+ 2시간 검증 행 추가</button>
@@ -12518,6 +12876,7 @@ function renderStepContent(step, stepType) {
   // ── 기존 공정기록에서 저장된 데이터 복원 (임시저장/완료 모두) ──
   restoreSavedStepData(stepNo, stepType, step);
   if (stepType === 'inspect') ccpGridRender(stepNo);   // 격자 초기 렌더 (신규/복원 모두)
+  if (stepType === 'inspect') metalFillCcpLine(stepNo);   // 자동 검출 참고 줄(읽기 전용·비동기·실패하면 숨김)
 }
 
 /**
@@ -14829,7 +15188,7 @@ Screens['approval-detail'] = async (params = {}) => {
           <div class="fs-11 c-txt-l mb-8">전 공정 기록·CCP 결과·사진·LOT 추적을 포함한 HACCP 생산기록</div>
           <div class="row" style="gap:8px">
             <button class="btn btn-pri" style="flex:1" onclick="previewWOPdf('${wo[0]}')">📥 PDF 미리보기</button>
-            ${wo[19] ? `<button class="btn btn-outline" style="flex:1" onclick="window.open('${wo[19]}','_blank')">🔗 저장본 열기</button>` : ''}
+            ${wo[19] ? `<button class="btn btn-outline btn-pri" style="flex:1" onclick="window.open('${wo[19]}','_blank')">🔗 저장본 열기</button>` : ''}
           </div>
         </div>
 
