@@ -118,6 +118,8 @@ a { text-decoration:none; color:inherit; }
 .btn-outline.btn-gray { color:var(--gray-d); border-color:var(--gray-d); }
 .btn-full { width:100%; }
 .bs-save { position:sticky; bottom:8px; z-index:3; box-shadow:0 4px 14px rgba(0,0,0,0.28); }   /* 박스 출하(송도·콜로) 저장 단추 — 봉이 쌓여 화면 밖으로 밀려도 화면 아래에 붙어 있다 */
+#bs-sticky { position:sticky; top:0; z-index:4; background:var(--white); padding:10px 0 8px; box-shadow:0 8px 10px -8px rgba(0,0,0,0.35); }   /* 박스 출하 — 카메라·지금 할 일은 목록을 내려도 맨 위에 붙어 있다(.bs-save 의 위쪽 짝) */
+@media (max-height:560px) { #bs-sticky { position:static; box-shadow:none; } }   /* 낮은 화면(가로로 눕힘 · 키보드가 올라와 화면이 줄어든 때) — 붙은 카메라가 화면을 다 먹고 번호 입력칸을 덮는다 */
 .btn-sm { padding:6px 12px; font-size:12px; min-height:36px; }
 .btn:disabled { opacity:0.5; cursor:not-allowed; }
 .input-group { margin-bottom:14px; }
@@ -17249,15 +17251,22 @@ Screens['box-ship'] = async (params = {}) => {
   };
   // 머리 단추는 btn-outline 을 쓰지 않는다 — 색 modifier 없는 btn-outline 은 투명 단추 가드(tests/db-sheets-width)가 막는다. 머리 색 바탕 위의 «투명 바탕 · 흰 글자 · 흰 테두리» 를 직접 지정한다.
   renderHeader('📦 박스 출하', '화면 안내를 따라 찍으세요', { back: 'inventory', noRefresh: true, right: '<button class="btn btn-sm" style="background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.6);padding:4px 10px;font-size:12px" onclick="boxShipFinish()">끝내기</button>' });
+  /* 카메라 창(#bs-cam) 안에 읽는 칸(#bs-reader)을 «가운데 맞춰» 둔다 — 영상은 세로(예: 328×492)인데 창은 낮아서, 예전엔 창 위쪽만 잘라 보여 주느라
+     실제로 읽는 칸(영상 한가운데)이 창 아래로 밀려 반쯤 잘리고 테두리 표시도 접혔다. 창이 읽는 칸의 한가운데를 비춰야 «보이는 곳 = 읽는 곳» 이다. */
   $id('content').innerHTML = `
-    <div style="padding:12px 16px 24px">
-      <div class="row" id="bs-modes" style="gap:6px;margin-bottom:10px"></div>
-      <div id="bs-reader" style="width:100%;height:min(42vh,320px);background:#000;border-radius:10px;overflow:hidden"></div>
-      <div id="bs-panel" class="mt-12"><div class="spinner" style="margin:0 auto"></div></div>
-      <div class="row mt-12" style="gap:6px">
+    <div style="padding:0 16px 24px">
+      <div id="bs-sticky">
+        <div id="bs-cam" style="position:relative;width:100%;height:clamp(176px,30vh,236px);background:#000;border-radius:10px;overflow:hidden">
+          <div id="bs-reader" style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%)"></div>
+        </div>
+        <div id="bs-guide" class="mt-8"></div>
+      </div>
+      <div class="row mt-8" style="gap:6px">
         <input type="text" id="bs-manual" autocomplete="off" placeholder="라벨·송장이 안 읽히면 번호 입력" style="flex:1;min-width:0;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px" onkeydown="if(event.key==='Enter'){event.preventDefault();boxShipManual()}">
         <button class="btn btn-sm btn-outline btn-pri" onclick="boxShipManual()">넣기</button>
       </div>
+      <div id="bs-panel" class="mt-8"><div class="spinner" style="margin:0 auto"></div></div>
+      <div class="row mt-12" id="bs-modes" style="gap:6px"></div>
     </div>`;
   try {
     ['완제품개별', '완제품LOT', '출하기록'].forEach(t => SheetsAPI.invalidateCache(t));
@@ -17302,10 +17311,12 @@ async function startBoxShipScan() {
   try {
     sc = new Html5Qrcode('bs-reader', cfg);
     window._boxShipScanner = sc;
-    const w = el.clientWidth || 320, h = el.clientHeight || 240;
+    // 읽는 칸 = 창 안에 들어가는 가로로 넓은 상자(1차원 송장 바코드 · 봉 QR 둘 다) — 창 위아래에 숨 쉴 틈(24px씩)을 둔다
+    const cam = $id('bs-cam') || el;
+    const w = el.clientWidth || cam.clientWidth || 320, h = cam.clientHeight || el.clientHeight || 240;
     await sc.start(
       { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: Math.max(120, Math.floor(w * 0.85)), height: Math.max(80, Math.floor(Math.min(h, w) * 0.6)) } },
+      { fps: 10, qrbox: { width: Math.max(120, Math.floor(w * 0.85)), height: Math.max(80, Math.min(150, h - 48)) } },
       text => { boxShipAccept(text); },
       () => {}
     );
@@ -17436,8 +17447,8 @@ function boxShipConfirm(title, sub, labels) {
 
 function renderBoxShip() {
   const bs = State._boxShip;
-  const modesEl = $id('bs-modes'), panel = $id('bs-panel');
-  if (!bs || !modesEl || !panel) return;
+  const modesEl = $id('bs-modes'), guideEl = $id('bs-guide'), panel = $id('bs-panel');
+  if (!bs || !modesEl || !guideEl || !panel) return;
   const mode = BOX_SHIP_CFG.MODES[bs.mode];
   modesEl.innerHTML = Object.entries(BOX_SHIP_CFG.MODES).map(([k, m]) =>
     `<button class="btn btn-sm ${k === bs.mode ? 'btn-pri' : 'btn-outline btn-gray'}" style="flex:1;padding:8px 4px;font-size:13px" onclick="boxShipSetMode('${k}')">${m.label}</button>`).join('');
@@ -17446,12 +17457,34 @@ function renderBoxShip() {
   const guide = BoxShip.stepOf(mode, n, bs.fresh);
   const names = BoxShip.STEPS[mode.waybill ? 'parcel' : 'direct'];
   const stripe = guide.tone === 'warn' ? 'var(--warn)' : 'var(--suc)';
-  panel.innerHTML = `
-    <div class="card" style="padding:12px;border-left:5px solid ${stripe}">
-      <div class="row" style="gap:6px;align-items:center;margin-bottom:4px">${names.map((nm, i) =>
+  // 송장 위치 안내 — 송장을 찍을 차례(택배 · 봉을 다 담음)에만. 한 장에 바코드가 둘이라 «어느 것을 찍나» 가 막힌다: 숫자 12자리 긴 바코드만 읽힌다(다른 건 오류음).
+  // 그림은 모식도다 — 실제 스티커의 위치·모양과 다를 수 있어 «어느 줄이냐» 는 글(숫자 12자리)로 말한다. 실물 사진은 개인정보(받는 분·주소)라 넣지 않는다.
+  const wbSvg = '<svg viewBox="0 0 104 64" width="92" height="57" style="flex-shrink:0" aria-hidden="true">'
+    + '<rect x="1" y="1" width="102" height="62" rx="5" style="fill:var(--white);stroke:var(--gray-l);stroke-width:1.5"/>'
+    + '<rect x="8" y="7" width="34" height="3.5" rx="1.5" style="fill:var(--gray-l)"/><rect x="8" y="13" width="22" height="3.5" rx="1.5" style="fill:var(--gray-l)"/>'
+    + '<rect x="5" y="19" width="94" height="24" rx="3" style="fill:none;stroke:var(--suc);stroke-width:2.4"/>'
+    + '<path style="fill:#222" d="M10 23h2v13h-2zM14 23h1v13h-1zM17 23h3v13h-3zM22 23h1v13h-1zM25 23h2v13h-2zM29 23h1v13h-1zM32 23h3v13h-3zM37 23h1v13h-1zM40 23h2v13h-2zM44 23h1v13h-1zM47 23h3v13h-3zM52 23h2v13h-2zM56 23h1v13h-1zM59 23h3v13h-3zM64 23h1v13h-1zM67 23h2v13h-2zM71 23h1v13h-1zM74 23h3v13h-3zM79 23h1v13h-1zM82 23h2v13h-2zM86 23h1v13h-1zM89 23h3v13h-3z"/>'
+    + '<rect x="24" y="38" width="56" height="3" rx="1.5" style="fill:var(--gray)"/>'
+    + '<path style="fill:#888" d="M10 50h1v8h-1zM13 50h2v8h-2zM17 50h1v8h-1zM20 50h3v8h-3zM25 50h1v8h-1zM28 50h2v8h-2zM32 50h1v8h-1zM35 50h2v8h-2z"/>'
+    + '<path style="stroke:var(--err);stroke-width:3;stroke-linecap:round" d="M52 49l10 10M62 49L52 59"/></svg>';
+  const wbHint = mode.waybill && guide.step === 2 && guide.tone !== 'warn' ? `
+    <div class="card mt-8" style="padding:10px 12px">
+      <div class="row" style="gap:12px;align-items:center">
+        ${wbSvg}
+        <div class="fs-13" style="line-height:1.5;word-break:keep-all">
+          <div class="c-suc fw-7">✔ 긴 바코드 — 숫자 12자리</div>
+          <div class="c-err">✖ 짧은 8자리 바코드는 안 읽혀요</div>
+          <div class="c-txt-l fs-12">상자 가로를 바코드로 채우게 · 흐려지면 조금 뒤로</div>
+        </div>
+      </div>
+    </div>` : '';
+  guideEl.innerHTML = `
+    <div class="card" style="padding:8px 10px;border-left:5px solid ${stripe}">
+      <div class="row" style="gap:6px;align-items:center;margin-bottom:2px">${names.map((nm, i) =>
         `<span class="fs-11 ${i + 1 === guide.step ? 'fw-7' : 'c-txt-l'}">${i + 1 === guide.step ? '●' : '○'} ${i + 1}. ${HS_ESC(nm)}</span>`).join('<span class="fs-11 c-txt-l">›</span>')}</div>
       <div class="fs-15 fw-7 ${guide.tone === 'warn' ? 'c-warn' : ''}" style="word-break:keep-all">${HS_ESC(guide.text)}</div>
-    </div>
+    </div>`;
+  panel.innerHTML = `${wbHint}
     <div class="card mt-8" style="padding:12px">
       <div class="row between" style="align-items:center">
         <div class="fs-14 fw-7">${mode.waybill ? '이번 상자' : HS_ESC(mode.receiver) + ' 직배'} · ${n}봉</div>
