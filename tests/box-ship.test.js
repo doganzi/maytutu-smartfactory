@@ -380,10 +380,10 @@ t('옛 안내문이 파일 어디에도(주석 포함) 없다 — 단계 안내�
 });
 t('화면 — 단계 표시 · 지금 할 일 · 오늘 수 · 방금 저장 · 직배는 저장 단추(택배는 없음 · 단추는 bs-save 로 아래에 붙는다)', () => {
   const render = (bs) => {
-    const els = { 'bs-modes': { innerHTML: '' }, 'bs-panel': { innerHTML: '' } };
+    const els = { 'bs-modes': { innerHTML: '' }, 'bs-guide': { innerHTML: '' }, 'bs-panel': { innerHTML: '' } };
     const c = vm.createContext({ State: { _boxShip: bs }, BoxShip, BOX_SHIP_CFG, $id: (id) => els[id], HS_ESC: (x) => String(x), formatDate: () => '2026-10-04', Object, Set, Array, Map, String });
     vm.runInContext(fnText('function renderBoxShip() {') + '; renderBoxShip()', c);
-    return els['bs-panel'].innerHTML;
+    return els['bs-guide'].innerHTML + els['bs-panel'].innerHTML;   // 지금 할 일(#bs-guide·카메라와 함께 붙는다) + 목록(#bs-panel)
   };
   const base = (mode, n) => ({ mode, bags: Array.from({ length: n }, (_, i) => ({ indivId: 'FG-' + i, lotId: 'LOT-A' })), fresh: false, lastSaved: '', shipRows: [], shipsOk: true });
   const h0 = render(base('parcel', 0));
@@ -463,6 +463,45 @@ t('저장 단추 — 봉이 쌓여 화면 밖으로 밀려도 아래에 붙는�
   assert.ok(Number(p.get('z-index')) >= 2, '목록 글 위로 올라오지 않으면 가려진다');
 });
 
+t('송장 위치 안내 — 송장을 찍을 차례(택배 · 3~4봉)에만: 숫자 12자리 긴 바코드만 읽힌다(8자리는 ✖)', () => {
+  const render = (mode, n) => {
+    const els = { 'bs-modes': { innerHTML: '' }, 'bs-guide': { innerHTML: '' }, 'bs-panel': { innerHTML: '' } };
+    const bs = { mode, bags: Array.from({ length: n }, (_, i) => ({ indivId: 'FG-' + i, lotId: 'LOT-A' })), fresh: false, lastSaved: '', shipRows: [], shipsOk: false };
+    const c = vm.createContext({ State: { _boxShip: bs }, BoxShip, BOX_SHIP_CFG, $id: (id) => els[id], HS_ESC: (x) => String(x), formatDate: () => '2026-10-04', Object, Set, Array, Map, String });
+    vm.runInContext(fnText('function renderBoxShip() {') + '; renderBoxShip()', c);
+    return els['bs-panel'].innerHTML;
+  };
+  const hint = (h) => h.includes('숫자 12자리') && h.includes('8자리');
+  assert.ok(hint(render('parcel', 3)) && hint(render('parcel', 4)), '송장 찍을 차례(3·4봉)에 안내가 없다');
+  assert.ok(render('parcel', 3).includes('<svg'), '송장 그림이 없다');
+  assert.ok(!hint(render('parcel', 0)) && !hint(render('parcel', 2)), '봉을 더 찍을 때는 송장 안내를 띄우지 않는다');
+  assert.ok(!hint(render('parcel', 5)), '5봉(경고) — 송장을 찍으라는 안내를 더하지 않는다');
+  assert.ok(!hint(render('songdo', 2)) && !hint(render('colo', 2)), '송도·콜로는 송장이 없다');
+});
+t('카메라 — 목록을 내려도 맨 위에 붙는다(#bs-sticky) · 창(#bs-cam) 가운데에 읽는 칸 · 낮은 화면·키보드에서는 푼다', () => {
+  const a = CODE.indexOf("Screens['box-ship'] = async"), tpl = CODE.slice(a, CODE.indexOf('startBoxShipScan();', a));
+  const iSticky = tpl.indexOf('id="bs-sticky"'), iCam = tpl.indexOf('id="bs-cam"'), iReader = tpl.indexOf('id="bs-reader"'), iGuide = tpl.indexOf('id="bs-guide"'), iPanel = tpl.indexOf('id="bs-panel"'), iModes = tpl.indexOf('id="bs-modes"');
+  assert.ok(iSticky !== -1 && iSticky < iCam && iCam < iReader && iReader < iGuide && iGuide < iPanel && iPanel < iModes, '틀 순서: 붙는 칸 { 카메라 창 { 읽는 칸 } · 안내 } → 번호 입력 → 목록 → 방식 단추(카메라가 맨 위)');
+  assert.ok(tpl.indexOf('id="bs-manual"') > tpl.indexOf('id="bs-guide"') && tpl.indexOf('id="bs-manual"') < iPanel, '번호 입력칸은 붙는 칸 바로 아래 — 목록을 안 내려도 보인다');
+  const cam = /<div id="bs-cam" style="([^"]*)">/.exec(tpl);
+  assert.ok(cam, '#bs-cam 을 찾지 못함');
+  const cp = cssProps(cam[1]);
+  assert.ok(/^clamp\(/.test(cp.get('height')) && cp.get('overflow') === 'hidden' && cp.get('position') === 'relative', '카메라 창은 clamp 높이 · overflow:hidden · position:relative');
+  const rd = cssProps(/<div id="bs-reader" style="([^"]*)">/.exec(tpl)[1]);
+  assert.ok(rd.get('top') === '50%' && rd.get('transform') === 'translateY(-50%)' && rd.get('position') === 'absolute', '읽는 칸을 창 가운데에 두지 않으면 영상 위쪽만 보여 읽는 칸이 아래로 밀려 잘린다(2026-10-06 «송장이 안 읽힌다»)');
+  assert.ok(!/height:min\(42vh/.test(tpl), '예전 고정 높이 창으로 되돌아갔다');
+  const sticky = cssProps(/#bs-sticky\s*\{([^}]*)\}/.exec(CODE)[1]);
+  assert.strictEqual(sticky.get('position'), 'sticky');
+  assert.strictEqual(sticky.get('top'), '0', '맨 위에 붙지 않는다');
+  assert.ok(/^var\(--(white|bg)\)$/.test(sticky.get('background')), '바탕이 비면 아래로 지나가는 목록이 카메라 뒤로 비친다');
+  assert.ok(Number(sticky.get('z-index')) > Number(cssProps(/\.bs-save\s*\{([^}]*)\}/.exec(CODE)[1]).get('z-index')), '저장 단추(.bs-save)보다 위에 있어야 카메라가 가려지지 않는다');
+  // 낮은 화면(키보드가 올라와 줄어든 화면 포함)에서는 붙은 카메라를 푼다 — 안 풀면 붙은 칸이 보이는 영역을 다 먹어 번호 입력칸이 안 보인다.
+  // 입력 포커스·블러에 맞춰 풀고 되붙이는 방식은 쓰지 않는다: 블러 때 되붙으며 «넣기» 단추가 카메라 밑으로 덮여 클릭이 빗나간다.
+  const low = /@media \(max-height:(\d+)px\)\s*\{\s*#bs-sticky\s*\{([^}]*)\}/.exec(CODE);
+  assert.ok(low && cssProps(low[2]).get('position') === 'static', '낮은 화면에서 붙은 카메라를 풀지 않는다');
+  assert.ok(Number(low[1]) >= 520 && Number(low[1]) < 640, `낮은 화면 기준 ${low[1]}px — 키보드가 올라온 화면(≈350)은 걸리고 보통 화면(≥640)은 안 걸려야 한다`);
+  assert.ok(!/boxShipTyping|bs-typing/.test(CODE), '입력 포커스로 붙은 카메라를 풀고 되붙이는 코드가 남았다 — 블러 때 «넣기» 가 덮인다');
+});
 t('안내 글·확인창 — 낱말 중간에서 줄이 꺾이지 않는다(word-break:keep-all)', () => {
   const g = noComment(fnText('function renderBoxShip() {'));
   assert.ok(/<div class="fs-15 fw-7 \$\{[^}]*\}" style="[^"]*word-break:keep-all[^"]*">\$\{HS_ESC\(guide\.text\)\}<\/div>/.test(g), '안내 글에 keep-all 이 없다 — «있/으면» 처럼 낱말 중간에서 꺾인다');
@@ -812,15 +851,16 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
     holder.release = () => holder.rel.splice(0).forEach((f) => f());   // 켜는 중인 스캐너를 모두 켜진 것으로
     class FakeScanner {
       constructor() { if (holder.ctorFail) throw new Error('생성 실패'); this.on = false; this.id = holder.n = (holder.n || 0) + 1; }
-      start() { return new Promise((r, j) => { holder.rel.push(() => { this.on = true; r(); }); holder.rej.push(j); }); }
+      start(cam, cfg) { (holder.startArgs = holder.startArgs || []).push([cam, cfg]); return new Promise((r, j) => { holder.rel.push(() => { this.on = true; r(); }); holder.rej.push(j); }); }
       stop() { if (!this.on) return Promise.reject(new Error('not running')); log.push('stop'); holder.stopped.push(this.id); this.on = false; return Promise.resolve(); }
       clear() { log.push('clear'); }
     }
     const win = {};
     const el = { clientWidth: 300, clientHeight: 200, innerHTML: '' };
-    const c = vm.createContext({ window: win, State: state, Html5Qrcode: FakeScanner, $id: () => el, HS_ESC: String, boxShipAccept() {}, Math });
+    const els = { cam: null };   // 카메라 창(#bs-cam) — 없으면 읽는 칸 높이로 본다
+    const c = vm.createContext({ window: win, State: state, Html5Qrcode: FakeScanner, $id: (id) => (id === 'bs-cam' ? els.cam : el), HS_ESC: String, boxShipAccept() {}, Math });
     vm.runInContext(fnText('async function stopBoxShipScan() {') + '\n' + fnText('async function startBoxShipScan() {'), c);
-    return { log, win, holder, el, run: (js) => vm.runInContext(js, c) };
+    return { log, win, holder, el, els, run: (js) => vm.runInContext(js, c) };
   };
   await at('카메라 — 켜는 사이 화면을 떠나면 켜진 카메라를 끈다(라우터가 전역을 먼저 비워도)', async () => {
     const state = { currentScreen: 'box-ship' };
@@ -833,6 +873,23 @@ process.on('exit', () => { if (!asyncDone) { console.error('✗ 비동기 시험
     await p;
     assert.ok(s.log.includes('stop'), '켜진 카메라가 꺼지지 않았다');
     assert.strictEqual(s.win._boxShipScanner, null);
+  });
+  await at('카메라 — 읽는 칸은 카메라 창 안에 들어간다(위아래 24px 여유) · 높이 상한 150 · 창 높이가 모자라도 80 이상', async () => {
+    const boxOf = async (cam) => {
+      const s = scanWorld({ currentScreen: 'box-ship' });
+      s.els.cam = cam;
+      const p = s.run('startBoxShipScan()');
+      await tick();
+      s.holder.release();
+      await p;
+      return s.holder.startArgs[0][1].qrbox;
+    };
+    const a = await boxOf({ clientWidth: 328, clientHeight: 194 });
+    assert.deepStrictEqual([a.width, a.height], [255, 146], '창 194 → 높이 146, 가로는 읽는 칸(300) 폭의 85%');
+    assert.ok(a.height + 48 <= 194, '읽는 칸이 창 밖으로 나간다 — 보이지 않는 곳을 읽는다');
+    assert.strictEqual((await boxOf({ clientWidth: 328, clientHeight: 236 })).height, 150, '높이 상한');
+    assert.strictEqual((await boxOf({ clientWidth: 328, clientHeight: 100 })).height, 80, '아주 낮은 창에서도 80');
+    assert.strictEqual((await boxOf(null)).height, 150, '창이 없으면 읽는 칸 높이(200)에서 구한다');
   });
   await at('카메라 — 화면에 머물면 끄지 않는다', async () => {
     const s = scanWorld({ currentScreen: 'box-ship' });
