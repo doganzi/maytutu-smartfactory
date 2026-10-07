@@ -267,6 +267,7 @@ process.on('exit', code => {
     ['입력창 활성', e => { e.document.activeElement = { tagName: 'INPUT', id: 'q' }; }, e => { e.document.activeElement = null; }],
     ['모달 열림', e => { e.dialogOpen = true; }, e => { e.dialogOpen = false; }],
     ['방금 만짐(0.5초 전)', e => { e.LiveSync._lastTouchTs = Date.now() - 500; }, e => { e.LiveSync._lastTouchTs = 0; }],
+    ['출하 선택 중', e => { e.State._selectedShipIds = vm.runInContext('new Map([["x", new Set([1])]])', e.ctx); }, e => { e.State._selectedShipIds = undefined; }],
   ];
   for (const [name, hold, release] of busyCases) {
     const e = await opened(SHEETS());
@@ -324,7 +325,7 @@ process.on('exit', code => {
     for (let i = 0; i < 3; i++) await e.sync('poll');
     assert.strictEqual(e.renders.length, 0, '재고 화면 등은 펼침·입력 보존을 위해 자동 갱신 제외(수동만)');
     assert.strictEqual(e.fetched.length, 0, '받지도 않는다');
-    for (const s of ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm', 'box-ship']) {
+    for (const s of ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm']) {
       assert.ok(e.LiveSync._busyReason(s), `${s} 은(는) 입력 보존 화면 목록에 있어야 한다`);
     }
     console.log('✔ ⑤ 입력 보존 화면');
