@@ -119,6 +119,9 @@ a { text-decoration:none; color:inherit; }
 .btn-full { width:100%; }
 .btn-sm { padding:6px 12px; font-size:12px; min-height:36px; }
 .btn:disabled { opacity:0.5; cursor:not-allowed; }
+.sd-save { position:sticky; bottom:8px; z-index:3; box-shadow:0 4px 14px rgba(0,0,0,0.28); }   /* 송도 직배 저장 단추 — 봉이 쌓여 화면 밖으로 밀려도 화면 아래에 붙어 있다 */
+#sd-sticky { position:sticky; top:0; z-index:4; background:var(--white); padding:10px 0 8px; box-shadow:0 8px 10px -8px rgba(0,0,0,0.35); }   /* 송도 직배 — 카메라·지금 할 일은 목록을 내려도 맨 위에 붙어 있다(.sd-save 의 위쪽 짝) */
+@media (max-height:560px) { #sd-sticky { position:static; box-shadow:none; } }   /* 낮은 화면(가로로 눕힘 · 키보드가 올라와 화면이 줄어든 때) — 붙은 카메라가 화면을 다 먹고 번호 입력칸을 덮는다 */
 .input-group { margin-bottom:14px; }
 .input-group label { display:block; font-size:12px; font-weight:600; color:var(--txt-l); margin-bottom:4px; }
 .input-group input, .input-group select, .input-group textarea { width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--gray-l); font-size:16px; color:var(--txt); background:var(--white); outline:none; min-height:44px; }
@@ -206,11 +209,12 @@ a { text-decoration:none; color:inherit; }
 .c-txt-l { color:var(--txt-l); } .c-pri { color:var(--pri); } .c-suc { color:var(--suc); } .c-err { color:var(--err); } .c-warn { color:var(--warn); } .c-info { color:var(--info); } .c-teal { color:var(--teal); } .c-gray { color:var(--gray); }
 
 /* Toast notification */
-.toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); padding:10px 20px; border-radius:8px; color:#fff; font-size:13px; font-weight:600; z-index:100; opacity:0; transition:opacity 0.3s; pointer-events:none; }
+.toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); width:max-content; max-width:calc(100vw - 32px); padding:10px 20px; border-radius:8px; color:#fff; font-size:13px; font-weight:600; z-index:100; opacity:0; transition:opacity 0.3s; pointer-events:none; }
 .toast.show { opacity:1; }
 .toast.suc { background:var(--suc); }
 .toast.err { background:var(--err); }
 .toast.info { background:var(--info); }
+.toast.warn { background:var(--warn); color:#1b1b1b; }   /* 규칙이 없던 종류 — 배경 없는 흰 글씨가 머리글에 묻혀 오류 안내가 안 읽혔다 */
 
 /* Loading overlay */
 #loading { position:fixed; inset:0; background:rgba(255,255,255,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:99; }
@@ -1639,6 +1643,7 @@ const Router = {
 
   render(params = {}) {
     const s = State.currentScreen;
+    if (s !== 'songdo-ship' && window._songdoShipScanner) stopSongdoShipScan();   // 송도 직배 화면을 떠나면 카메라를 끈다
     // 이 화면이 읽는 시트 목록을 새로 적기 시작 — LiveSync 가 «바뀐 게 있나» 비교하는 근거
     State._screenKeys = State._screenKeys || {};
     SheetsAPI._track = State._screenKeys[s] = new Map();
@@ -1651,7 +1656,7 @@ const Router = {
       'approval-detail': 'prod', 'req-form': 'prod', 'reject-modal': 'prod',
       inventory: 'inv', 'receive-form': 'inv', 'lot-detail': 'inv',
       'po-new': 'inv', 'po-detail': 'inv',
-      'qr-scan': 'scan',
+      'qr-scan': 'scan', 'songdo-ship': 'inv',
       more: 'more', 'sop-list': 'more', 'sop-detail': 'more',
       equip: 'more', 'label-print': 'more', settings: 'more',
       'items-rm': 'more', 'items-fg': 'more', 'items-sp': 'more',
@@ -1809,7 +1814,7 @@ const LiveSync = {
   _busyReason(screen) {
     // 입력 보존 화면: 입력값/결과 유실 방지. 'lot-detail' / 'inventory' 는 LOT 카드 펼침 상태와
     // 스크롤 위치 보존을 위해 포함(자동 재렌더 시 펼침이 접혀 페이지가 짧아지는 문제).
-    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm'];
+    const inputPreservedScreens = ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm', 'songdo-ship'];
     if (inputPreservedScreens.includes(screen)) return `${screen}: 입력 보존 화면`;
     // 출하 선택 모드 — 완제품 LOT 에 출하 선택(체크박스)이 1개라도 있으면 보존
     if (State._selectedShipIds instanceof Map) {
@@ -5612,6 +5617,7 @@ Screens.more = () => {
   // 정렬: 일별 품질/HACCP → 생산 → 계획/절차 → 마스터 → 관리 → 설정 (사용빈도순, 2026-06-19)
   // 제거: 데이터 정합성 검증·CCP 미입력 보완·DB 직접 조회·편집 (메뉴 항목만 — 화면 코드는 보존, 재추가 가능)
   const items = [
+    { icon: '🏪', label: '송도 직배', desc: '봉 라벨 찍고 저장 · 송도직영점', target: 'songdo-ship' },
     { icon: '✅', label: 'HACCP', desc: 'CCP 체크리스트, 일별 점검', target: 'haccp' },
     { icon: '🌡️', label: '동결온도 모니터링', desc: '냉장/냉동 실시간 온도 로그 · HACCP 기록 PDF', target: 'temp-log' },
     { icon: '🧲', label: '금속검출 실시간현황', desc: '검출기 자동 기록 · 통신 상태 · 모니터링 공백', target: 'metal-live' },
@@ -7873,7 +7879,7 @@ const DB_SHEETS = {
   '소모품품목': ['code','name','spec','unit','category','minStock'],
   '거래처': ['code','name','type','contact','phone','addr','note'],
   '생산요청': ['reqId','itemCode','itemName','qty','unit','reqDate','dueDate','status','requester','notes'],
-  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],
+  '출하기록': ['shipId','lotId','indivId','customer','qty','unit','shipDt','shipper','freezerTemp','tempAt','productTemp','tempMethod'],   // M~O(전표번호·받는 방식·받는 곳)는 송도 직배 저장(songdoShipSave)이 쓴다 — 옛 출하 창은 12열만 쓰므로 정의는 12열(15열로 늘리면 tests/db-sheets-width 의 폭 검사가 어긋난다)
   '입고기록': ['rcvId','type','supplier','itemCode','itemName','lotId','qty','unit','recvDt','receiver','status','photoUrl'],
   '기기관리': ['code','name','type','spec','installDt','lastCalibDt','nextCalibDt','status'],
   'HACCP기준': HACCP_STD_HEADER,
@@ -17697,6 +17703,520 @@ async function executeShipment(indivId, lotId, itemName, customerName, customerC
 // 하위호환: 기존 processShipment 호출 시 팝업으로 전환
 async function processShipment(indivId, lotId, itemName) {
   showShipmentPopup(indivId, lotId, itemName);
+}
+
+// ─── 송도 직배 ───
+// <songdo-ship>
+/* 송도 직배 — 봉 라벨(QR)을 찍어 담고 «저장» 한 번. 송도직영점은 SV 가 낱봉으로 가져가므로 송장 대신
+   직배 전표 D-YYYYMMDD-송도 가 받는 곳을 대신한다.
+   2026-10-07 «박스 출하 롤백, 송도 직배만 남긴다» — 박스 출하(#169)의 택배(겉 라벨 + 한진 송장)·콜로 픽업·봉 라벨 2장은 되돌렸다(#183).
+   여러 봉을 골라 한꺼번에 처리하는 일반 출하는 옛 «선택 출하»(LOT 의 봉 목록에서 눌러 고르기)가 맡는다 — 이 화면은 송도 직배 전용이다. */
+const SONGDO_SHIP_CFG = {
+  CUSTOMER: '송도직영점',   // 출하기록 [3] 거래처 · [14] 받는 곳
+  METHOD: '직배',           // 출하기록 [13] 받는 방식
+  TAG: '송도',              // 직배 전표 D-YYYYMMDD-송도
+  DEBOUNCE_MS: 2500,        // 카메라는 같은 코드를 초당 여러 번 읽는다 — 같은 코드는 이 시간 안에 한 번만
+  HUSH_MS: 8000,            // 거절·취소한 코드가 계속 화면에 있으면 경고가 되풀이된다 — 그 코드는 이만큼 더 조용히
+  RESUME_DAYS: 7,           // 끊긴 저장을 이어 쓸 수 있는 옛 전표의 나이(일) — 더 오래된 «출하가능» 봉은 끊긴 저장이 아닌 다른 사정일 수 있어 사람이 시트를 본다
+};
+const SongdoShip = {
+  BLOCKED: ['폐기', '소진', '입고취소', '삭제'],
+  GONE: ['출하완료', '폐기', '입고취소', '삭제'],   // LOT 잔량에서 빼는 상태 — 옛 출하 처리와 같은 목록
+  classify(raw) {
+    const s = String(raw == null ? '' : raw).trim();
+    return /^FG-/i.test(s) ? { kind: 'fg', code: s.toUpperCase() } : { kind: 'unknown', code: s };
+  },
+  /* 봉 하나를 목록에 담아도 되는가 — indiv = { status } (시트에 없으면 undefined) */
+  checkBag(bags, code, indiv) {
+    if (bags.some(b => b.indivId === code)) return { ok: false, reason: 'dup' };
+    if (!indiv) return { ok: false, reason: 'notfound' };
+    const st = indiv.status || '';
+    if (st === '출하완료') return { ok: false, reason: 'shipped' };
+    if (this.BLOCKED.includes(st)) return { ok: false, reason: 'blocked', status: st };
+    if (st !== '출하가능') return { ok: false, reason: 'notready', status: st || '냉동보관중' };
+    return { ok: true };
+  },
+  /* 저장 계획 — 시트를 다시 읽은 뒤 무엇을 쓸지. 저장은 «출하기록 → 완제품개별 → LOT» 세 번에 나눠 쓰므로
+     중간에 끊기면 같은 전표로 다시 저장할 때 이미 적힌 것은 건너뛴다(같은 봉이 두 번 출하되지 않게).
+     statusOf(id) = 지금 완제품개별 상태 · sameRefRows = 같은 전표로 이미 적힌 출하기록 행
+     otherRefs = [{ indivId, ref }] 이 목록의 봉이 «다른» 전표(또는 옛 출하 창)로 이미 적힌 기록 */
+  planSave(bags, statusOf, sameRefRows, otherRefs) {
+    const already = new Set(sameRefRows.map(r => r[2]));
+    const inList = new Set(bags.map(b => b.indivId));
+    const gone = bags.filter(b => {
+      const st = statusOf(b.indivId);
+      return st !== '출하가능' && !(st === '출하완료' && already.has(b.indivId));   // 출하완료 + 이미 적힘 = 끊긴 저장의 이어 쓰기
+    });
+    if (gone.length) return { gone };
+    // 다른 전표로 이미 적혔는데 상태는 아직 출하가능 = 그쪽 저장이 중간에 끊긴 봉 — 여기서 또 적으면 같은 봉이 출하기록에 두 번 남는다
+    const limbo = new Map();
+    (otherRefs || []).forEach(o => { if (inList.has(o.indivId) && !already.has(o.indivId) && statusOf(o.indivId) === '출하가능' && !limbo.has(o.indivId)) limbo.set(o.indivId, o); });
+    if (limbo.size) return { gone: [], limbo: [...limbo.values()] };
+    return { gone: [], toAppend: bags.filter(b => !already.has(b.indivId)), toMark: bags.filter(b => statusOf(b.indivId) === '출하가능') };
+  },
+  /* 직배 전표(D-YYYYMMDD-송도)는 날짜가 붙어 오늘 전표로는 어제 끊긴 저장을 끝낼 수 없다.
+     limbo = planSave 가 돌려준 [{ indivId, ref }] · bagCount = 목록의 봉 수 · ref = 오늘 전표.
+     목록의 봉이 «전부» 같은 받는 곳의 같은 옛 전표로 끊겨 있으면 그 전표를 돌려준다 — 섞였거나 받는 곳이 다르면 null(사람이 시트를 본다) */
+  resumeRef(limbo, bagCount, ref) {
+    const re = /^D-(\d{8})-(.+)$/;
+    const day = s => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) / 86400000;
+    const now = re.exec(String(ref));
+    if (!now || !limbo || limbo.length !== bagCount) return null;
+    const refs = [...new Set(limbo.map(l => l.ref))];
+    if (refs.length !== 1) return null;
+    const old = re.exec(refs[0]);
+    if (!old || old[2] !== now[2]) return null;
+    const age = day(now[1]) - day(old[1]);   // 며칠 전 전표인가 — 오늘·미래 전표나 너무 오래된 전표는 이어 쓰지 않는다
+    return age >= 1 && age <= SONGDO_SHIP_CFG.RESUME_DAYS ? refs[0] : null;
+  },
+  /* r.info = shippedInfo() — 이미 나간 봉이면 «언제 어디로» 를 붙여 다른 봉과 헷갈리지 않게 한다 */
+  message(r) {
+    return ({
+      dup: '이미 이 목록에 담은 봉입니다',
+      notfound: '등록되지 않은 봉 라벨입니다',
+      shipped: r.info ? `이미 출하된 봉입니다 (${r.info}) — 넣지 않았습니다` : '이미 출하된 봉입니다 — 넣지 않았습니다',
+      blocked: `${r.status} 처리된 봉입니다 — 넣지 않았습니다`,
+      notready: `아직 출하할 수 없는 봉입니다 (${r.status})`,
+    })[r.reason] || '처리할 수 없습니다';
+  },
+  /* 출하기록 날짜 칸은 시트 서식에 따라 «2026-10-04 09:10» · «2026. 10. 4 오전 9:10:00» · «2026/10/4» 로 온다 — 앞의 날짜만 YYYY-MM-DD 로 */
+  ymdOf(v) {
+    const m = String(v == null ? '' : v).match(/^\s*(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}` : '';
+  },
+  /* 이미 나간 봉의 출하기록 행 → «10/4 송도직영점 직배» · «10/6 직접 출하»(옛 출하 창 — 출하 메모) · «10/3 송장 5012…»(박스 출하 시절 택배 행) (행이 없으면 빈 글자) */
+  shippedInfo(row) {
+    if (!row) return '';
+    const ymd = this.ymdOf(row[6]);
+    const md = ymd ? `${parseInt(ymd.slice(5, 7), 10)}/${parseInt(ymd.slice(8, 10), 10)}` : '';
+    const ref = String(row[12] || '').replace(/^'/, '');
+    const what = row[13] === '택배' ? (ref ? `송장 ${ref}` : '택배')
+      : row[13] ? [row[14], row[13]].filter(Boolean).join(' ')
+      : String(row[3] || '').trim();
+    return [md, what].filter(Boolean).join(' ');
+  },
+  /* 오늘 저장한 송도 직배 봉 수. 전표번호가 없는 옛 출하 창 행·다른 방식·다른 날은 세지 않는다 · rows = 출하기록 행 · ymd = 'YYYY-MM-DD' */
+  todayCount(rows, ymd) {
+    let n = 0;
+    (rows || []).forEach(r => { if (r && this.ymdOf(r[6]) === ymd && r[13] === SONGDO_SHIP_CFG.METHOD && String(r[12] || '').trim()) n++; });
+    return n;
+  },
+  todayText(n) { return n ? `오늘 송도 직배 ${n}봉` : '오늘 저장한 송도 직배 없음'; },
+  /* 따라 하는 순서 */
+  STEPS: ['봉 라벨 찍기', '저장'],
+  /* 지금 해야 할 한 가지 — 카메라 바로 아래 안내 카드. n = 담은 봉 수 · fresh = 방금 저장하고 다음 묶음을 아직 안 시작함 */
+  stepOf(n, fresh) {
+    if (n === 0) return { step: 1, text: fresh ? '저장했습니다 — 다음 봉 라벨을 찍으세요' : `${SONGDO_SHIP_CFG.CUSTOMER}으로 가는 봉 라벨을 찍으세요` };
+    return { step: 2, text: `${n}봉 — 다 찍었으면 아래 «저장» 을 누르세요` };
+  },
+  /* 소리 — 맞으면 짧게 한 번, 틀리면 낮게 두 번(장갑 낀 손·시끄러운 현장에서 화면을 안 봐도 알게). 재생은 songdoShipBeep */
+  beepPlan(ok) { return ok ? [{ hz: 880, ms: 90, gap: 0 }] : [{ hz: 220, ms: 150, gap: 0 }, { hz: 220, ms: 150, gap: 90 }]; },
+  directRef(dateStr) { return `D-${String(dateStr).replace(/-/g, '').slice(0, 8)}-${SONGDO_SHIP_CFG.TAG}`; },
+  /* 출하기록 shipId n개 — 그날 최대 번호 다음부터 연속.
+     (옛 일괄 출하는 행마다 시트를 다시 읽어 아직 안 쓴 행을 못 보고 n행이 같은 번호를 받았다) */
+  nextShipIds(existingIds, dateStr, n) {
+    const pattern = `SHP-${String(dateStr).replace(/-/g, '').slice(0, 8)}-`;
+    let max = 0;
+    (existingIds || []).forEach(id => {
+      if (typeof id === 'string' && id.startsWith(pattern)) {
+        const k = parseInt(id.slice(pattern.length), 10);
+        if (k > max) max = k;
+      }
+    });
+    return Array.from({ length: n }, (_, i) => pattern + String(max + 1 + i).padStart(3, '0'));
+  },
+  /* 출하기록 행 — 앞 12열은 옛 출하 창과 같은 모양, 뒤 3열 = 전표번호 / 받는 방식 / 받는 곳 */
+  buildRows(bags, o) {
+    const C = SONGDO_SHIP_CFG, t = o.temp;
+    return bags.map((b, i) => [
+      o.shipIds[i], b.lotId, b.indivId, C.CUSTOMER, '1', 'ea', o.shipTime, o.shipper || '',
+      t ? `${t.temp}°C` : '', t ? t.at : '', t ? `${t.productTemp}°C` : '', t ? t.method : '',
+      o.ref, C.METHOD, C.CUSTOMER,
+    ]);
+  },
+  remainOf(indivRows, lotId) {
+    return indivRows.filter(iv => iv[1] === lotId && !this.GONE.includes(iv[3])).length;
+  },
+};
+// </songdo-ship>
+
+const SONGDO_SHIP_SHEET_HDR = ['송장·전표번호', '받는 방식', '받는 곳'];   // 출하기록 M~O 열 제목 (비어 있을 때만 쓴다)
+
+function songdoShipRef(r) { return String((r && r[12]) || '').replace(/^'/, ''); }   // 출하기록 [12] — 박스 출하 시절 택배 송장의 글자 고정 작은따옴표는 떼고 비교
+
+Screens['songdo-ship'] = async () => {
+  const sd = State._songdoShip = {
+    bags: [], indiv: new Map(), ready: false, busy: false, last: { code: '', at: 0 }, lastSaved: '',
+    shipRows: [], shipByIndiv: new Map(), fresh: false, shipsOk: false,   // shipRows = 출하기록 행(오늘 수·이미 나간 봉 안내용 · shipsOk = 그걸 읽었나) · fresh = 방금 저장하고 다음 묶음을 아직 안 시작함
+  };
+  // 머리 단추는 btn-outline 을 쓰지 않는다 — 색 modifier 없는 btn-outline 은 투명 단추 가드(tests/db-sheets-width)가 막는다. 머리 색 바탕 위의 «투명 바탕 · 흰 글자 · 흰 테두리» 를 직접 지정한다.
+  renderHeader('🏪 송도 직배', '화면 안내를 따라 찍으세요', { back: 'inventory', noRefresh: true, right: '<button class="btn btn-sm" style="background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.6);padding:4px 10px;font-size:12px" onclick="songdoShipFinish()">끝내기</button>' });
+  /* 카메라 창(#sd-cam) 안에 읽는 칸(#sd-reader)을 «가운데 맞춰» 둔다 — 영상은 세로(예: 328×492)인데 창은 낮아서, 위쪽만 잘라 보여 주면
+     실제로 읽는 칸(영상 한가운데)이 창 아래로 밀려 반쯤 잘리고 테두리 표시도 접힌다. 창이 읽는 칸의 한가운데를 비춰야 «보이는 곳 = 읽는 곳» 이다. */
+  $id('content').innerHTML = `
+    <div style="padding:0 16px 24px">
+      <div id="sd-sticky">
+        <div id="sd-cam" style="position:relative;width:100%;height:clamp(176px,30vh,236px);background:#000;border-radius:10px;overflow:hidden">
+          <div id="sd-reader" style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%)"></div>
+        </div>
+        <div id="sd-guide" class="mt-8"></div>
+      </div>
+      <div class="row mt-8" style="gap:6px">
+        <input type="text" id="sd-manual" autocomplete="off" placeholder="라벨이 안 읽히면 번호 입력" style="flex:1;min-width:0;padding:10px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px" onkeydown="if(event.key==='Enter'){event.preventDefault();songdoShipManual()}">
+        <button class="btn btn-sm btn-outline btn-pri" onclick="songdoShipManual()">넣기</button>
+      </div>
+      <div id="sd-panel" class="mt-8"><div class="spinner" style="margin:0 auto"></div></div>
+    </div>`;
+  try {
+    ['완제품개별', '완제품LOT', '출하기록'].forEach(t => SheetsAPI.invalidateCache(t));
+    let shipsOk = true;
+    const [indivs, lots, ships] = await Promise.all([
+      SheetsAPI.getAll('완제품개별', false),
+      SheetsAPI.getAll('완제품LOT', false),
+      SheetsAPI.getAll('출하기록', false).catch(() => { shipsOk = false; return []; }),
+    ]);
+    if (State._songdoShip !== sd || State.currentScreen !== 'songdo-ship') return;   // 불러오는 사이 화면을 떠났다
+    const lotName = new Map(lots.map(l => [l[0], l[2] || '']));
+    indivs.forEach(iv => {
+      if (iv[0]) sd.indiv.set(String(iv[0]).trim().toUpperCase(), { indivId: iv[0], lotId: iv[1], status: iv[3] || '', itemName: lotName.get(iv[1]) || '' });
+    });
+    // 여기서 못 읽어도 화면은 연다 — 이미 적힌 전표는 저장 직전에 시트를 다시 읽어 한 번 더 막는다
+    sd.shipRows = ships.slice();
+    sd.shipsOk = shipsOk;   // 못 읽었으면 «오늘 저장한 송도 직배 없음» 이라고 거짓말하지 않는다 — 줄을 감춘다
+    ships.forEach(r => { if (r[2]) sd.shipByIndiv.set(String(r[2]).trim().toUpperCase(), r); });
+    sd.ready = true;
+  } catch (e) {
+    $id('sd-panel').innerHTML = `<div class="c-err fs-13">불러오기 실패: ${HS_ESC(e.message)}</div>`;
+    return;
+  }
+  renderSongdoShip();
+  startSongdoShipScan();
+};
+
+async function startSongdoShipScan() {
+  await stopSongdoShipScan();
+  const el = $id('sd-reader');
+  if (!el || State.currentScreen !== 'songdo-ship') return;
+  if (typeof Html5Qrcode === 'undefined') {
+    el.innerHTML = '<div style="color:#fff;padding:16px;font-size:13px">스캐너를 불러오지 못했습니다 — 아래 칸에 번호를 넣어 주세요</div>';
+    return;
+  }
+  // 봉 라벨 = QR — 그 밖의 1차원 바코드(택배 송장 스티커 등)는 읽지 않는다(읽으면 «봉 라벨이 아닙니다» 오류음만 울린다)
+  const F = window.Html5QrcodeSupportedFormats;
+  const cfg = F && F.QR_CODE !== undefined ? { formatsToSupport: [F.QR_CODE] } : undefined;
+  let sc = null;
+  try {
+    sc = new Html5Qrcode('sd-reader', cfg);
+    window._songdoShipScanner = sc;
+    // 읽는 칸 = 창 안에 들어가는 가로로 넓은 상자 — 창 위아래에 숨 쉴 틈(24px씩)을 둔다
+    const cam = $id('sd-cam') || el;
+    const w = el.clientWidth || cam.clientWidth || 320, h = cam.clientHeight || el.clientHeight || 240;
+    await sc.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: Math.max(120, Math.floor(w * 0.85)), height: Math.max(80, Math.min(150, h - 48)) } },
+      text => { songdoShipAccept(text); },
+      () => {}
+    );
+    const left = State.currentScreen !== 'songdo-ship';
+    if (left || window._songdoShipScanner !== sc) {   // 켜는 사이 화면을 떠났거나 더 새로 켠 스캐너가 생겼다 — 라우터는 전역만 비웠으니 내가 켠 카메라를 직접 끈다
+      if (window._songdoShipScanner === sc) window._songdoShipScanner = null;
+      try { await sc.stop(); } catch (e) {}
+      if (left) { try { sc.clear(); } catch (e) {} }   // 화면에 머무는데 밀려난 것이면 같은 #sd-reader 를 쓰는 새 스캐너 화면을 지우지 않는다
+    }
+  } catch (e) {
+    if (window._songdoShipScanner === sc) {   // 내가 아직 현재 스캐너일 때(만들지도 못했으면 비어 있을 때)만 — 더 새로 켠 스캐너나 떠난 화면에 오류 문구를 덮지 않는다
+      window._songdoShipScanner = null;
+      el.innerHTML = `<div style="color:#fff;padding:16px;font-size:13px">카메라를 쓸 수 없습니다 — 아래 칸에 번호를 넣어 주세요<br><span style="opacity:.6">${HS_ESC(e && e.message || e)}</span></div>`;
+    }
+  }
+}
+
+async function stopSongdoShipScan() {
+  const sc = window._songdoShipScanner;
+  window._songdoShipScanner = null;
+  if (sc) {
+    try { await sc.stop(); } catch (e) {}
+    try { sc.clear(); } catch (e) {}
+  }
+}
+
+async function songdoShipAccept(raw, opt = {}) {
+  const sd = State._songdoShip;
+  if (!sd || !sd.ready || State.currentScreen !== 'songdo-ship') return;
+  const c = SongdoShip.classify(raw);
+  const now = Date.now();
+  if (!opt.manual && c.code === sd.last.code && now - sd.last.at < SONGDO_SHIP_CFG.DEBOUNCE_MS) return;
+  sd.last = { code: c.code, at: now };
+  const hush = () => { sd.last = { code: c.code, at: Date.now() + SONGDO_SHIP_CFG.HUSH_MS }; };
+  if (sd.busy) {   // 저장 중·확인창 — 담지 않는다. 다음 묶음 봉을 먼저 찍었으면 알려 준다
+    if (c.kind === 'fg') toast('저장 중입니다 — 끝나면 다시 찍어 주세요', 'info', 2000);
+    return;
+  }
+  if (c.kind === 'fg') {
+    const iv = sd.indiv.get(c.code);
+    const r = SongdoShip.checkBag(sd.bags, iv ? iv.indivId : c.code, iv);
+    if (!r.ok) {
+      if (r.reason === 'shipped') r.info = SongdoShip.shippedInfo(sd.shipByIndiv.get(String(iv.indivId).trim().toUpperCase()));
+      if (r.reason !== 'dup' || opt.manual) { songdoShipBuzz(false); toast(SongdoShip.message(r), r.reason === 'dup' ? 'info' : 'warn', 3000); }
+      if (r.reason !== 'dup') hush();
+      return;
+    }
+    sd.bags.push({ indivId: iv.indivId, lotId: iv.lotId, itemName: iv.itemName });
+    sd.fresh = false;
+    songdoShipBuzz(true);
+    renderSongdoShip();
+    return;
+  }
+  songdoShipBuzz(false);
+  toast(`봉 라벨(FG-…)이 아닙니다: ${String(c.code).slice(0, 30)}`, 'warn', 3000);
+  hush();   // 엉뚱한 코드가 계속 화면에 있어도 오류음이 되풀이되지 않게
+}
+
+function songdoShipBuzz(ok) {
+  try { if (navigator.vibrate) navigator.vibrate(ok ? 40 : [60, 40, 60]); } catch (e) {}
+  songdoShipBeep(ok);
+}
+/* 소리 — 소리가 안 나도(무음·오디오 차단) 진동·화면 안내는 그대로 간다 */
+function songdoShipBeep(ok) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    let ac = window._songdoShipAudio;
+    if (!ac || ac.state === 'closed') ac = window._songdoShipAudio = new AC();   // 닫힌 오디오는 다시 못 쓴다 — 새로 연다
+    if (ac.state === 'suspended') { const p = ac.resume(); if (p && p.catch) p.catch(() => {}); }   // 거절돼도 소리만 안 난다
+    let at = ac.currentTime;
+    SongdoShip.beepPlan(ok).forEach(b => {
+      at += b.gap / 1000;
+      const osc = ac.createOscillator(), gain = ac.createGain();
+      osc.frequency.value = b.hz;
+      gain.gain.value = 0.25;
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(at);
+      osc.stop(at + b.ms / 1000);
+      at += b.ms / 1000;
+    });
+  } catch (e) {}
+}
+
+function songdoShipConfirm(title, sub, labels) {
+  const L = Object.assign({ no: '취소', yes: '저장' }, labels);
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.innerHTML = `
+      <div class="dialog" style="max-width:360px;word-break:keep-all">
+        <div class="fs-15 fw-7 mb-8">${HS_ESC(title)}</div>
+        ${sub ? `<div class="fs-12 c-txt-l mb-12">${HS_ESC(sub)}</div>` : ''}
+        <div class="d-actions">
+          <button class="btn btn-sm btn-outline btn-gray" data-a="no">${HS_ESC(L.no)}</button>
+          <button class="btn btn-sm btn-suc" data-a="yes">${HS_ESC(L.yes)}</button>
+        </div>
+      </div>`;
+    const done = v => { overlay.remove(); resolve(v); };
+    overlay.querySelector('[data-a="no"]').onclick = () => done(false);
+    overlay.querySelector('[data-a="yes"]').onclick = () => done(true);
+    overlay.addEventListener('click', e => { if (e.target === overlay) done(false); });
+    document.body.appendChild(overlay);
+  });
+}
+
+function renderSongdoShip() {
+  const sd = State._songdoShip;
+  const guideEl = $id('sd-guide'), panel = $id('sd-panel');
+  if (!sd || !guideEl || !panel) return;
+  const n = sd.bags.length;
+  const lots = [...new Set(sd.bags.map(b => b.lotId))];
+  const guide = SongdoShip.stepOf(n, sd.fresh);
+  guideEl.innerHTML = `
+    <div class="card" style="padding:8px 10px;border-left:5px solid var(--suc)">
+      <div class="row" style="gap:6px;align-items:center;margin-bottom:2px">${SongdoShip.STEPS.map((nm, i) =>
+        `<span class="fs-11 ${i + 1 === guide.step ? 'fw-7' : 'c-txt-l'}">${i + 1 === guide.step ? '●' : '○'} ${i + 1}. ${HS_ESC(nm)}</span>`).join('<span class="fs-11 c-txt-l">›</span>')}</div>
+      <div class="fs-15 fw-7" style="word-break:keep-all">${HS_ESC(guide.text)}</div>
+    </div>`;
+  panel.innerHTML = `
+    <div class="card mt-8" style="padding:12px">
+      <div class="row between" style="align-items:center">
+        <div class="fs-14 fw-7">${HS_ESC(SONGDO_SHIP_CFG.CUSTOMER)} 직배 · ${n}봉</div>
+        ${n ? `<button class="btn btn-sm btn-outline btn-gray" style="padding:2px 10px;font-size:11px" onclick="songdoShipClear()">비우기</button>` : ''}
+      </div>
+      ${n ? sd.bags.map((b, i) => `
+        <div class="row between" style="padding:6px 0;border-bottom:1px solid var(--bg);align-items:center;gap:6px">
+          <div style="min-width:0;flex:1"><span class="c-suc fw-7">✓</span> <span class="lot-id" style="font-size:11px;word-break:break-all">${HS_ESC(b.indivId)}</span></div>
+          <button class="btn btn-sm btn-outline btn-err" style="padding:2px 8px;font-size:10px;flex-shrink:0" onclick="songdoShipRemove(${i})">빼기</button>
+        </div>`).join('') : `<div class="fs-12 c-txt-l mt-8">아직 담은 봉이 없습니다</div>`}
+      ${n ? `<div class="fs-11 c-txt-l mt-6">LOT ${lots.map(HS_ESC).join(', ')}</div>` : ''}
+      <button class="btn btn-suc btn-full sd-save mt-12" ${n ? '' : 'disabled'} onclick="songdoShipSaveDirect()">저장 · ${n}봉 → ${HS_ESC(SONGDO_SHIP_CFG.CUSTOMER)}</button>
+    </div>
+    ${sd.lastSaved ? `<div class="fs-12 c-suc fw-6 mt-8">✔ 방금 저장: ${HS_ESC(sd.lastSaved)}</div>` : ''}
+    ${sd.shipsOk ? `<div class="fs-12 c-txt-l mt-8">${HS_ESC(SongdoShip.todayText(SongdoShip.todayCount(sd.shipRows, formatDate())))}</div>` : ''}`;
+}
+
+function songdoShipRemove(i) {
+  const sd = State._songdoShip;
+  if (!sd || sd.busy) return;
+  sd.bags.splice(i, 1);
+  sd.fresh = false;
+  renderSongdoShip();
+}
+function songdoShipClear() {
+  const sd = State._songdoShip;
+  if (!sd || sd.busy) return;
+  sd.bags = [];
+  sd.fresh = false;
+  renderSongdoShip();
+}
+function songdoShipManual() {
+  const el = $id('sd-manual');
+  if (!el) return;
+  const v = el.value.trim();
+  el.value = '';
+  if (v) songdoShipAccept(v, { manual: true });
+}
+function songdoShipSaveDirect() {
+  const sd = State._songdoShip;
+  if (!sd || !sd.bags.length) return;
+  songdoShipSave(SongdoShip.directRef(formatDate()));
+}
+
+/* 끝내기 — 아직 저장 안 한 봉이 있으면 한 번 묻고, 카메라를 끄고 오늘 합계를 알려 준 뒤 재고로 돌아간다 */
+async function songdoShipFinish() {
+  const sd = State._songdoShip;
+  if (!sd || sd.busy) return;
+  if (sd.bags.length) {
+    sd.busy = true;   // 확인창이 떠 있는 동안 카메라가 읽은 봉을 담지 않는다
+    const yes = await songdoShipConfirm(`저장하지 않은 봉 ${sd.bags.length}개가 있습니다`, '끝내면 이 봉들은 저장되지 않습니다 — 그래도 끝낼까요?', { no: '계속 찍기', yes: '끝내기' });
+    if (!yes || State._songdoShip !== sd || State.currentScreen !== 'songdo-ship') { sd.busy = false; return; }
+  }
+  sd.busy = true;   // 카메라를 끄는 동안 읽힌 봉은 받지 않는다 — 나가는 화면에서 저장이 새로 시작되면 안 된다
+  const text = sd.shipsOk ? SongdoShip.todayText(SongdoShip.todayCount(sd.shipRows, formatDate())) : '';
+  await stopSongdoShipScan();
+  if (State._songdoShip !== sd || State.currentScreen !== 'songdo-ship') { sd.busy = false; return; }   // 카메라를 끄는 사이 화면을 옮겼다 — 이동·토스트가 새 화면을 덮지 않게
+  toast(`🏪 송도 직배를 끝냅니다${text ? ' — ' + text : ''}`, 'suc', 4000);
+  Router.go('inventory');
+}
+
+/* 출하기록 M~O 열 제목 — 비어 있을 때만 한 번 채운다(사람이 고친 제목은 덮지 않는다) */
+async function songdoShipEnsureHeader() {
+  if (State._shipHdrOk) return;
+  try {
+    const r = await SheetsAPI.getRange('출하기록!M1:O1', false);
+    if (!(r[0] && r[0][0])) await SheetsAPI.update('출하기록!M1:O1', [SONGDO_SHIP_SHEET_HDR]);
+    State._shipHdrOk = true;
+  } catch (e) { console.warn('[출하기록 제목]', e); }
+}
+
+/* 목록의 봉 저장 — 봉마다 출하기록 한 행 + 완제품개별 출하완료 + LOT 잔량 + 다 나간 LOT 의 작업지시서 출하완료.
+   소리 — 저장이 안 되면(그 사이 처리됨·끊긴 봉이 섞임·끊김) 거절과 같은 낮은 소리, 저장되면 높은 «삑» 한 번(2026-10-05 현장 결정). */
+async function songdoShipSave(ref) {
+  const sd = State._songdoShip;
+  if (!sd || !sd.bags.length) return;
+  if (!acquireLock('songdoShipSave')) return;
+  sd.busy = true;
+  try {
+    showLoading();
+    // 1. 저장 직전 재확인 — 다른 기기가 그 사이 출하·폐기했을 수 있다.
+    //    출하기록을 못 읽으면 저장하지 않는다(빈 목록으로 넘기면 shipId 가 겹치고 끊긴 저장을 못 알아본다)
+    SheetsAPI.invalidateCache('완제품개별');
+    SheetsAPI.invalidateCache('출하기록');
+    const [fresh, ships] = await Promise.all([
+      SheetsAPI.getAll('완제품개별', false),
+      SheetsAPI.getAll('출하기록', false),
+    ]);
+    const st = new Map(fresh.map(iv => [iv[0], iv[3] || '']));
+    const inIds = new Set(sd.bags.map(b => b.indivId));
+    const planFor = (r) => {   // 이 전표 r 로 저장한다면 — 같은 r 로 이미 적힌 행 · 다른 전표(옛 출하 창 포함)로 이미 적힌 봉
+      const same = ships.filter(x => songdoShipRef(x) === r);
+      const others = ships.filter(x => inIds.has(x[2]) && songdoShipRef(x) !== r).map(x => ({ indivId: x[2], ref: songdoShipRef(x) }));
+      return SongdoShip.planSave(sd.bags, id => st.get(id), same, others);
+    };
+    let plan = planFor(ref);
+    // 직배 전표는 날짜가 붙어 오늘 전표로는 어제 끊긴 저장을 끝낼 수 없다 — 목록의 봉이 전부 같은 옛 전표로 끊겨 있으면 그 전표로 이어 쓴다
+    const resume = plan.limbo ? SongdoShip.resumeRef(plan.limbo, sd.bags.length, ref) : null;
+    if (resume) { ref = resume; plan = planFor(ref); }
+    if (plan.gone.length) {
+      plan.gone.forEach(b => { const v = sd.indiv.get(String(b.indivId).toUpperCase()); if (v) v.status = st.get(b.indivId) || v.status; });
+      sd.bags = sd.bags.filter(b => !plan.gone.includes(b));
+      songdoShipBuzz(false);
+      toast(`${plan.gone.length}봉은 그 사이 다른 곳에서 처리돼 목록에서 뺐습니다 — 목록을 확인하고 다시 저장해 주세요`, 'err', 5000);
+      renderSongdoShip();
+      return;
+    }
+    if (plan.limbo) {
+      const limboIds = new Set(plan.limbo.map(l => l.indivId));
+      sd.bags = sd.bags.filter(b => !limboIds.has(b.indivId));
+      songdoShipBuzz(false);
+      toast(`${limboIds.size}봉은 다른 전표(${[...new Set(plan.limbo.map(l => l.ref || '옛 출하 기록'))].join(', ')})로 이미 출하기록에 적혀 있어 목록에서 뺐습니다 — 그 봉만 따로 담아 저장하면 끊긴 저장이 이어집니다 (${SONGDO_SHIP_CFG.RESUME_DAYS}일이 지난 전표면 시트 출하기록을 확인해 주세요)`, 'err', 6000);
+      renderSongdoShip();
+      return;
+    }
+    const shipTime = formatDateTime();
+    const shipper = (State.user && State.user.email) || '';
+    let rows = [], temp = null;
+    if (plan.toAppend.length) {
+      temp = await getShipFreezerStamp();   // 출하시점 냉동창고 온도 자동 스탬프
+      warnShipStamp(temp);
+      const shipIds = SongdoShip.nextShipIds(ships.map(r => r[0]), formatDate(), plan.toAppend.length);
+      rows = SongdoShip.buildRows(plan.toAppend, { ref, shipTime, shipper, temp, shipIds });
+      await songdoShipEnsureHeader();
+      await SheetsAPI.append('출하기록', rows);
+      rows.forEach(r => { sd.shipRows.push(r); sd.shipByIndiv.set(String(r[2]).trim().toUpperCase(), r); });   // 오늘 수·이미 나간 봉 안내가 곧바로 맞는다
+    }
+
+    // 2. 완제품개별 — 상태·출하시각·출하자 (D·E·F, 옛 출하 처리와 같은 칸) · 이어 쓰기면 아직 출하가능인 봉만
+    const upd = [];
+    for (const b of plan.toMark) {
+      const idx = await SheetsAPI.findRowIndex('완제품개별', 0, b.indivId);
+      if (idx > 0) {
+        upd.push({ range: `완제품개별!D${idx}`, values: [['출하완료']] });
+        upd.push({ range: `완제품개별!E${idx}`, values: [[shipTime]] });
+        upd.push({ range: `완제품개별!F${idx}`, values: [[shipper]] });
+      }
+    }
+    if (upd.length) await SheetsAPI.batchUpdate(upd);
+
+    // 3. LOT 잔량·상태 → 다 나간 LOT 은 작업지시서도 출하완료 (CON-010)
+    SheetsAPI.invalidateCache('완제품개별');
+    const after = await SheetsAPI.getAll('완제품개별', false);
+    const lotUpd = [], doneLots = [];
+    for (const lotId of [...new Set(sd.bags.map(b => b.lotId))]) {
+      const remain = SongdoShip.remainOf(after, lotId);
+      const li = await SheetsAPI.findRowIndex('완제품LOT', 0, lotId);
+      if (li > 0) {
+        lotUpd.push({ range: `완제품LOT!I${li}`, values: [[String(remain)]] });
+        if (remain === 0) lotUpd.push({ range: `완제품LOT!J${li}`, values: [['출하완료']] });
+      }
+      if (remain === 0) doneLots.push(lotId);
+    }
+    if (lotUpd.length) await SheetsAPI.batchUpdate(lotUpd);
+    if (doneLots.length) {
+      try {
+        const wos = await SheetsAPI.getAll('작업지시서');
+        for (const lotId of doneLots) {
+          const wo = wos.find(w => w[14] === lotId && (w[12] === '출하가능' || w[12] === '냉동보관중'));
+          if (wo) await SheetsAPI.updateCell('작업지시서', 0, wo[0], 12, '출하완료');
+        }
+      } catch (e) { console.warn('WO 상태 전환 실패:', e); }
+    }
+    ['완제품LOT', '완제품개별', '출하기록'].forEach(t => SheetsAPI.invalidateCache(t));
+
+    // 4. 화면 즉시 반영 — 목록을 비우고 다음 묶음으로 (카메라는 계속 켜 둔다)
+    sd.bags.forEach(b => { const v = sd.indiv.get(String(b.indivId).toUpperCase()); if (v) v.status = '출하완료'; });
+    sd.lastSaved = `${sd.bags.length}봉 · ${ref}${rows.length < sd.bags.length ? ' (끊긴 저장 이어 쓰기)' : ''}`;
+    sd.bags = [];
+    sd.fresh = true;
+    songdoShipBuzz(true);
+    toast(`🏪 저장 — ${sd.lastSaved}${temp ? ` · 냉동고 ${temp.temp}°C 자동기록` : ''}`, 'suc', 3500);
+    renderSongdoShip();
+  } catch (e) {
+    songdoShipBuzz(false);
+    toast('송도 직배 실패: ' + e.message, 'err', 5000);
+    console.error('[songdoShipSave]', e);
+  } finally {
+    hideLoading();
+    sd.busy = false;
+    releaseLock('songdoShipSave');
+  }
 }
 
 // [제거됨] checkFreezeAndUpdateStatus — 관리자 승인(approveWO)만이 출하가능 전환 경로
