@@ -2478,6 +2478,8 @@ Screens.dashboard = async () => {
         </div>
       </div>
 
+      ${isAdmin ? LiveSync.lateSlot('home-ship-push') : ''}
+
       ${isAdmin && pendingWOs.length > 0 ? `
         <div class="fs-14 fw-7 mb-8">🔔 냉동보관 · 출하승인</div>
         ${pendingWOs.map(wo => {
@@ -2630,6 +2632,7 @@ Screens.dashboard = async () => {
 
   loadHomeProdPlan();     // 반죽 실판매(ERP API) 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
   hsLoadHomeDocAlert();   // Drive 는 느리다 — 홈을 다 그린 뒤 뒤에서 채운다
+  ShipApprovePush.fillHome();   // 🔔 출하승인 알림 권유 — 받는 사람의 아직 안 켠 기기에만
 };
 
 /** 홈 「챙겨야 할 서류」 — Drive 에 원본이 없는 성적서·검교정 성적서를 실무자에게 알린다.
@@ -5578,6 +5581,7 @@ Screens.settings = () => {
           </div>
           <button class="btn btn-sm ${CertNotif.off() ? 'btn-outline btn-gray' : 'btn-pri'}" style="min-width:64px" onclick="setCertAlertOff(${!CertNotif.off()})">${CertNotif.off() ? '🔕 꺼짐' : '🔔 켜짐'}</button>
         </div>
+        <div id="set-ship-push"></div>
       </div>
       <div class="card">
         <div class="fs-14 fw-7 mb-8">앱 정보</div>
@@ -5588,6 +5592,7 @@ Screens.settings = () => {
       <button class="btn btn-outline btn-err btn-full mt-16" onclick="Auth.logout()">로그아웃</button>
     </div>
   `;
+  ShipApprovePush.fillSettings();   // 🔔 출하승인 알림 줄 — 받는 사람에게만(기기 상태를 비동기로 읽는다)
 };
 
 /** 🔕 시험성적서 알림 on/off — 홈 배너·설정 두 곳에서 같은 함수를 쓴다(FR-20260813-3ZC).
@@ -7436,6 +7441,259 @@ const CertNotif = {
   set(v) { try { v ? localStorage.setItem(this.KEY, '1') : localStorage.removeItem(this.KEY); } catch (e) {} },
 };
 // </cert-notif>
+
+// <ship-approve-push>
+/* 🔔 출하승인 알림 — 앱을 닫아 둬도 오는 웹푸시 (사용자 지시 2026-10-07 «출하 승인알람을 한성호 팀장의 공장 앱에서»).
+   왜: 승인이 늦었다 — 9/28~9/30 배치는 냉동 12시간이 9/28~9/30 밤에 찼는데 승인은 10/2 에 몰려 났다.
+      홈의 «새 승인요청» 토스트는 앱을 열어야만 보이고, 12시간이 «찼을 때» 가 아니라 생산이 «끝났을 때» 뜬다.
+   역할 분담:
+     · 이 앱 = 받을 기기를 등록(구독)하고, 알림을 누르면 «생산 › 승인대기» 를 연다.
+     · ERP  = 판단·발송. Apps Script `sf_ship_approve_push.gs`(5분 배치)가 이 시트 작업지시서를 보고 냉동 12시간이 지난
+              미승인 배치를 찾아 ERP 배포의 /api/push-send(VAPID 서명)로 보낸다. 평일 08~18시는 찬 즉시,
+              밤·주말·공휴일에 찬 것은 다음 근무일 08시에 모아서, 승인이 안 되면 근무일마다 08시에 다시(사용자 선택 2026-10-07).
+   저장 = 이 시트 «푸시구독» 탭(기기 1대 = 1행). ERP 의 PushSub 에 넣지 않는다 — 그쪽 행은 ERP 서비스워커로 ERP 알림
+          전부를 받는 구독이라 섞으면 공장 기기에 ERP 업무 알림이 쏟아지고, 공장 구독은 ERP 쪽 정리(만료 처리)를 못 받는다.
+   받는 사람 = 이 시트 «사용자» 탭 F열 «알림» 에 «출하승인» 이 적힌 관리자(사용자 선택 «한성호 팀장만» 2026-10-07).
+          ⚠️ 이메일을 코드에 적지 않는다 — 이 저장소는 public 이다. 명단은 시트(공유 범위가 지킨다) 한 칸이 정본이고,
+          켜기 단추도 서버 발송(ERP)도 같은 칸을 읽는다. 사람을 바꾸려면 그 칸만 옮겨 적는다(코드·배포 없음). */
+const ShipApprovePush = {
+  FLAG: '출하승인',                      // 사용자!F «알림» 칸의 낱말(쉼표로 여러 개 가능)
+  USER_COL: 5,                           // 사용자 탭 F열(0부터) — [0]=email [1]=name [2]=role
+  TAB: '푸시구독',
+  HEADER: ['subId', 'email', 'endpoint', 'p256dh', 'auth', 'device', 'active', 'topics', 'createdAt', 'updatedAt'],
+  TOPIC: 'ship_approve',
+  KEY_URL: '/api/push-send',            // GET → { publicKey } · POST → 시험 발송. 공장 주소도 ERP 배포라 같은 주소다
+  GO_URL: '/app/factory/home?go=approve',
+  LS_SUB: 'mt_shipPushSub',             // 이 기기의 subId
+  LS_SKIP: 'mt_shipPushSkip',           // «이 기기는 안 받음» — 홈 권유만 숨긴다(설정에서 언제든 켬)
+  _publicKey: '',
+  _go: '',
+
+  /** 사용자 탭 한 행이 «출하승인 알림 받는 관리자» 인가 — 관리자(admin) + F열에 FLAG. */
+  flagged(row) {
+    if (!row || String(row[2] || '').trim().toLowerCase() !== 'admin') return false;
+    return String(row[this.USER_COL] || '').split(/[\s,·/]+/).includes(this.FLAG);
+  },
+  /** 사용자 탭(머리글 뺀 행들)에서 이 이메일이 받는 사람인가. */
+  isRecipientIn(users, email) {
+    const e = String(email || '').trim().toLowerCase();
+    return !!e && (users || []).some(r => String(r && r[0] || '').trim().toLowerCase() === e && this.flagged(r));
+  },
+  async amRecipient() {
+    if (!State.user?.email) return false;
+    const users = await SheetsAPI.getAll('사용자').catch(() => []);
+    return this.isRecipientIn(users, State.user.email);
+  },
+  isActive(v) { return v === true || String(v || '').trim().toUpperCase() === 'TRUE'; },
+
+  /** 시트에 쓸 키 값 — USER_ENTERED 로 쓰므로 «-» 로 시작하는 base64url 이 수식으로 읽히지 않게 따옴표를 붙인다. */
+  lit(v) { return "'" + String(v || ''); },
+  rowFor(j, email, ua, now, subId) {
+    return [subId, String(email || '').toLowerCase(), j.endpoint, this.lit(j.keys.p256dh), this.lit(j.keys.auth),
+      String(ua || '').slice(0, 120), 'TRUE', this.TOPIC, now, now];
+  },
+  patchFor(j, email, ua, now) {
+    return { 1: String(email || '').toLowerCase(), 3: this.lit(j.keys.p256dh), 4: this.lit(j.keys.auth),
+      5: String(ua || '').slice(0, 120), 6: 'TRUE', 7: this.TOPIC, 9: now };
+  },
+  /** VAPID 공개키(base64url) → applicationServerKey 바이트. */
+  b64ToBytes(s) {
+    const b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - String(s || '').length % 4) % 4);
+    const bin = atob(b64), out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  },
+  sameKey(sub, key) {
+    const have = sub && sub.options && sub.options.applicationServerKey;
+    if (!have) return true;                // 옛 브라우저는 키를 안 알려준다 — 같다고 보고 그대로 쓴다
+    const a = new Uint8Array(have), b = this.b64ToBytes(key);
+    return a.length === b.length && a.every((x, i) => x === b[i]);
+  },
+
+  /** 주소의 ?go= — 알림을 눌러 앱이 «새로» 열릴 때 들어온다. 읽자마자 주소에서 지운다(새로고침해도 다시 안 끌려가게). */
+  captureGo() {
+    try {
+      const u = new URL(location.href), go = u.searchParams.get('go');
+      if (!go) return;
+      this._go = go;
+      u.searchParams.delete('go');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    } catch (e) {}
+  },
+  /** 시작 화면 대신 갈 곳이 있으면 가고 true. initApp 이 «마지막 화면 복원» 보다 먼저 부른다. */
+  consumeGo() { const g = this._go; this._go = ''; return g ? this.go(g) : false; },
+  go(where) {
+    if (where !== 'approve' || !State.user) return false;
+    State._prodActiveTab = '승인대기';
+    Router.go('production');
+    return true;
+  },
+
+  _ls(fn) { try { return fn(); } catch (e) { return null; } },
+  supported() {
+    return ON_ERP_HOST && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  },
+  /** 'unsupported' | 'denied' | 'on' | 'off' — 이 기기 기준. */
+  async status() {
+    if (!this.supported()) return 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      return sub && this._ls(() => localStorage.getItem(this.LS_SUB)) ? 'on' : 'off';
+    } catch (e) { return 'off'; }
+  },
+  async _ready() {
+    let reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) reg = await navigator.serviceWorker.register('sw.js');
+    return await Promise.race([navigator.serviceWorker.ready,
+      new Promise((_, no) => setTimeout(() => no(new Error('서비스워커가 준비되지 않았습니다 — 앱을 새로 열어 주세요')), 8000))]);
+  },
+  async _key() {
+    if (this._publicKey) return this._publicKey;
+    const r = await fetch(this.KEY_URL, { cache: 'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.publicKey) throw new Error('알림 서버 키를 받지 못했습니다 (' + r.status + ')');
+    return (this._publicKey = j.publicKey);
+  },
+  async _ensureTab() {
+    try { await SheetsAPI.getAll(this.TAB, false); }
+    catch (e) { await SheetsAPI.createSheet(this.TAB, this.HEADER); SheetsAPI.invalidateCache(this.TAB); }
+  },
+  async _save(sub) {
+    const j = sub.toJSON(), email = State.user?.email || '', ua = navigator.userAgent, now = formatDateTime();
+    await this._ensureTab();
+    const rows = await SheetsAPI.getAll(this.TAB, false);
+    const hit = rows.find(r => r[2] === j.endpoint);
+    if (hit) { await SheetsAPI.updateRow(this.TAB, 0, hit[0], this.patchFor(j, email, ua, now)); return hit[0]; }
+    const subId = 'SFP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+    await SheetsAPI.append(this.TAB, this.rowFor(j, email, ua, now, subId));
+    return subId;
+  },
+  _after() { if (State.currentScreen === 'settings') Router.render(); else this.fillHome(); },
+
+  async enable() {
+    if (!this.supported()) { toast(this.hint('unsupported'), 'warn', 6000); return false; }
+    if (isPreviewing()) { _previewSkipWrite(); return false; }
+    try {
+      showLoading();
+      const perm = await Notification.requestPermission();   // 누른 손길 안에서 먼저 — 그래야 권한 창이 뜬다
+      if (perm !== 'granted') { toast(this.hint('denied'), 'warn', 7000); return false; }
+      const reg = await this._ready();
+      const key = await this._key();
+      let sub = await reg.pushManager.getSubscription();
+      if (sub && !this.sameKey(sub, key)) { await sub.unsubscribe().catch(() => {}); sub = null; }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: this.b64ToBytes(key) });
+      const subId = await this._save(sub);
+      this._ls(() => { localStorage.setItem(this.LS_SUB, subId); localStorage.removeItem(this.LS_SKIP); });
+      toast('🔔 출하승인 알림을 켰습니다 — 냉동 12시간이 지나면 이 기기로 옵니다', 'suc', 5000);
+      return true;
+    } catch (e) {
+      console.warn('[출하승인 알림] 켜기 실패', e);
+      toast('알림을 켜지 못했습니다: ' + (e.message || e), 'err', 7000);
+      return false;
+    } finally { hideLoading(); this._after(); }
+  },
+  async disable() {
+    if (isPreviewing()) { _previewSkipWrite(); return; }
+    try {
+      showLoading();
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      const endpoint = sub && sub.endpoint, mine = this._ls(() => localStorage.getItem(this.LS_SUB));
+      if (sub) await sub.unsubscribe().catch(() => {});
+      const rows = await SheetsAPI.getAll(this.TAB, false).catch(() => []);
+      const hit = rows.find(r => (mine && r[0] === mine) || (endpoint && r[2] === endpoint));
+      if (hit) await SheetsAPI.updateRow(this.TAB, 0, hit[0], { 6: '', 9: formatDateTime() });
+      this._ls(() => localStorage.removeItem(this.LS_SUB));
+      toast('🔕 이 기기의 출하승인 알림을 껐습니다', 'suc');
+    } catch (e) { toast('끄지 못했습니다: ' + (e.message || e), 'err', 6000); }
+    finally { hideLoading(); this._after(); }
+  },
+  /** 시험 발송 — 이 기기 한 대에만. 켠 직후 «정말 오는지» 를 그 자리에서 본다(서버 판단 없이 발송 길만). */
+  async test() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (!sub) throw new Error('이 기기는 아직 켜져 있지 않습니다');
+      if (!Auth.isTokenFresh()) await Auth.tryRefreshToken();
+      const j = sub.toJSON();
+      const r = await fetch(this.KEY_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + State.token },
+        body: JSON.stringify({ items: [{ sub_id: this._ls(() => localStorage.getItem(this.LS_SUB)) || 'SFP-TEST',
+          endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth,
+          title: '🧊 출하승인 알림 시험', body: '이 기기로 옵니다 — 누르면 생산 › 승인대기 화면이 열립니다',
+          url: this.GO_URL, tag: 'sf-ship-approve-test' }] }),
+      });
+      const out = await r.json().catch(() => ({}));
+      const first = (out.results || [])[0] || {};
+      if (!r.ok || !out.sent) throw new Error(out.error || first.err || ('HTTP ' + r.status));
+      toast('📨 시험 알림을 보냈습니다 — 몇 초 안에 이 기기에 떠야 합니다', 'suc', 5000);
+    } catch (e) { toast('시험 알림 실패: ' + (e.message || e), 'err', 7000); }
+  },
+  skipHere() {
+    this._ls(() => localStorage.setItem(this.LS_SKIP, '1'));
+    toast('이 기기에서는 권유를 숨겼습니다 — 설정 › 알림에서 언제든 켤 수 있어요', 'suc', 5000);
+    this.fillHome();
+  },
+  hint(st) {
+    if (st === 'denied') return '알림이 막혀 있습니다 — 브라우저 주소창 왼쪽 ⓘ › 사이트 설정 › 알림 «허용» 뒤 다시 켜 주세요';
+    if (st === 'unsupported') return /iPhone|iPad|iPod/.test(navigator.userAgent)
+      ? '아이폰은 사파리 공유(⬆) › «홈 화면에 추가» 로 설치한 공장 앱에서 켤 수 있습니다'
+      : '이 브라우저는 알림을 받을 수 없습니다 — 크롬으로 공장 앱(maytutu-factory)을 열어 주세요';
+    return '';
+  },
+
+  /** 홈 권유 카드 — 받는 사람이고, 이 기기가 아직 안 켜졌을 때만. 켜졌으면 아무것도 안 그린다(설정에서 본다). */
+  async fillHome() {
+    const el = $id('home-ship-push');
+    if (!el) return;
+    if (this._ls(() => localStorage.getItem(this.LS_SKIP)) || !(await this.amRecipient())) { el.innerHTML = ''; return; }
+    const st = await this.status();
+    if (st === 'on') { el.innerHTML = ''; return; }
+    const off = st === 'off';
+    el.innerHTML = `
+      <div class="card" style="border-left:3px solid var(--info)">
+        <div class="row between" style="gap:8px">
+          <div style="flex:1">
+            <div class="fs-14 fw-7" style="white-space:normal;word-break:keep-all">🔔 출하승인 알림을 이 기기로 받기</div>
+            <div class="fs-12 c-txt-l mt-2" style="white-space:normal;word-break:keep-all">${off
+              ? '냉동 12시간이 지나면 앱을 닫아 둬도 알려 줍니다 — 평일 08~18시는 바로, 밤·휴일분은 다음 근무일 08시에.'
+              : HS_ESC(this.hint(st))}</div>
+          </div>
+          ${off ? `<button class="btn btn-sm btn-pri" style="min-width:64px" onclick="ShipApprovePush.enable()">켜기</button>` : ''}
+        </div>
+        <div class="fs-12 mt-8"><a href="javascript:void(0)" onclick="ShipApprovePush.skipHere()" style="color:var(--txt-l);text-decoration:underline">이 기기에서는 안 받기</a></div>
+      </div>`;
+  },
+
+  /** 설정 › 알림 의 한 줄 — 받는 사람(사용자!F «출하승인»)에게만. */
+  async fillSettings() {
+    const el = $id('set-ship-push');
+    if (!el) return;
+    if (!(await this.amRecipient())) { el.innerHTML = ''; return; }
+    const st = await this.status();
+    const on = st === 'on';
+    el.innerHTML = `
+      <div class="row between" style="border-top:1px solid var(--gray-l);padding-top:10px;margin-top:10px">
+        <div style="flex:1">
+          <div class="fs-13 fw-6" style="white-space:normal;word-break:keep-all">출하승인 알림 (앱을 닫아도 옴)</div>
+          <div class="fs-11 c-txt-l mt-2" style="white-space:normal;word-break:keep-all">${on
+            ? '켜짐 — 냉동 12시간이 지난 미승인 배치를 알려 줍니다. 평일 08~18시는 바로, 밤·휴일분은 다음 근무일 08시에.'
+            : st === 'off' ? '꺼짐 — 켜면 이 기기로 옵니다.' : HS_ESC(this.hint(st))}</div>
+          ${on ? `<div class="fs-12 mt-4"><a href="javascript:void(0)" onclick="ShipApprovePush.test()" style="color:var(--info);text-decoration:underline">📨 시험 알림 보내기</a></div>` : ''}
+        </div>
+        ${st === 'on' || st === 'off' ? `<button class="btn btn-sm ${on ? 'btn-pri' : 'btn-outline btn-gray'}" style="min-width:64px"
+          onclick="ShipApprovePush.${on ? 'disable' : 'enable'}()">${on ? '🔔 켜짐' : '🔕 꺼짐'}</button>` : ''}
+      </div>`;
+  },
+};
+ShipApprovePush.captureGo();
+// 앱이 이미 열려 있을 때 알림을 누르면 서비스워커가 창을 앞으로 올리고 이 메시지로 «어디로» 를 알려 준다(새로 열지 않는다).
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+  if (e.data && e.data.type === 'sf-go') ShipApprovePush.go(e.data.go);
+});
+// </ship-approve-push>
 
 const DB_SHEETS = {
   '작업지시서': ['woId','sopId','reqId','fgItemCode','name','targetQty','unit','packCount','email','startedAt','completedAt','freezeStart','status','lastStep','fgLotId','approver','approvedAt','note','col18','pdfUrl'],
@@ -17760,8 +18018,8 @@ async function initApp() {
       return;
     }
 
-    // 풀투리프레시 / 페이지 리로드 후 마지막 화면 복원 시도, 없으면 dashboard
-    if (!restoreLastScreen()) {
+    // 🔔 알림을 눌러 열렸으면(?go=approve) 그 화면이 먼저 — 그다음 마지막 화면 복원, 없으면 dashboard
+    if (!ShipApprovePush.consumeGo() && !restoreLastScreen()) {
       Router.go('dashboard');
     }
 
