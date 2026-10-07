@@ -35,6 +35,38 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(self.clients.claim());
 });
 
+/* 🔔 웹푸시 — 출하승인 알림(2026-10-07). 판단·발송은 ERP 쪽(Apps Script sf_ship_approve_push.gs → /api/push-send)이
+   하고, 여기는 받아서 띄우고 누르면 그 화면을 연다. 페이로드 = { title, body, url, tag } (ERP push-send 의 모양).
+   캐시를 만들지 않는 이 파일의 원칙은 그대로다 — 아래 둘은 응답을 저장하지 않는다. */
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || '메이투투 공장', {
+    body: d.body || '',
+    tag: d.tag || 'sf-push',
+    renotify: true,                       // 같은 tag 로 새 내용이 오면 다시 울린다(조용히 바꿔치기 금지)
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    data: { url: d.url || 'home?go=approve' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || 'home?go=approve', self.registration.scope);
+  event.waitUntil((async () => {
+    // 앱이 이미 열려 있으면 그 창을 앞으로 올리고 «어디로» 만 알려 준다 — 새로 열면 다시 로그인·로딩을 한다
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = wins.find(c => c.url.startsWith(self.registration.scope));
+    if (open) {
+      try { await open.focus(); } catch (e) {}
+      open.postMessage({ type: 'sf-go', go: target.searchParams.get('go') || '' });
+      return;
+    }
+    await self.clients.openWindow(target.href);
+  })());
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.mode !== 'navigate' || req.method !== 'GET') return;
