@@ -325,7 +325,7 @@ process.on('exit', code => {
     for (let i = 0; i < 3; i++) await e.sync('poll');
     assert.strictEqual(e.renders.length, 0, '재고 화면 등은 펼침·입력 보존을 위해 자동 갱신 제외(수동만)');
     assert.strictEqual(e.fetched.length, 0, '받지도 않는다');
-    for (const s of ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm']) {
+    for (const s of ['wo-create', 'bom-calc', 'req-form', 'data-audit', 'reject-modal', 'lot-detail', 'inventory', 'po-new', 'po-detail', 'vendors', 'items-rm', 'songdo-ship']) {
       assert.ok(e.LiveSync._busyReason(s), `${s} 은(는) 입력 보존 화면 목록에 있어야 한다`);
     }
     console.log('✔ ⑤ 입력 보존 화면');
