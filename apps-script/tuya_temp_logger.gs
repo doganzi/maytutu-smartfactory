@@ -160,6 +160,78 @@ function logTemperatures() {
   });
 
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+
+  // 기기 상태(온라인·공인 IP)는 30분에 한 번 — 온도 기록이 먼저이고, 이 단계가 실패해도 온도 기록은 이미 끝났다.
+  try { logDeviceHealth_(false); } catch (e) { Logger.log('기기상태 기록 실패: ' + e.message); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   공장 기기 상태 — 사무실 이전(2026-09-22) 뒤 공장 망 안에는 관제 기기가 없다.
+   그래서 Tuya 클라우드가 이미 알고 있는 «온라인 여부 · 마지막 보고 시각 · 기기가 붙은 공인 IP» 를
+   탭 '기기상태' 에 1기기 1행으로 덮어쓴다. ERP 관제가 이 탭을 읽어 공장 칸을 그린다.
+     판정: 전 기기 동시 오프라인 = 공장 인터넷·전원 · 한 대만 = 그 기기 · 공인 IP 가 바뀜 = 회선 변경
+   호출량: 기기당 1회 × 30분 → 5대면 월 ≈7,200회(온도 2대 10분 ≈8,640회와 합쳐 무료 26,000회의 ≈61%).
+   대상: 스크립트 속성 TUYA_HEALTH_IDS(콤마 · 온도계가 아닌 기기 포함) — 없으면 TUYA_DEVICE_IDS.
+   ═══════════════════════════════════════════════════════════════════ */
+var HEALTH_TAB = '기기상태';
+var HEALTH_EVERY_MIN = 30;
+
+function healthIds_() {
+  var raw = TUYA.prop('TUYA_HEALTH_IDS', '') || TUYA.prop('TUYA_DEVICE_IDS', '');
+  return raw.split(',').map(function (s) { return s.trim(); }).filter(String);
+}
+
+function kst_(ms) { return ms ? Utilities.formatDate(new Date(ms), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : ''; }
+
+/** Tuya 의 시각은 초 단위(10자리)·밀리초(13자리)가 섞여 온다. */
+function tuyaMs_(v) { var n = Number(v || 0); if (!n) return 0; return n < 1e12 ? n * 1000 : n; }
+
+/** @param {boolean} force true = 30분 간격 무시(수동 실행용) */
+function logDeviceHealth_(force) {
+  var SP = PropertiesService.getScriptProperties();
+  var last = Number(SP.getProperty('TUYA_HEALTH_AT') || '0');
+  if (!force && Date.now() - last < HEALTH_EVERY_MIN * 60000) return;
+  var ids = healthIds_();
+  if (!ids.length) return;
+  var now = kst_(Date.now());
+  var rows = ids.map(function (id) {
+    try {
+      var d = TUYA.request('GET', '/v1.0/devices/' + id, TUYA.token(), null) || {};
+      return [now, id, TUYA.nameOf(id) || d.name || '', d.online === true ? 'online' : (d.online === false ? 'offline' : ''),
+              kst_(tuyaMs_(d.update_time)), d.ip || '', d.category || '', d.product_name || '', ''];
+    } catch (e) {
+      return [now, id, TUYA.nameOf(id), '', '', '', '', '', String(e.message).slice(0, 200)];
+    }
+  });
+  var ss = SpreadsheetApp.openById(TUYA.prop('SHEET_ID', ''));
+  var sh = ss.getSheetByName(HEALTH_TAB) || ss.insertSheet(HEALTH_TAB);
+  var head = ['점검시각(KST)', '기기ID', '기기명', '온라인', '마지막보고(KST)', '공인IP', '종류', '제품', '오류'];
+  sh.clearContents();
+  sh.getRange(1, 1, 1, head.length).setValues([head]);
+  sh.getRange(2, 1, rows.length, head.length).setValues(rows);
+  sh.setFrozenRows(1);
+  SP.setProperty('TUYA_HEALTH_AT', String(Date.now()));
+}
+
+/** 수동 1회: 간격 무시하고 지금 기록 → '기기상태' 탭 확인 */
+function logDeviceHealthNow() { logDeviceHealth_(true); }
+
+/**
+ * 수동 1회: 연동된 앱 계정의 기기 목록을 로그로 — TUYA_HEALTH_IDS 를 채울 때 쓴다.
+ * 엔드포인트가 프로젝트 종류마다 달라 두 곳을 차례로 시도한다(실패는 로그만).
+ */
+function discoverAllDevices() {
+  var tries = ['/v1.0/iot-01/associated-users/devices?size=50', '/v2.0/cloud/thing/device?page_size=20'];
+  for (var i = 0; i < tries.length; i++) {
+    try {
+      var r = TUYA.request('GET', tries[i], TUYA.token(), null);
+      var list = (r && (r.devices || r.list)) || (Array.isArray(r) ? r : []);
+      Logger.log('● ' + tries[i] + ' → ' + list.length + '대');
+      list.forEach(function (d) { Logger.log([d.id, d.name, d.category, d.product_name, 'online=' + d.online, 'ip=' + (d.ip || '')].join(' | ')); });
+      if (list.length) { Logger.log('→ 스크립트 속성 TUYA_HEALTH_IDS = ' + list.map(function (d) { return d.id; }).join(',')); return; }
+    } catch (e) { Logger.log('✕ ' + tries[i] + ' : ' + e.message); }
+  }
 }
 
 
