@@ -934,6 +934,7 @@ process.on('exit', code => {
       const ctx = vm.createContext({
         console: { log() {}, warn() {}, error() {} }, State: {}, $id: id => (id === 'home-prod-plan' ? el : null),
         SheetsAPI: { getAll: async () => [] }, FactoryPnl: { fetchDough: async () => ({ rows: [] }) },
+        ErpAdj: { load: async () => [], lotMap: () => new Map(), applyDay: (events) => ({ events, days: new Set() }) },   // ERP 보정(3단계 <erp-adj>) — 보정 없음
       });
       vm.runInContext(PRODPLAN_SRC, ctx);
       await vm.runInContext('loadHomeProdPlan()', ctx);

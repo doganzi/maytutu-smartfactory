@@ -184,12 +184,12 @@ t('들어오는 길 — 더보기 메뉴 맨 앞 «🏪 송도 직배»', () => 
   assert.ok(/label: '송도 직배'[^}]*target: 'songdo-ship'/.test(items), '더보기 메뉴 없음');
   assert.ok(items.indexOf("target: 'songdo-ship'") < items.indexOf("target: 'haccp'"), '메뉴 맨 앞이 아니다');
 });
-t('출하기록 쓰기 — 이 화면의 append 는 한 곳(행을 SongdoShip.buildRows 가 만든다) · 정의 12열은 옛 출하 창 폭 검사와 맞춰 둔다', () => {
+t('출하기록 쓰기 — 이 화면의 append 는 한 곳(행을 SongdoShip.buildRows 가 만든다) · 정의 16열은 옛 출하 창(받는 곳 O · 메모 P 까지 16열 literal append) 폭 검사와 맞춰 둔다', () => {
   const calls = CODE.match(/SheetsAPI\.append\(\s*['"`]출하기록['"`],\s*rows\s*\)/g) || [];
   assert.strictEqual(calls.length, 1, `행 목록(rows)을 넘기는 출하기록 append 가 ${calls.length}곳이다 — 송도 직배 저장 한 곳뿐이어야 한다`);
   const m = CODE.match(/'출하기록': \[([^\]]*)\]/);
   assert.ok(m, 'DB_SHEETS 출하기록 줄 없음');
-  assert.strictEqual(m[1].split(',').length, 12, 'DB 조회 정의는 12열이다 — 15열로 늘리려면 옛 출하 창의 12열 literal append 와 tests/db-sheets-width 폭 검사를 같이 손봐야 한다');
+  assert.strictEqual(m[1].split(',').length, 16, 'DB 조회 정의는 16열이다(3단계 <ship-dest> — 옛 출하 창이 O 받는 곳 · P 메모까지 쓴다) — 바꾸려면 옛 출하 창의 16열 literal append 와 tests/db-sheets-width 폭 검사를 같이 손봐야 한다');
 });
 t('저장 — 직전 재조회(실패 시 중단) · 저장 계획 · 연속 shipId · 온도 · D/E/F · LOT I/J · 작업지시서 · 잠금 해제', () => {
   const a = CODE.indexOf('async function songdoShipSave(ref) {');
