@@ -74,7 +74,7 @@ const around = (anchor, span = 700) => { const i = CODE.indexOf(anchor); assert.
 
 t('홈 — 완제품품목을 같이 읽어 알림에 번호·성적서번호를 싣는다', () => {
   // 같은 호출이 완제품 품목 화면에도 있으니, 홈 로드 묶음(Promise.all) 안에서만 센다
-  const load = around('const [woData, rmItems, rmLots, eqData, certData, devData, fgMaster]', 900);
+  const load = around('const [woData, rmItems, rmLots, eqData, certData, devData, fgMaster', 900)   // 뒤에 erpAdj(3단계 <erp-adj>)가 붙어 닫는 괄호는 앵커에서 뺀다;
   assert.ok(load.includes("SheetsAPI.getAll('완제품품목').catch(() => [])"), '홈 로드에 완제품품목 없음: ' + load);
   assert.ok(CODE.includes('const fgNo = FgReportNo.map(fgMaster);'));
   const push = around('certAlerts.push(', 400);

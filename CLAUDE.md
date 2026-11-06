@@ -196,7 +196,15 @@ HACCP 감사 바인더로 들어가므로 번호가 기준서와 다르면 심�
 - `사용자`: [0]=email [1]=name [2]=role(admin/worker…) [3]=phone [4]=createdAt **[5]=알림**(쉼표구분 낱말 — `출하승인` = 출하승인 푸시를 받는 관리자). 앱은 읽기만 한다
 - `푸시구독`(앱이 자동 생성): subId · email · endpoint · p256dh · auth · device · active(TRUE/빈칸) · topics(`ship_approve`) · createdAt · updatedAt — ERP 가 머리글 이름으로 읽는다
 - `완제품품목`: [8]=packsPerBox, [10]~[17]=규제정보(`FG_EXT`), **[18]=공급단가(원/봉·VAT 제외)** — 손익 매출의 유일한 단가 소스
-- `원재료품목`: [13]=매입단가(원/기본단위) — ERP `SmartFactoryKpi.rawInventory()` 도 이 칸을 읽는다
+- `원재료품목`: [13]=매입단가(원/기본단위) — ERP `SmartFactoryKpi.rawInventory()` 도 이 칸을 읽는다. 입고(QR)·구매주문 수령에서 단가를 적으면 이 칸도 그 값으로 바뀐다
+- `출하기록`(16열): [3]=customer(받는 방식 — 직접 출하·택배) · [12]·[13]=전표번호·받는 방식(**송도 직배 화면 전용**) ·
+  **[14]=받는 곳**(O · `가맹점`·`송도 직영`·`R&D 시험`·`B2B 샘플` — 송도 직배 화면은 `송도직영점`) · **[15]=메모**(P · R&D 시험·B2B 샘플은 필수).
+  ERP 공장 현황이 O열로 출고를 «가맹 출하·송도 직영·기타 소진» 으로 나눈다 — **값 글자를 바꾸지 말 것**, «테스트» 낱말 금지(ERP 가 시험 데이터로 거른다). 빈칸 = 가맹점(옛 줄). 코드 = `// <ship-dest>`
+- `입고기록`(13열): **[12]=단가**(M · 원/기본단위 · VAT 제외 · 정수) — ERP 원재료 수불 «최근 입고 단가·전회 대비» 가 읽는다. 코드 = `// <rcv-price>`
+- `ERP_실적보정`(ERP 가 쓰고 이 앱은 **읽기만**): id·at·by·kind·item·key·label·scope·before·after·memo·report·status.
+  같은 (kind,item,key) 는 나중 줄이 이김 · status `취소` 무시 · 원본 탭은 덮어쓰지 않는다. 이 앱은 rm(재고)·rmin/rmout(날짜별 입고/사용 → 발주점 제안)·
+  prod/ship(홈 생산계획)·lot(LOT 잔량)을 겹쳐 보이고 «ERP 보정» 딱지를 붙인다. 규칙은 ERP `factory-board-model.mjs` 와 같다 — 한쪽만 고치지 말 것.
+  코드 = `// <erp-adj>` · 검증 `node tests/factory-stage3.test.js`(ERP 원본 대조: `ERP_FACTORY_MODEL=<경로> node tests/factory-stage3.test.js`)
 - `공장손익`(자동 생성): [0]=period(YYYY-MM), [1]=항목(노무비/임차료·관리비/공과금(전기·가스·수도)),
   [2]=금액, [3]=메모, [4]=등록자, [5]=등록일시. **금액이 빈 칸 = 수기값 없음**(0 이 아니다 — ERP 결산으로 폴백)
 
