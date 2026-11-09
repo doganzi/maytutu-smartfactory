@@ -7636,9 +7636,70 @@ const HACCP_STD_HEADER = ['stdId','구분','항목','대상품목','위해요소
 const CERT_SHEET_HEADER = ['certId','구분','itemCode','itemName','발행기관','성적서번호','발행일','유효기한','판정','파일링크','등록자','등록일시','상태','비고'];
 const DEV_SHEET_HEADER  = ['devId','발견일','구분','제목','상세','근거','심각도','상태','담당','조치내용','조치일','등록자','등록일시','audit_note'];
 /** 완제품품목 확장 컬럼 — 기존 [0]~[9] 뒤에 append (기존 인덱스 절대 변경 금지) */
-const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18, mbCodes: 19 };
+const FG_EXT = { reportNo: 10, reportDate: 11, foodType: 12, recipe: 13, packSize: 14, labelFile: 15, labelUpdatedAt: 16, specNote: 17, supplyPrice: 18, mbCodes: 19, group: 20 };
 const FG_SHEET_HEADER = ['code','name','spec','unit','packUnit','shelfLife','storage','status','packsPerBox','labelImage',
-                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가','마켓봄코드'];
+                         '품목보고번호','품목제조보고일','식품유형','성분배합비율','제조포장단위','라벨파일','라벨갱신일','완제품규격','공급단가','마켓봄코드','구분'];
+// <fg-group>
+/* 완제품품목 [20] «구분» (U열) — ERP 공장 현황이 이 글자로 품목을 세 묶음으로 나눈다(P1 · 2026-11-09 승인).
+   ⚠️ 값 글자를 바꾸지 말 것 — ERP 가 글자 그대로 묶는다. 품목 이름으로 짐작하지 않는다.
+   새 품목은 반드시 고른다. 기존 품목(빈칸)은 ERP 쪽에서 사용자 확인을 받아 채운다(P2) — 앱이 짐작해 채우지 않는다.
+   머리 U1 «구분» 은 비어 있을 때만 채운다(사람이 고친 제목은 덮지 않는다). */
+const FG_GROUP = {
+  OPTIONS: ['B2B 반죽', 'B2C 반죽', 'B2C 호두과자'],
+  HINT: { 'B2B 반죽': '가맹점 공급', 'B2C 반죽': '외부몰 판매', 'B2C 호두과자': '외부몰 판매' },
+  NONE: '구분 미지정',
+};
+const FgGroup = {
+  /** 품목 행의 구분 — 빈칸이면 '' */
+  of(row) { return String((row && row[FG_EXT.group]) ?? '').trim(); },
+  /** 고른 값 검사. 새 품목은 셋 중 하나가 필수 · 기존 품목은 빈칸(그대로)과 지금 값 유지도 허용 */
+  check(v, { isNew = false, prev = '' } = {}) {
+    const g = String(v == null ? '' : v).trim();
+    if (FG_GROUP.OPTIONS.includes(g)) return { ok: true, group: g };
+    if (!g) return isNew ? { ok: false, msg: '구분을 고르세요 (B2B 반죽 · B2C 반죽 · B2C 호두과자)' } : { ok: true, group: '' };
+    if (!isNew && g === String(prev || '').trim()) return { ok: true, group: g };   // 시트에 이미 있던 다른 글자는 건드리지 않는다
+    return { ok: false, msg: '구분 값이 올바르지 않습니다' };
+  },
+  /** 등록·수정 창의 고르기 칸 — 글자 16px(아이폰이 눌렀을 때 화면을 확대하지 않게) */
+  selectHtml(cur, isNew) {
+    const c = String(cur || '').trim();
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const opts = [
+      !c ? `<option value="" selected>— 선택 —</option>` : '',
+      (c && !FG_GROUP.OPTIONS.includes(c)) ? `<option value="${esc(c)}" selected>${esc(c)}</option>` : '',
+      ...FG_GROUP.OPTIONS.map(o => `<option value="${o}"${o === c ? ' selected' : ''}>${o} (${FG_GROUP.HINT[o]})</option>`),
+    ].join('');
+    return `<div class="input-group" style="margin-bottom:10px">
+        <label for="fg-group">구분${isNew ? ' *' : ''}</label>
+        <select id="fg-group" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:16px;background:var(--card,#fff);color:var(--txt)">${opts}</select>
+        <div class="fs-11 c-txt-l mt-4">ERP 공장 현황이 이 구분으로 품목을 묶습니다${isNew ? '' : (c ? '' : ' · 비워 두면 그대로 둡니다')}</div>
+      </div>`;
+  },
+  /** 목록 카드 한 줄 */
+  lineHtml(row, isAdmin) {
+    const g = this.of(row);
+    if (g) return `<div class="fs-12 c-txt-l">🗂️ 구분: <b>${g.replace(/</g, '&lt;')}</b></div>`;
+    return `<div class="fs-12 c-txt-l">🗂️ 구분: <span class="c-warn">${FG_GROUP.NONE}</span>${isAdmin ? ' <span style="color:var(--pri)">· ERP 확인 뒤 채움</span>' : ''}</div>`;
+  },
+  /** 완제품품목 머리줄 → 빈 칸이면 채울 갱신 목록 */
+  headerPatch(hdr) {
+    const h = Array.isArray(hdr) ? hdr : [];
+    if (String(h[FG_EXT.group] == null ? '' : h[FG_EXT.group]).trim()) return [];
+    return [{ range: `완제품품목!${String.fromCharCode(65 + FG_EXT.group)}1`, values: [[FG_SHEET_HEADER[FG_EXT.group]]] }];
+  },
+  _hdrDone: false,
+  /** 관리자가 완제품 품목 화면을 열 때·저장할 때 한 번 — 실패해도 화면·저장은 막지 않는다 */
+  async ensureHeader() {
+    if (this._hdrDone) return;
+    try {
+      const r = await SheetsAPI.getRange('완제품품목!A1:Z1', false);
+      const patch = this.headerPatch(r && r[0]);
+      if (patch.length) await SheetsAPI.batchUpdate(patch);
+      this._hdrDone = true;
+    } catch (e) { console.warn('[완제품품목 제목 구분]', e); }
+  },
+};
+// </fg-group>
 /** 품목제조보고번호 — 정본은 «완제품품목» 마스터 한 곳(FG_EXT.reportNo).
     성적서·알림·점검 항목에는 번호를 복사해 두지 않고 제품코드로 마스터를 찾아 보여 준다 →
     마스터를 고치면 LiveSync(30초) 한 번에 모든 화면이 같이 바뀐다(번호가 두 곳에 있으면 한쪽이 낡는다). */
@@ -10099,6 +10160,7 @@ Screens['items-fg'] = async () => {
   const isAdmin = State.user?.role === 'admin';
   window._fgItemsCache = items;
   const fgNoMap = FgReportNo.map(items);
+  if (isAdmin) FgGroup.ensureHeader();   // 머리 U1 «구분» — 비었을 때만 · 기다리지 않는다
 
   $id('content').innerHTML = `
     <div style="padding:16px">
@@ -10133,6 +10195,7 @@ Screens['items-fg'] = async () => {
                   ${isAdmin ? `<button class="btn btn-sm btn-outline btn-pri" style="padding:2px 8px;font-size:11px" onclick="openFgSpecEditor('${code}')">✏️</button>` : ''}
                 </div>
               </div>
+              ${FgGroup.lineHtml(item, isAdmin)}
               <div class="fs-12 c-txt-l">🔖 ${FgReportNo.html(fgNoMap, code)}${isAdmin && !fgNoMap.has(String(code)) ? ' <span style="color:var(--pri)">· ✏️에서 입력</span>' : ''}</div>
               <div class="fs-12 c-txt-l">📦 포장: ${pkgLine}</div>
               <div class="fs-12 c-txt-l">규격: ${spec || '-'} · 단위: ${unit}</div>
@@ -10199,7 +10262,8 @@ async function openFgSpecEditor(code) {
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
   overlay.innerHTML = `
-    <div class="dialog" style="max-width:380px">
+    <div class="dialog" style="max-width:380px;max-height:90vh;max-height:calc(100dvh - 32px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain">
+      <!-- 창이 폰 화면보다 길다(약 1,300px) — 높이를 화면 안으로 묶고 창 안에서 스크롤해야 맨 위(품목코드·구분)와 맨 아래(등록)에 닿는다 -->
       <div class="fs-16 fw-7 mb-8">🎁 ${isNew ? '신규 완제품 등록' : '완제품 스펙 수정'}</div>
       <div class="grid-2" style="gap:8px;margin-bottom:10px">
         <div class="input-group">
@@ -10215,6 +10279,7 @@ async function openFgSpecEditor(code) {
         <label>제품명 *</label>
         <input type="text" id="fg-name" value="${esc(item[1])}" placeholder="예: 앙호두" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
       </div>
+      ${FgGroup.selectHtml(FgGroup.of(item), isNew)}
       <div class="input-group" style="margin-bottom:10px">
         <label>규격</label>
         <input type="text" id="fg-spec" value="${esc(item[2])}" placeholder="예: 호두과자 (냉동생지)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gray-l);font-size:14px">
@@ -10337,6 +10402,10 @@ async function saveFgSpec(isNew, origCode, closeFn) {
   if (bagRaw !== '' && (isNaN(bagKg) || bagKg <= 0)) { toast('봉당 중량(kg)은 0보다 큰 숫자', 'err'); return; }
   if (ppbRaw !== '' && (isNaN(ppb) || ppb < 1)) { toast('박스당 봉수는 1 이상의 정수', 'err'); return; }
   const ppbStr = (ppbRaw === '' ? '' : String(ppb));
+  // 구분 [20] — 새 품목은 필수 · 기존 품목은 바뀐 때만 쓴다(ERP 가 같은 칸을 채우는 중일 수 있다)
+  const prevGroup = isNew ? '' : FgGroup.of((window._fgItemsCache || []).find(x => x[0] === origCode));
+  const grp = FgGroup.check($id('fg-group')?.value, { isNew, prev: prevGroup });
+  if (!grp.ok) { toast(grp.msg, 'err', 4000); return; }
 
   // 규제정보 (품목제조보고 · 라벨) — 시트 [10]~[17]
   const reg = {
@@ -10381,14 +10450,18 @@ async function saveFgSpec(isNew, origCode, closeFn) {
       // col 순서: code,name,spec,unit,packUnit,shelfLife,storage,status(''),packsPerBox,labelImage + 규제정보[10]~[17]
       const row = [code, name, spec, unit, packUnit, shelfLife, storage, '', ppbStr, labelUrl];
       for (let i = 10; i <= FG_EXT.specNote; i++) row[i] = reg[i] || '';
+      row[FG_EXT.supplyPrice] = ''; row[FG_EXT.mbCodes] = ''; row[FG_EXT.group] = grp.group;   // [18][19] 빈칸 · [20] 구분
+      await FgGroup.ensureHeader();
       await SheetsAPI.append('완제품품목', row);
       SheetsAPI.invalidateCache('완제품품목');
-      toast(`${code} ${name} 등록 완료`, 'suc');
+      toast(`${code} ${name} 등록 완료 · ${grp.group}`, 'suc');
     } else {
       if (window._fgLabelFile) labelUrl = await DriveAPI.uploadPhoto(window._fgLabelFile);
       // col: 1=name, 2=spec, 3=unit, 4=packUnit, 5=shelfLife, 6=storage, 8=packsPerBox, 9=labelImage
+      const grpPatch = grp.group !== prevGroup ? { [FG_EXT.group]: grp.group } : {};
+      if (Object.keys(grpPatch).length) await FgGroup.ensureHeader();
       await SheetsAPI.updateRow('완제품품목', 0, origCode, {
-        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr, 9: labelUrl, ...reg
+        1: name, 2: spec, 3: unit, 4: packUnit, 5: shelfLife, 6: storage, 8: ppbStr, 9: labelUrl, ...reg, ...grpPatch
       });
       SheetsAPI.invalidateCache('완제품품목');
       toast(`${origCode} 스펙 저장 완료`, 'suc');
@@ -11640,6 +11713,8 @@ async function hsSeedAngbutterSop() {
         row[FG_EXT.foodType] = A.foodType; row[FG_EXT.recipe] = A.recipeText;
         row[FG_EXT.packSize] = A.packSize; row[FG_EXT.labelFile] = '';
         row[FG_EXT.labelUpdatedAt] = ''; row[FG_EXT.specNote] = '일반세균 1,000 이하 · 대장균군 0 · 식중독균 6종 음성 · 금속성이물 Fe 2.5mm∅·STS 4.0mm∅ 이상 불검출';
+        row[FG_EXT.supplyPrice] = ''; row[FG_EXT.mbCodes] = ''; row[FG_EXT.group] = 'B2C 호두과자';   // 새로 만드는 앙버터 호두과자 — 구분 필수
+        await FgGroup.ensureHeader();
         await SheetsAPI.append('완제품품목', row);
       }
 
