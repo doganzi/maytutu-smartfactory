@@ -87,6 +87,8 @@ var TUYA = (function () {
   }
 
   function deviceStatus_(id) { return request_('GET', '/v1.0/devices/' + id + '/status', getToken_(), null); }
+  // 상태 + 온라인 여부를 한 번에 — 호출 수는 /status 와 같다(2026-11-11)
+  function device_(id) { return request_('GET', '/v1.0/devices/' + id, getToken_(), null); }
 
   function deviceIds_() {
     return (p_('TUYA_DEVICE_IDS', '') || '').split(',').map(function (s) { return s.trim(); }).filter(String);
@@ -99,7 +101,7 @@ var TUYA = (function () {
     return hit;
   }
 
-  return { prop: p_, deviceStatus: deviceStatus_, deviceIds: deviceIds_, nameOf: nameOf_,
+  return { prop: p_, deviceStatus: deviceStatus_, device: device_, deviceIds: deviceIds_, nameOf: nameOf_,
            request: request_, token: getToken_ };
 })();
 
@@ -147,12 +149,17 @@ function logTemperatures() {
   ids.forEach(function (id) {
     var temp = '', raw = '', state = 'OK';
     try {
-      var st = TUYA.deviceStatus(id); // [{code, value}, ...]
+      var dv = TUYA.device(id);       // { online, status: [{code, value}, ...] }
+      var st = dv.status || [];
       var found = false;
       for (var i = 0; i < st.length; i++) {
         if (st[i].code === code) { raw = st[i].value; temp = Number(st[i].value) / scale; found = true; break; }
       }
       if (!found) state = 'NO_CODE(' + code + ')';
+      // 값이 숫자가 아니면(빈 값·null·참거짓) 온도로 적지 않는다
+      if (found && (raw === null || raw === '' || typeof raw === 'boolean' || !isFinite(Number(raw)))) { state = 'BAD_VALUE'; temp = ''; }
+      // 센서가 끊기면 Tuya 는 마지막 값을 그대로 돌려준다 → 온라인이 «참» 으로 확인될 때만 값을 적는다(냉장고1 9/11~11/11 −8℃ 두 달 굳음)
+      if (dv.online !== true) { state = dv.online === false ? 'OFFLINE' : 'UNKNOWN(online)'; temp = ''; raw = ''; }
     } catch (e) {
       state = 'ERROR: ' + e.message;
     }
